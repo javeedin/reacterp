@@ -1,12 +1,13 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Button, Tag, Typography, Space, Tooltip, Spin,
-  Row, Col, message, Modal, Empty, Select, Input, Tabs, Upload, Checkbox, Steps, Alert, Progress,
+  Row, Col, message, Modal, Empty, Select, Input, Tabs, Upload, Checkbox, Steps, Alert, Progress, InputNumber,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   HomeOutlined, UploadOutlined, InboxOutlined, CheckCircleTwoTone, CloseCircleTwoTone,
   InfoCircleOutlined, CopyOutlined, SearchOutlined, PlusOutlined, ReloadOutlined, ApiOutlined,
+  EditOutlined, ProfileOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -50,6 +51,9 @@ const mapLimit = async <T, R>(items: T[], limit: number, fn: (t: T, i: number) =
   await Promise.all(Array.from({ length: Math.min(limit, Math.max(1, items.length)) }, worker));
   return out;
 };
+// Rewrite an absolute Fusion self href onto the proxy base (web) or keep it (electron).
+const fusionHref = (href: string) => _isElectron ? href : href.replace(/^https?:\/\/[^/]+\/fscmRestApi\/resources\/[^/]+/, '/fusion-api');
+const RESITEM_HDRS = { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' };
 const fetchJson = async (url: string): Promise<any> => { const r = await fetch(url, { headers: FUSION_HDRS }); return r.ok ? r.json() : null; };
 // Exact-match GET of one item in an org.
 const getItem = async (itemNumber: string, org: string) =>
@@ -75,6 +79,118 @@ interface PasteRow { key: string; itemNumber: string; description: string; exist
 interface OrgOpt { code: string; name: string; }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Edit item attributes — adaptive editor: shows the item's real fields relevant
+// to lot/serial control, sales account, status and flags, and PATCHes itemsV2.
+// ─────────────────────────────────────────────────────────────────────────────
+// Curated groups → the field-name patterns that belong to each (matched against
+// the actual attribute names Fusion returns, so we don't hardcode exact spellings).
+const EDIT_GROUPS: { title: string; re: RegExp }[] = [
+  { title: 'Lot & Serial Control', re: /(lot|serial|shelf.?life|expiration|bulk.?picked)/i },
+  { title: 'Accounts', re: /(sales.?account|cost.?of.?sales|expense.?account|encumbrance|account)/i },
+  { title: 'Item Status & Type', re: /(item.?status|lifecycle|user.?item.?type|sales.?product.?type|primary.?u(om|nit)|item.?class)/i },
+  { title: 'Inventory & Ordering Flags', re: /(inventory.?item|stock.?enabled|inventory.?asset|purchas|customer.?order|shippable|internal.?order|transaction.?enabled|returnable|reservable|restrict|locator.?control)/i },
+];
+const EDIT_SKIP = /^(ItemId|OrganizationId|MasterOrganizationId|links|CategoryCode|.*ObjectVersionNumber|CreatedBy|CreationDate|LastUpdateDate|LastUpdatedBy|LastUpdateLogin)$/i;
+
+const EditItemModal: React.FC<{ item: any | null; onClose: () => void; onSaved: () => void }> = ({ item, onClose, onSaved }) => {
+  const [full, setFull] = useState<any>(null);
+  const [selfHref, setSelfHref] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [edits, setEdits] = useState<Record<string, any>>({});
+  const [saving, setSaving] = useState(false);
+  const [resp, setResp] = useState<string>('');
+
+  useEffect(() => {
+    if (!item) return;
+    setFull(null); setEdits({}); setResp(''); setSelfHref('');
+    (async () => {
+      setLoading(true);
+      try {
+        const r = await fetch(`${ITEMS_URL}?q=OrganizationCode=${item.OrganizationCode};ItemNumber=${encodeURIComponent(item.ItemNumber)}&onlyData=false&limit=1`, { headers: FUSION_HDRS });
+        const d = await r.json();
+        const it = (d.items ?? [])[0];
+        setFull(it ?? null);
+        const self = (it?.links ?? []).find((x: any) => x.rel === 'self')?.href;
+        if (self) setSelfHref(fusionHref(self));
+      } catch (e: any) { setResp(`Load failed: ${e?.message ?? e}`); }
+      finally { setLoading(false); }
+    })();
+  }, [item]);
+
+  const groups = useMemo(() => {
+    if (!full) return [] as { title: string; fields: [string, any][] }[];
+    const used = new Set<string>();
+    return EDIT_GROUPS.map(g => {
+      const fields = Object.entries(full).filter(([k, v]) =>
+        !EDIT_SKIP.test(k) && (v === null || typeof v !== 'object') && g.re.test(k) && !used.has(k));
+      fields.forEach(([k]) => used.add(k));
+      return { title: g.title, fields };
+    }).filter(g => g.fields.length);
+  }, [full]);
+
+  const setVal = (k: string, v: any) => setEdits(prev => ({ ...prev, [k]: v }));
+  const curVal = (k: string) => (k in edits ? edits[k] : full?.[k]);
+
+  const save = async () => {
+    if (!selfHref) { message.error('No item self link to update'); return; }
+    const body = Object.fromEntries(Object.entries(edits).filter(([k]) => full?.[k] !== edits[k]));
+    if (Object.keys(body).length === 0) { message.warning('No changes to save'); return; }
+    setSaving(true); setResp('');
+    try {
+      const r = await fetch(selfHref, { method: 'PATCH', headers: RESITEM_HDRS, body: JSON.stringify(body) });
+      const txt = await r.text();
+      if (!r.ok) { setResp(`HTTP ${r.status}: ${txt.slice(0, 500)}`); message.error('Update failed — see details'); }
+      else {
+        try { setFull(JSON.parse(txt)); } catch { /* keep */ }
+        setEdits({}); message.success('Item updated'); onSaved();
+      }
+    } catch (e: any) { setResp(`Error: ${e?.message ?? e}`); message.error('Update failed'); }
+    finally { setSaving(false); }
+  };
+
+  const renderField = (k: string, v: any) => {
+    const val = curVal(k);
+    const isBool = typeof full?.[k] === 'boolean' || /^(true|false)$/i.test(String(full?.[k] ?? '')) || /flag$/i.test(k);
+    const isNum = typeof full?.[k] === 'number';
+    return (
+      <Col xs={24} md={12} key={k} style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>{k}{k in edits && full?.[k] !== edits[k] ? <Tag color="warning" style={{ marginLeft: 6, fontSize: 9, lineHeight: '14px' }}>changed</Tag> : null}</div>
+        {isBool
+          ? <Select size="small" style={{ width: '100%' }} value={String(val)} onChange={x => setVal(k, x === 'true')}
+              options={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]} />
+          : isNum
+            ? <InputNumber size="small" style={{ width: '100%' }} value={val as number} onChange={x => setVal(k, x)} />
+            : <Input size="small" value={val == null ? '' : String(val)} onChange={e => setVal(k, e.target.value)} />}
+      </Col>
+    );
+  };
+
+  return (
+    <Modal open={!!item} onCancel={() => { if (!saving) onClose(); }} width={820} maskClosable={false}
+      title={<Space><ProfileOutlined style={{ color: REDWOOD.info }} />Edit Item — {item?.ItemNumber} <Tag>{item?.OrganizationCode}</Tag></Space>}
+      footer={<Space>
+        <Button onClick={onClose} disabled={saving}>Close</Button>
+        <Button type="primary" loading={saving} disabled={!selfHref || Object.keys(edits).length === 0}
+          onClick={save} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Save Changes</Button>
+      </Space>}>
+      {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        : !full ? <Empty description="Item not found" />
+        : <div>
+            <Text type="secondary" style={{ fontSize: 12 }}>Edit the attributes below and Save — changes are PATCHed to <code>itemsV2</code>. Only changed fields are sent.</Text>
+            {groups.map(g => (
+              <Card key={g.title} size="small" title={g.title} style={{ marginTop: 10, borderRadius: 8 }} styles={{ body: { paddingBottom: 2 } }}>
+                <Row gutter={12}>{g.fields.map(([k, v]) => renderField(k, v))}</Row>
+              </Card>
+            ))}
+            {groups.length === 0 && <Empty style={{ marginTop: 12 }} description="No editable lot/serial/account attributes found on this item" />}
+            {resp && <Alert type="error" showIcon style={{ marginTop: 12 }} message="Update response"
+              description={<pre style={{ whiteSpace: 'pre-wrap', fontSize: 11, margin: 0, maxHeight: 200, overflow: 'auto' }}>{resp}</pre>} />}
+          </div>}
+    </Modal>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Search tab — query itemsV2 by org + item / description
 // ─────────────────────────────────────────────────────────────────────────────
 const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
@@ -85,6 +201,7 @@ const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [lastUrl, setLastUrl] = useState('');
+  const [editItem, setEditItem] = useState<any | null>(null);
 
   const run = useCallback(async () => {
     const q: string[] = [`OrganizationCode=${org}`];
@@ -108,6 +225,10 @@ const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
     { title: 'UOM', dataIndex: 'PrimaryUOMValue', width: 90, render: (v, r) => v ?? r.PrimaryUnitOfMeasure ?? '—' },
     { title: 'Item Class', dataIndex: 'ItemClass', width: 160, ellipsis: true, render: v => v ?? '—' },
     { title: 'Status', dataIndex: 'ItemStatusValue', width: 110, render: v => v ? <Tag color="blue">{v}</Tag> : '—' },
+    { title: '', key: 'edit', width: 80, fixed: 'right', render: (_: any, r: any) => (
+        <Button size="small" icon={<EditOutlined />} onClick={() => setEditItem(r)}
+          style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Edit</Button>
+      ) },
   ];
 
   return (
@@ -129,8 +250,9 @@ const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
       </Row>
       {err && <Alert type="error" showIcon message={err} style={{ marginBottom: 12 }} />}
       <Table size="small" rowKey={(_, i) => String(i)} columns={cols} dataSource={rows} loading={loading}
-        pagination={{ pageSize: 25, showSizeChanger: true }} scroll={{ x: 900 }}
+        pagination={{ pageSize: 25, showSizeChanger: true }} scroll={{ x: 980 }}
         locale={{ emptyText: 'No items — run a search' }} />
+      <EditItemModal item={editItem} onClose={() => setEditItem(null)} onSaved={run} />
     </div>
   );
 };
