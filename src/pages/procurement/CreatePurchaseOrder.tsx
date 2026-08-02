@@ -2317,10 +2317,43 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
       } catch { /* use empty */ }
     }
     const masterMap = new Map(masterItems.map((it: any) => [String(it.item_number ?? '').toUpperCase(), it]));
-    setPastedRows(prev => prev.map(r => {
+    // First pass — match against the ORDS/APEX item master.
+    let rows = pastedRows.map(r => {
       const matched = masterMap.get(r.itemNumber.toUpperCase());
-      return { ...r, status: matched ? 'valid' : 'invalid', matchedItem: matched };
-    }));
+      return { ...r, status: (matched ? 'valid' : 'invalid') as PastedItem['status'], matchedItem: matched };
+    });
+    // Second pass — for anything not in the master, check the Fusion item web
+    // service (itemsV2) for this org; if found there, mark it valid too.
+    const missing = Array.from(new Set(rows.filter(r => r.status !== 'valid').map(r => r.itemNumber)));
+    if (missing.length && header?.shipToOrg) {
+      const fusionMap = new Map<string, any>();
+      const chunk = 40;
+      for (let i = 0; i < missing.length; i += chunk) {
+        const list = missing.slice(i, i + chunk).map(n => `'${String(n).replace(/'/g, "''")}'`).join(',');
+        const url = `${FUSION_BASE}/itemsV2?q=OrganizationCode=${header.shipToOrg};ItemNumber in (${list})&limit=200&onlyData=true`;
+        try {
+          const r = await fetch(url, { headers: FUSION_HDRS });
+          if (r.ok) { const d = await r.json(); (d.items ?? []).forEach((it: any) => { if (it.ItemNumber) fusionMap.set(String(it.ItemNumber).toUpperCase(), it); }); }
+        } catch { /* ignore this chunk */ }
+      }
+      if (fusionMap.size) {
+        rows = rows.map(r => {
+          if (r.status === 'valid') return r;
+          const f = fusionMap.get(r.itemNumber.toUpperCase());
+          if (!f) return r;
+          // Normalize the Fusion item onto the item-master shape used downstream.
+          const matchedItem = {
+            item_number: f.ItemNumber,
+            description: f.ItemDescription ?? '',
+            primary_uom_code: f.PrimaryUOMValue ?? f.PrimaryUnitOfMeasure ?? '',
+            uom: f.PrimaryUOMValue ?? f.PrimaryUnitOfMeasure ?? '',
+            _source: 'fusion',
+          };
+          return { ...r, status: 'valid' as PastedItem['status'], matchedItem };
+        });
+      }
+    }
+    setPastedRows(rows);
     setImportValidating(false);
   };
 
@@ -4140,9 +4173,10 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                             {
                               title: 'Description (matched)', key: 'desc',
                               render: (_: any, r: PastedItem) => r.matchedItem
-                                ? <Text style={{ fontSize: 12 }}>{r.matchedItem.description ?? '—'}</Text>
+                                ? <Space size={4}><Text style={{ fontSize: 12 }}>{r.matchedItem.description ?? '—'}</Text>
+                                    {(r.matchedItem as any)._source === 'fusion' && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', margin: 0 }}>Fusion</Tag>}</Space>
                                 : r.status === 'invalid'
-                                  ? <Text style={{ fontSize: 12, color: C.red }}>Not found in item master</Text>
+                                  ? <Text style={{ fontSize: 12, color: C.red }}>Not found in item master or Fusion</Text>
                                   : <Text style={{ fontSize: 12, color: C.textLight }}>—</Text>,
                             },
                             {
