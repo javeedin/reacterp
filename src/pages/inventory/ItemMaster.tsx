@@ -257,12 +257,13 @@ const ItemMaster: React.FC = () => {
   const buildUrl = useCallback((vals: any, limit = 500, offset = 0): string => {
     if (source === 'fusion') {
       // Fusion itemsV2 — filter by org + item/description/status via the q parameter.
-      // Fusion's q parameter has no upper()/function support — query columns directly.
+      // Fusion itemsV2 q syntax: unquoted values, LIKE with a trailing % (prefix match),
+      // and no function calls (upper() etc. are rejected).
       const q: string[] = [];
       if (vals.org)         q.push(`OrganizationCode=${vals.org}`);
-      if (vals.itemNumber)  q.push(`ItemNumber LIKE '%${String(vals.itemNumber).replace(/'/g, "''")}%'`);
-      if (vals.description) q.push(`ItemDescription LIKE '%${String(vals.description).replace(/'/g, "''")}%'`);
-      if (vals.status)      q.push(`ItemStatusValue='${String(vals.status).replace(/'/g, "''")}'`);
+      if (vals.itemNumber)  q.push(`ItemNumber LIKE ${String(vals.itemNumber)}%`);
+      if (vals.description) q.push(`ItemDescription LIKE ${String(vals.description)}%`);
+      if (vals.status)      q.push(`ItemStatusValue=${vals.status}`);
       const p = new URLSearchParams();
       p.set('limit', String(limit));
       p.set('offset', String(offset));
