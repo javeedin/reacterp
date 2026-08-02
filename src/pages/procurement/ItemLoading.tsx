@@ -51,6 +51,8 @@ const mapLimit = async <T, R>(items: T[], limit: number, fn: (t: T, i: number) =
   await Promise.all(Array.from({ length: Math.min(limit, Math.max(1, items.length)) }, worker));
   return out;
 };
+// First present value among keys.
+const pfv = (o: any, keys: string[]) => { for (const k of keys) { if (o?.[k] != null && o[k] !== '') return o[k]; } return undefined; };
 // Rewrite an absolute Fusion self href onto the proxy base (web) or keep it (electron).
 const fusionHref = (href: string) => _isElectron ? href : href.replace(/^https?:\/\/[^/]+\/fscmRestApi\/resources\/[^/]+/, '/fusion-api');
 const RESITEM_HDRS = { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' };
@@ -272,7 +274,8 @@ const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   const run = useCallback(async () => {
     const orgClause = org && org !== ALL_ORGS ? `OrganizationCode=${org};` : '';
     // Parse the pasted item numbers (one per line, or tab/comma separated).
-    const nums = Array.from(new Set(itemsText.split(/\r?\n|,|\t|\s{2,}/).map(s => s.trim()).filter(Boolean)));
+    let nums = Array.from(new Set(itemsText.split(/\r?\n|,|\t|\s{2,}/).map(s => s.trim()).filter(Boolean)));
+    if (nums.length > 500) { message.warning(`Too many items (${nums.length}) — searching the first 500`); nums = nums.slice(0, 500); }
     setLoading(true); setErr('');
     try {
       if (nums.length) {
@@ -305,9 +308,9 @@ const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   }, [org, itemsText, description]);
 
   const cols: ColumnsType<any> = [
-    { title: 'Item Number', dataIndex: 'ItemNumber', width: 160, render: v => <Text strong>{v}</Text> },
-    { title: 'Description', dataIndex: 'ItemDescription', ellipsis: true },
-    { title: 'Org', dataIndex: 'OrganizationCode', width: 120, render: v => <Tag>{v}</Tag> },
+    { title: 'Item Number', dataIndex: 'ItemNumber', width: 160, render: v => <Text strong>{String(v ?? '')}</Text> },
+    { title: 'Description', dataIndex: 'ItemDescription', width: 320, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v == null ? '—' : String(v)}</Text> },
+    { title: 'Org', dataIndex: 'OrganizationCode', width: 120, render: v => <Tag>{String(v ?? '')}</Tag> },
     { title: 'UOM', dataIndex: 'PrimaryUOMValue', width: 90, render: (v, r) => v ?? r.PrimaryUnitOfMeasure ?? '—' },
     { title: 'Item Class', dataIndex: 'ItemClass', width: 150, ellipsis: true, render: v => v ?? '—' },
     { title: <Tooltip title="Lot control enabled">Lot</Tooltip>, key: 'lot', width: 55, align: 'center',
@@ -602,6 +605,20 @@ const CreateWizard: React.FC<{ open: boolean; onClose: () => void; items: PasteR
   );
 };
 
+// Contain render errors so a crash shows the message instead of white-screening.
+class TabErrorBoundary extends React.Component<{ children: React.ReactNode }, { error?: Error }> {
+  state: { error?: Error } = {};
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error) { /* eslint-disable-next-line no-console */ console.error('ItemLoading render error:', error); }
+  render() {
+    if (this.state.error) return (
+      <Alert type="error" showIcon message="This view hit an error" style={{ margin: 12 }}
+        description={<pre style={{ whiteSpace: 'pre-wrap', fontSize: 11, margin: 0, maxHeight: 260, overflow: 'auto' }}>{String(this.state.error?.stack || this.state.error?.message || this.state.error)}</pre>} />
+    );
+    return this.props.children as React.ReactElement;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 const ItemLoading: React.FC = () => {
   const [orgs, setOrgs] = useState<OrgOpt[]>([]);
@@ -640,10 +657,12 @@ const ItemLoading: React.FC = () => {
           {!orgsLoading && <Tag style={{ marginLeft: 10 }}>{orgs.length} orgs</Tag>}
         </div>
         <Card style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-          <Tabs activeKey={tab} onChange={setTab} items={[
-            { key: 'search', label: <span><SearchOutlined /> Search</span>, children: <SearchTab orgs={orgs} /> },
-            { key: 'load', label: <span><UploadOutlined /> Load</span>, children: <LoadTab orgs={orgs} /> },
-          ]} />
+          <TabErrorBoundary>
+            <Tabs activeKey={tab} onChange={setTab} items={[
+              { key: 'search', label: <span><SearchOutlined /> Search</span>, children: <SearchTab orgs={orgs} /> },
+              { key: 'load', label: <span><UploadOutlined /> Load</span>, children: <LoadTab orgs={orgs} /> },
+            ]} />
+          </TabErrorBoundary>
         </Card>
       </Content>
     </Layout>
