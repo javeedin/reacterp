@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Input, Row, Col,
   Tag, Select, Drawer, List, Badge, Tabs, Button, Form, Descriptions,
-  Space, Alert, Modal, message, Tooltip, Spin, Collapse, Progress,
+  Space, Alert, Modal, message, Tooltip, Spin, Collapse, Progress, Segmented,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -61,6 +61,32 @@ interface ItemRow {
 
 interface OrgOption { label: string; value: string; }
 interface EditTab   { key: string; item: ItemRow; }
+
+// Map a Fusion itemsV2 row onto the ItemRow shape (ORDS/APEX field names). Fields
+// the Fusion resource doesn't carry (price, sales account, barcode, DFF attrs) are
+// left blank so the same table/columns render for both sources.
+const pfv = (o: any, keys: string[]) => { for (const k of keys) { if (o?.[k] != null && o[k] !== '') return o[k]; } return undefined; };
+const mapFusionItem = (it: any): ItemRow => ({
+  inventory_item_id: String(pfv(it, ['ItemId', 'InventoryItemId']) ?? ''),
+  item_number:       pfv(it, ['ItemNumber']) ?? '',
+  description:       pfv(it, ['ItemDescription', 'Description']) ?? '',
+  primary_uom_code:  pfv(it, ['PrimaryUOMValue', 'PrimaryUnitOfMeasureValue', 'PrimaryUOMCode', 'PrimaryUnitOfMeasure']) ?? '',
+  inventory_item_status_code: pfv(it, ['ItemStatusValue', 'ItemStatus', 'ApprovalStatusValue']) ?? '',
+  organization_code: pfv(it, ['OrganizationCode']) ?? '',
+  inventory_org_code: pfv(it, ['OrganizationCode']) ?? null,
+  sales_account:     '',
+  item_price:        String(pfv(it, ['ListPrice', 'UnitPrice']) ?? ''),
+  barcode:           null,
+  old_item_code:     '',
+  inventory_item_flag:  String(pfv(it, ['InventoryItemFlag']) ?? ''),
+  stock_enabled_flag:   String(pfv(it, ['StockEnabledFlag']) ?? ''),
+  inventory_asset_flag: String(pfv(it, ['InventoryAssetFlag']) ?? ''),
+  attribute1: String(pfv(it, ['Attribute1']) ?? ''), attribute2: String(pfv(it, ['Attribute2']) ?? ''), attribute3: String(pfv(it, ['Attribute3']) ?? ''),
+  attribute4: String(pfv(it, ['Attribute4']) ?? ''), attribute5: String(pfv(it, ['Attribute5']) ?? ''), attribute6: String(pfv(it, ['Attribute6']) ?? ''),
+  attribute7: String(pfv(it, ['Attribute7']) ?? ''), attribute8: String(pfv(it, ['Attribute8']) ?? ''), attribute9: String(pfv(it, ['Attribute9']) ?? ''),
+  attribute10: String(pfv(it, ['Attribute10']) ?? ''),
+  instance_name: null,
+});
 
 // ── Edit Item Panel ───────────────────────────────────────────────────────────
 const EditItemPanel: React.FC<{ item: ItemRow }> = ({ item }) => {
@@ -185,6 +211,8 @@ const ItemMaster: React.FC = () => {
   // tabs
   const [activeTabKey, setActiveTabKey] = useState('search');
   const [editTabs, setEditTabs]         = useState<EditTab[]>([]);
+  // Data source: APEX (ORDS) — default — or Fusion (itemsV2).
+  const [source, setSource] = useState<'apex' | 'fusion'>('apex');
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -227,6 +255,21 @@ const ItemMaster: React.FC = () => {
 
   // ── Build search URL from form values ────────────────────────────────────────
   const buildUrl = useCallback((vals: any, limit = 500, offset = 0): string => {
+    if (source === 'fusion') {
+      // Fusion itemsV2 — filter by org + item/description/status via the q parameter.
+      const q: string[] = [];
+      if (vals.org)         q.push(`OrganizationCode=${vals.org}`);
+      if (vals.itemNumber)  q.push(`upper(ItemNumber) LIKE '%${String(vals.itemNumber).toUpperCase().replace(/'/g, "''")}%'`);
+      if (vals.description) q.push(`upper(ItemDescription) LIKE '%${String(vals.description).toUpperCase().replace(/'/g, "''")}%'`);
+      if (vals.status)      q.push(`ItemStatusValue='${String(vals.status).replace(/'/g, "''")}'`);
+      const p = new URLSearchParams();
+      p.set('limit', String(limit));
+      p.set('offset', String(offset));
+      p.set('onlyData', 'true');
+      p.set('totalResults', 'true');
+      if (q.length) p.set('q', q.join(';'));
+      return `${FUSION_BASE}/itemsV2?${p.toString()}`;
+    }
     const p = new URLSearchParams();
     p.set('limit', String(limit));
     p.set('offset', String(offset));
@@ -242,7 +285,7 @@ const ItemMaster: React.FC = () => {
     if (vals.attr4)       p.set('attr4', vals.attr4);
     if (vals.attr5)       p.set('attr5', vals.attr5);
     return `${ORDS_BASE}/inventory/itemmaster?${p.toString()}`;
-  }, []);
+  }, [source]);
 
   // ── Search handler ───────────────────────────────────────────────────────────
   const handleSearch = useCallback(async () => {
@@ -272,10 +315,11 @@ const ItemMaster: React.FC = () => {
       while (true) {
         if (ctrl.signal.aborted) break;
         const pageUrl = buildUrl(vals, 500, offset);
-        const r = await fetch(pageUrl, { signal: ctrl.signal });
+        const r = await fetch(pageUrl, { signal: ctrl.signal, ...(source === 'fusion' ? { headers: FUSION_HDRS } : {}) });
         if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
         const d = await r.json();
-        const items: ItemRow[] = d.items ?? (Array.isArray(d) ? d : []);
+        const raw: any[] = d.items ?? (Array.isArray(d) ? d : []);
+        const items: ItemRow[] = source === 'fusion' ? raw.map(mapFusionItem) : raw;
         all.push(...items);
         if (d.count != null) setTotalCount(d.count);
         setFetchPage(page);
@@ -291,7 +335,7 @@ const ItemMaster: React.FC = () => {
     } finally {
       setSearching(false);
     }
-  }, [form, buildUrl]);
+  }, [form, buildUrl, source]);
 
   const handleCancel = () => abortRef.current?.abort();
 
@@ -540,6 +584,10 @@ const ItemMaster: React.FC = () => {
                 )}
               </Space>
               <Space size={6} onClick={e => e.stopPropagation()}>
+                <Tooltip title="Choose where to query items from — the APEX (ORDS) database or Fusion itemsV2">
+                  <Segmented size="small" value={source} onChange={(v) => setSource(v as 'apex' | 'fusion')}
+                    options={[{ label: 'APEX', value: 'apex' }, { label: 'Fusion', value: 'fusion' }]} />
+                </Tooltip>
                 <Tooltip title="View API endpoint and test">
                   <Button size="small" icon={<ApiOutlined />}
                     onClick={() => { setApiResponse(null); setApiError(''); setApiOpen(true); }}
@@ -776,19 +824,15 @@ const ItemMaster: React.FC = () => {
               borderRadius: 6, padding: '8px 12px', fontFamily: 'monospace',
               fontSize: 12, wordBreak: 'break-all', margin: '6px 0 8px',
             }}>
-              {(() => {
-                const org = form.getFieldValue('org');
-                return `${ORDS_BASE}/inventory/itemmaster?limit=5&offset=0${org ? '&org=' + org : ''}`;
-              })()}
+              {buildUrl(form.getFieldsValue(), 5, 0)}
             </div>
             <Button type="primary" icon={<ApiOutlined />} loading={apiLoading}
               style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
               onClick={async () => {
                 setApiLoading(true); setApiResponse(null); setApiError('');
-                const org = form.getFieldValue('org');
-                const testUrl = `${ORDS_BASE}/inventory/itemmaster?limit=5&offset=0${org ? '&org=' + org : ''}`;
+                const testUrl = buildUrl(form.getFieldsValue(), 5, 0);
                 try {
-                  const res = await fetch(testUrl, { headers: { Accept: 'application/json' } });
+                  const res = await fetch(testUrl, { headers: source === 'fusion' ? FUSION_HDRS : { Accept: 'application/json' } });
                   const text = await res.text();
                   let parsed: any;
                   try { parsed = JSON.parse(text); } catch { parsed = text; }
