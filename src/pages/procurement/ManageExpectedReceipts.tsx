@@ -10,7 +10,7 @@ import {
   CodeOutlined, EnvironmentOutlined, CopyOutlined,
   EditOutlined, NumberOutlined, ApiOutlined,
 } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
@@ -997,6 +997,17 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
     setExactDate(null); setDateRange(null);
     setGroups([]); setSearched(false); setFilterText('');
   };
+
+  // Pre-fill + auto-search when arriving with ?po=<number> (from the PO search page).
+  const [urlParams] = useSearchParams();
+  const [pendingPoSearch, setPendingPoSearch] = useState(false);
+  useEffect(() => {
+    const po = urlParams.get('po');
+    if (po) { setPoNum(po); setPendingPoSearch(true); }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (pendingPoSearch && poNum) { setPendingPoSearch(false); handleSearch(); }
+  }, [pendingPoSearch, poNum, handleSearch]);
 
   const filteredGroups = useMemo(() => {
     if (!filterText.trim()) return groups;

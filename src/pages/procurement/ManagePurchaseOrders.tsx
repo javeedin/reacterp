@@ -14,7 +14,7 @@ import {
   PlusOutlined, BankOutlined, UserOutlined, CalendarOutlined,
   DollarOutlined, FileTextOutlined, DownOutlined, FilePdfOutlined,
   HistoryOutlined, FolderOpenOutlined, EditOutlined,
-  CheckCircleTwoTone, CloseCircleTwoTone,
+  CheckCircleTwoTone, CloseCircleTwoTone, CarOutlined, InboxOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import CreatePurchaseOrder from './CreatePurchaseOrder';
@@ -916,6 +916,7 @@ ${po.NoteToSupplier ? `<div class="sec">Notes</div><div class="fv">${po.NoteToSu
 
 // ── Search Tab ───────────────────────────────────────────────────────────────
 const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => void; onLifeCycle: (po: RawPO) => void; lifecycleSummary: Record<number, LcSummary> }> = ({ onOpen, onEdit, onLifeCycle, lifecycleSummary }) => {
+  const navigate = useNavigate();
   const [form] = Form.useForm();
   const [data, setData]             = useState<RawPO[]>([]);
   const [loading, setLoading]       = useState(false);
@@ -1160,7 +1161,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
       render: (_: unknown, rec: RawPO) => <LcFlag state={lifecycleSummary?.[rec.POHeaderId]?.payment} />,
     },
     {
-      title: '', key: 'actions', width: 168, fixed: 'right', align: 'center',
+      title: '', key: 'actions', width: 230, fixed: 'right', align: 'center',
       render: (_: unknown, rec: RawPO) => (
         <Space size={4}>
           {String(rec.StatusCode ?? '').toUpperCase().includes('INCOMPLETE') && (
@@ -1173,6 +1174,15 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
             <Button size="small" icon={<HistoryOutlined />} onClick={() => onLifeCycle(rec)}
               style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary, borderRadius: 4, fontSize: 11 }} />
           </Tooltip>
+          {/* Receive — jump to Create ASN or Expected Receipt pre-filled with this PO */}
+          <Dropdown trigger={['click']} menu={{ items: [
+            { key: 'asn', icon: <CarOutlined />, label: 'Create ASN', onClick: () => navigate(`/procurement/create-asn?po=${encodeURIComponent(rec.OrderNumber ?? '')}`) },
+            { key: 'receipt', icon: <InboxOutlined />, label: 'Expected Receipt', onClick: () => navigate(`/procurement/expected-receipts?po=${encodeURIComponent(rec.OrderNumber ?? '')}`) },
+          ] }}>
+            <Button size="small" icon={<InboxOutlined />} style={{ borderColor: REDWOOD.success, color: REDWOOD.success, borderRadius: 4, fontSize: 11 }}>
+              Receive <DownOutlined style={{ fontSize: 9 }} />
+            </Button>
+          </Dropdown>
           <Button size="small" type="primary" icon={<EyeOutlined />} onClick={() => onOpen(rec)}
             style={{ background: REDWOOD.info, borderColor: REDWOOD.info, borderRadius: 4, fontSize: 11 }}>
             Open

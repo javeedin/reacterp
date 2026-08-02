@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   Layout, Typography, Card, Table, Button, Form, Input, Space, Tag,
   Tooltip, Row, Col, DatePicker, InputNumber, Modal, message, Divider,
@@ -10,7 +10,7 @@ import {
   SendOutlined, CheckCircleTwoTone, CloseCircleTwoTone,
   ClockCircleOutlined, InboxOutlined,
 } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -185,6 +185,13 @@ const CreateASN: React.FC = () => {
       setErr(e.message); setLines([]);
     } finally { setLoading(false); }
   }, [form]);
+
+  // Pre-fill + auto-search when arriving with ?po=<number> (from the PO search page).
+  const [urlParams] = useSearchParams();
+  useEffect(() => {
+    const po = urlParams.get('po');
+    if (po) { form.setFieldsValue({ po }); search(); }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reset = () => {
     form.resetFields();
