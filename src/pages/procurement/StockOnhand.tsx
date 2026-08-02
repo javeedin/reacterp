@@ -176,19 +176,22 @@ const buildTxnSoap = (r: SoapTxnRow, tableType: number, validationLevel: number)
 </soapenv:Envelope>`;
 };
 
-const callTxnManager = async (r: SoapTxnRow, tableType: number, validationLevel: number): Promise<{ ok: boolean; result: string; raw: string; envelope: string }> => {
+// Returns the raw <result> code the service echoes: "0" = success, "-1" (or other) = error.
+const callTxnManager = async (r: SoapTxnRow, tableType: number, validationLevel: number): Promise<{ ok: boolean; code: string | null; result: string; raw: string; envelope: string; httpStatus: number }> => {
   const envelope = buildTxnSoap(r, tableType, validationLevel);
   try {
     const resp = await fetch(SOAP_TXN_URL, { method: 'POST', headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: SOAP_ACTION, Authorization: AUTH_HEADER }, body: envelope });
     const raw = await resp.text();
     const fault = raw.match(/<faultstring>([\s\S]*?)<\/faultstring>/i)?.[1]?.trim();
+    const code = raw.match(/<(?:\w+:)?result>([\s\S]*?)<\/(?:\w+:)?result>/i)?.[1]?.trim() ?? null;
     // insertAndProcessInterfaceRows echoes any processing error text in the response body.
     const errMsg = raw.match(/<(?:\w+:)?ErrorExplanation>([\s\S]*?)<\/(?:\w+:)?ErrorExplanation>/i)?.[1]?.trim()
       || raw.match(/<(?:\w+:)?ErrorMessage>([\s\S]*?)<\/(?:\w+:)?ErrorMessage>/i)?.[1]?.trim();
-    if (!resp.ok || fault) return { ok: false, result: fault || errMsg || `HTTP ${resp.status}`, raw, envelope };
-    if (errMsg) return { ok: false, result: errMsg, raw, envelope };
-    return { ok: true, result: 'Processed', raw, envelope };
-  } catch (e: any) { return { ok: false, result: e?.message ?? String(e), raw: '', envelope }; }
+    if (fault) return { ok: false, code, result: fault, raw, envelope, httpStatus: resp.status };
+    if (!resp.ok) return { ok: false, code, result: errMsg || `HTTP ${resp.status}`, raw, envelope, httpStatus: resp.status };
+    const ok = code === '0' || (code == null && !errMsg);
+    return { ok, code, result: errMsg || (code != null ? `returned ${code}` : 'Processed'), raw, envelope, httpStatus: resp.status };
+  } catch (e: any) { return { ok: false, code: null, result: e?.message ?? String(e), raw: '', envelope, httpStatus: 0 }; }
 };
 
 interface OrgOpt { code: string; name: string; id?: string; }
@@ -279,10 +282,10 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
         const res = await callTxnManager(soapRowOf(l, trxId, srcLine), tableType, validationLevel);
         last = { envelope: res.envelope, raw: res.raw };
         const chk = await checkStagedOnce(trxId, srcLine);
-        upd(l.key, chk.state === 'processed' ? { status: 'processed', message: 'Processed into inventory' }
-          : chk.state === 'error' ? { status: 'error', message: chk.message }
-          : res.ok ? { status: 'processed', message: 'Processed' }
-          : { status: 'error', message: res.result });
+        const codeTxt = res.code != null ? `result ${res.code}` : (res.httpStatus ? `HTTP ${res.httpStatus}` : 'no result');
+        const detail = chk.state === 'error' ? chk.message : (res.ok ? '' : res.result);
+        if (res.ok && chk.state !== 'error') upd(l.key, { status: 'processed', message: `SOAP ${codeTxt} — processed into inventory` });
+        else upd(l.key, { status: 'error', message: `SOAP ${codeTxt}${detail ? ' — ' + detail : ''}` });
       }
       if (last) setSoapResp(last);
       setPosting(false); onDone();
@@ -327,10 +330,10 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
     { title: 'Avail', dataIndex: 'avail', width: 80, align: 'right' as const, render: v => fmtQty(v) },
     { title: 'Qty', dataIndex: 'qty', width: 100, align: 'right' as const, render: (v, l) => <InputNumber size="small" min={0} max={kind === 'receipt' ? undefined : l.avail} value={v} onChange={n => upd(l.key, { qty: Number(n) || 0 })} style={{ width: 90 }} /> },
     { title: 'UOM', dataIndex: 'uom', width: 60, render: v => v ?? '—' },
-    { title: 'Status', width: 180, render: (_, l) => l.status === 'pending' ? <Spin size="small" />
-      : l.status === 'processed' ? <Tooltip title={l.message}><Tag color="green" icon={<CheckCircleTwoTone twoToneColor={REDWOOD.success} />}>Processed</Tag></Tooltip>
+    { title: 'Status', width: 240, render: (_, l) => l.status === 'pending' ? <Spin size="small" />
+      : l.status === 'processed' ? <Tooltip title={l.message}><Tag color="green" icon={<CheckCircleTwoTone twoToneColor={REDWOOD.success} />} style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.message || 'Processed'}</Tag></Tooltip>
       : l.status === 'ok' ? <Tooltip title={l.message}><Tag color="processing" icon={<SyncOutlined spin />}>Processing…</Tag></Tooltip>
-      : l.status === 'error' ? <Tooltip title={l.message}><Tag color="red" icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />} style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.message}</Tag></Tooltip>
+      : l.status === 'error' ? <Tooltip title={l.message}><Tag color="red" icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />} style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.message}</Tag></Tooltip>
       : <Text type="secondary">—</Text> },
   ];
 
@@ -591,10 +594,10 @@ const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
         const res = await callTxnManager(soapRowOf(l, trxId, srcLine), tableType, validationLevel);
         lastRaw = res.raw || '(empty response)';
         const chk = await checkStagedOnce(trxId, srcLine);
-        upd(l.key, chk.state === 'processed' ? { status: 'processed', message: 'Processed into inventory' }
-          : chk.state === 'error' ? { status: 'error', message: chk.message }
-          : res.ok ? { status: 'processed', message: 'Processed' }
-          : { status: 'error', message: res.result });
+        const codeTxt = res.code != null ? `result ${res.code}` : (res.httpStatus ? `HTTP ${res.httpStatus}` : 'no result');
+        const detail = chk.state === 'error' ? chk.message : (res.ok ? '' : res.result);
+        if (res.ok && chk.state !== 'error') upd(l.key, { status: 'processed', message: `SOAP ${codeTxt} — processed into inventory` });
+        else upd(l.key, { status: 'error', message: `SOAP ${codeTxt}${detail ? ' — ' + detail : ''}` });
       }
       setSoapRaw(lastRaw);
       setPosting(false);
@@ -635,11 +638,11 @@ const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
           options={Array.from(new Set([...subinvs, v].filter(Boolean))).map(s => ({ value: s, label: s }))}
           onChange={x => upd(r.key, { subinventory: x || '' })} /> ) },
     { title: 'Lot', dataIndex: 'lot', width: 150, render: (v, r) => <Input size="small" value={v} placeholder="(optional)" onChange={e => upd(r.key, { lot: e.target.value })} /> },
-    { title: 'Status', width: 160, render: (_, r) => {
+    { title: 'Status', width: 240, render: (_, r) => {
         if (r.status === 'pending') return <Spin size="small" />;
-        if (r.status === 'processed') return <Tooltip title={r.message}><Tag color="green" icon={<CheckCircleTwoTone twoToneColor={REDWOOD.success} />}>Processed</Tag></Tooltip>;
+        if (r.status === 'processed') return <Tooltip title={r.message}><Tag color="green" icon={<CheckCircleTwoTone twoToneColor={REDWOOD.success} />} style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.message || 'Processed'}</Tag></Tooltip>;
         if (r.status === 'ok') return <Tooltip title={r.message}><Tag color="processing" icon={<SyncOutlined spin />}>Processing…</Tag></Tooltip>;
-        if (r.status === 'error') return <Tooltip title={r.message}><Tag color="red" icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />} style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.message}</Tag></Tooltip>;
+        if (r.status === 'error') return <Tooltip title={r.message}><Tag color="red" icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />} style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.message}</Tag></Tooltip>;
         return <Text type="secondary">—</Text>;
       } },
     { title: '', width: 36, render: (_, r) => <Button size="small" type="text" danger icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />} onClick={() => setRows(prev => prev.filter(x => x.key !== r.key))} /> },
