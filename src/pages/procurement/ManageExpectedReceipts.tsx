@@ -367,11 +367,6 @@ const PODetailTab: React.FC<{ poNumber: string; asn?: string; initialLines: Rece
   // Map one PO line + its receiving data into a receivingReceiptRequests line.
   const mapReceiveLine = useCallback((line: ReceiptLine, d: RcvData): Record<string, unknown> => {
     const lr = line as Record<string, unknown>;
-    // Receiving against an Advance Shipment Notice: match on the specific expected
-    // shipment line, not the PO schedule. Without the shipment reference Fusion
-    // resolves to the PO line (over-receipt tolerance 0) — which is what raises
-    // "quantity must be less than the tolerance quantity of 0", especially when an
-    // ASN is split across multiple shipment lines (e.g. 9 → 1 + 8).
     const base: Record<string, unknown> = {
       POHeaderId:       String(lr.POHeaderId ?? ''),
       POLineLocationId: String(lr.POLineLocationId ?? ''),
@@ -388,13 +383,6 @@ const PODetailTab: React.FC<{ poNumber: string; asn?: string; initialLines: Rece
       FromOrganizationCode: null,
       UnitOfMeasure:      String(line.UnitOfMeasure ?? line.UOMCode ?? ''),
     };
-    // When the line comes from a split ASN, point the receipt at the exact expected
-    // shipment line (its own available qty) via the shipment ids — the PO schedule
-    // otherwise resolves with over-receipt tolerance 0. These are valid attributes;
-    // ASNNumber/ASNLineNumber are NOT accepted by receivingReceiptRequests.
-    if (lr.ShipmentHeaderId != null && lr.ShipmentHeaderId !== '') base.ShipmentHeaderId = String(lr.ShipmentHeaderId);
-    if (lr.ShipmentLineId != null && lr.ShipmentLineId !== '') base.ShipmentLineId = String(lr.ShipmentLineId);
-    if (lr.DocumentShipmentLineNumber != null && lr.DocumentShipmentLineNumber !== '') base.DocumentShipmentLineNumber = String(lr.DocumentShipmentLineNumber);
     if (d?.locator) base.Locator = d.locator;
     if (d?.lotNumber) {
       base.lotSerialItemLots = [{
