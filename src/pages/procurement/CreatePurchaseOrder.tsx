@@ -5,7 +5,7 @@ import type { Dayjs } from 'dayjs';
 import {
   Layout, Breadcrumb, Typography, Card, Table, Button, Form, Input, Select,
   DatePicker, Row, Col, Space, Modal, InputNumber, Tabs, Checkbox,
-  Spin, Tooltip, Tag, Divider, Badge, Progress, Alert, Upload, Dropdown,
+  Spin, Tooltip, Tag, Divider, Badge, Progress, Alert, Upload, Dropdown, Segmented,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { TableRowSelection } from 'antd/es/table/interface';
@@ -289,6 +289,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
 
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
   const [supplierSearch, setSupplierSearch] = useState('');
+  const [supplierSearchBy, setSupplierSearchBy] = useState<'name' | 'number'>('name');
   const [supplierResults, setSupplierResults] = useState<any[]>([]);
   const [suppliersLoading, setSuppliersLoading] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
@@ -397,9 +398,11 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     } catch { setFxRate(null); } finally { setFxRateLoading(false); }
   };
 
-  const handleSupplierSearch = useCallback(async (term: string) => {
+  const handleSupplierSearch = useCallback(async (term: string, by: 'name' | 'number' = 'name') => {
     if (!term || term.length < 2) return;
-    const url = `${FUSION_BASE}/suppliers?q=Supplier LIKE '*${term}*'&limit=20`;
+    // Search by supplier name (Supplier) or supplier number (SupplierNumber).
+    const attr = by === 'number' ? 'SupplierNumber' : 'Supplier';
+    const url = `${FUSION_BASE}/suppliers?q=${attr} LIKE '*${term}*'&limit=20`;
     setSupplierApiUrl(url);
     setSuppliersLoading(true);
     try {
@@ -3830,16 +3833,21 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
             </Tooltip></Space>}
           width={700} onCancel={() => setSupplierModalOpen(false)}
           footer={<Button onClick={() => setSupplierModalOpen(false)}>Close</Button>}>
+          <Space style={{ marginBottom: 10 }}>
+            <Text style={{ fontSize: 12, color: C.textLight }}>Search by</Text>
+            <Segmented size="small" value={supplierSearchBy} onChange={(v) => setSupplierSearchBy(v as 'name' | 'number')}
+              options={[{ label: 'Name', value: 'name' }, { label: 'Number', value: 'number' }]} />
+          </Space>
           <Space.Compact style={{ width: '100%', marginBottom: 12 }}>
-            <Input placeholder="Type supplier name to search…" value={supplierSearch}
-              onChange={e => setSupplierSearch(e.target.value)} onPressEnter={() => handleSupplierSearch(supplierSearch)} allowClear />
+            <Input placeholder={supplierSearchBy === 'number' ? 'Type supplier number to search…' : 'Type supplier name to search…'} value={supplierSearch}
+              onChange={e => setSupplierSearch(e.target.value)} onPressEnter={() => handleSupplierSearch(supplierSearch, supplierSearchBy)} allowClear />
             <Button type="primary" icon={<SearchOutlined />} loading={suppliersLoading}
-              onClick={() => handleSupplierSearch(supplierSearch)}
+              onClick={() => handleSupplierSearch(supplierSearch, supplierSearchBy)}
               style={{ background: C.red, borderColor: C.red }}>Search</Button>
           </Space.Compact>
           <Table dataSource={supplierResults} rowKey={r => String(r.SupplierId)} size="small" bordered
             loading={suppliersLoading} pagination={{ pageSize: 8, showSizeChanger: false }}
-            locale={{ emptyText: 'Enter a name and click Search' }}
+            locale={{ emptyText: `Enter a supplier ${supplierSearchBy} and click Search` }}
             onRow={record => ({ onClick: () => handleSelectSupplier(record), style: { cursor: 'pointer' } })}
             columns={[
               { title: 'Supplier Number', dataIndex: 'SupplierNumber', width: 140, render: v => <Text style={{ fontSize: 12, fontWeight: 600 }}>{v ?? '—'}</Text> },
