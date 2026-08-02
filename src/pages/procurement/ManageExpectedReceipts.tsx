@@ -1080,10 +1080,9 @@ const SearchTabContent: React.FC<{ onOpenPO: (group: POGroup) => void }> = ({ on
       title: 'ASN',
       dataIndex: 'ASNNumbers',
       key: 'ASNNumbers',
-      width: 160,
-      ellipsis: true,
+      width: 240,
       render: (v: string) => v
-        ? <Tooltip title={v}><Tag color="purple" style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</Tag></Tooltip>
+        ? <Tooltip title={v}><Tag color="purple" style={{ whiteSpace: 'normal', height: 'auto', wordBreak: 'break-all', margin: 0 }}>{v}</Tag></Tooltip>
         : <span style={{ color: REDWOOD.neutral600 }}>—</span>,
     },
     {
