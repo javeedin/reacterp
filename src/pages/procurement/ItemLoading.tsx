@@ -251,6 +251,13 @@ const EditItemModal: React.FC<{ item: any | null; onClose: () => void; onSaved: 
 // ─────────────────────────────────────────────────────────────────────────────
 // Search tab — query itemsV2 by org + item / description
 // ─────────────────────────────────────────────────────────────────────────────
+// Lot / serial control enabled? Code 1 (or a "No … control" value) means disabled.
+const isLotEnabled = (r: any) => { const c = pfv(r, ['LotControlCode']); const v = pfv(r, ['LotControlValue']); if (c != null && c !== '') return Number(c) !== 1; if (v) return !/no\s*lot/i.test(String(v)); return false; };
+const isSerialEnabled = (r: any) => { const c = pfv(r, ['SerialNumberControlCode']); const v = pfv(r, ['SerialNumberControlValue']); if (c != null && c !== '') return Number(c) !== 1; if (v) return !/no\s*serial/i.test(String(v)); return false; };
+const yesNoIcon = (on: boolean) => on
+  ? <CheckCircleTwoTone twoToneColor={REDWOOD.success} style={{ fontSize: 16 }} />
+  : <CloseCircleTwoTone twoToneColor={REDWOOD.error} style={{ fontSize: 16 }} />;
+
 const ALL_ORGS = '__ALL__';
 const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   const [org, setOrg] = useState<string>(ALL_ORGS);
@@ -302,7 +309,11 @@ const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
     { title: 'Description', dataIndex: 'ItemDescription', ellipsis: true },
     { title: 'Org', dataIndex: 'OrganizationCode', width: 120, render: v => <Tag>{v}</Tag> },
     { title: 'UOM', dataIndex: 'PrimaryUOMValue', width: 90, render: (v, r) => v ?? r.PrimaryUnitOfMeasure ?? '—' },
-    { title: 'Item Class', dataIndex: 'ItemClass', width: 160, ellipsis: true, render: v => v ?? '—' },
+    { title: 'Item Class', dataIndex: 'ItemClass', width: 150, ellipsis: true, render: v => v ?? '—' },
+    { title: <Tooltip title="Lot control enabled">Lot</Tooltip>, key: 'lot', width: 55, align: 'center',
+      render: (_: any, r: any) => <Tooltip title={pfv(r, ['LotControlValue']) ?? (isLotEnabled(r) ? 'Lot controlled' : 'No lot control')}>{yesNoIcon(isLotEnabled(r))}</Tooltip> },
+    { title: <Tooltip title="Serial number control enabled">Serial</Tooltip>, key: 'serial', width: 60, align: 'center',
+      render: (_: any, r: any) => <Tooltip title={pfv(r, ['SerialNumberControlValue']) ?? (isSerialEnabled(r) ? 'Serial controlled' : 'No serial control')}>{yesNoIcon(isSerialEnabled(r))}</Tooltip> },
     { title: 'Status', dataIndex: 'ItemStatusValue', width: 110, render: v => v ? <Tag color="blue">{v}</Tag> : '—' },
     { title: '', key: 'edit', width: 80, fixed: 'right', render: (_: any, r: any) => (
         <Button size="small" icon={<EditOutlined />} onClick={() => setEditItem(r)}
