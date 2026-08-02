@@ -92,6 +92,25 @@ const EDIT_GROUPS: { title: string; re: RegExp }[] = [
 ];
 const EDIT_SKIP = /^(ItemId|OrganizationId|MasterOrganizationId|links|CategoryCode|.*ObjectVersionNumber|CreatedBy|CreationDate|LastUpdateDate|LastUpdatedBy|LastUpdateLogin)$/i;
 
+// Known enumerated item attributes → their valid values, so these render as a
+// dropdown (Fusion rejects free text like "Yes" for LotControlValue etc.).
+const ENUM_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  lotcontrolvalue: [{ value: 'No lot control', label: 'No lot control' }, { value: 'Full lot control', label: 'Full lot control' }],
+  lotcontrolcode: [{ value: '1', label: '1 — No lot control' }, { value: '2', label: '2 — Full lot control' }],
+  serialnumbercontrolvalue: [
+    { value: 'No serial number control', label: 'No serial number control' },
+    { value: 'Predefined serial numbers', label: 'Predefined serial numbers' },
+    { value: 'At organization receipt', label: 'At organization receipt' },
+    { value: 'At sales order issue', label: 'At sales order issue' },
+  ],
+  serialnumbercontrolcode: [
+    { value: '1', label: '1 — No serial number control' },
+    { value: '2', label: '2 — Predefined serial numbers' },
+    { value: '5', label: '5 — At organization receipt' },
+    { value: '6', label: '6 — At sales order issue' },
+  ],
+};
+
 const EditItemModal: React.FC<{ item: any | null; onClose: () => void; onSaved: () => void }> = ({ item, onClose, onSaved }) => {
   const [full, setFull] = useState<any>(null);
   const [selfHref, setSelfHref] = useState('');
@@ -134,7 +153,13 @@ const EditItemModal: React.FC<{ item: any | null; onClose: () => void; onSaved: 
   const curVal = (k: string) => (k in edits ? edits[k] : full?.[k]);
 
   const save = async () => {
-    const body = Object.fromEntries(Object.entries(edits).filter(([k]) => full?.[k] !== edits[k]));
+    // Send only changed fields; coerce to the attribute's original numeric type
+    // (e.g. LotControlCode is a number even though the dropdown value is a string).
+    const body = Object.fromEntries(
+      Object.entries(edits)
+        .filter(([k]) => String(full?.[k]) !== String(edits[k]))
+        .map(([k, v]) => [k, typeof full?.[k] === 'number' && v !== '' && v != null && !isNaN(Number(v)) ? Number(v) : v]),
+    );
     if (Object.keys(body).length === 0) { message.warning('No changes to save'); return; }
     setSaving(true); setResp(''); setOrgResults([]);
     try {
@@ -171,17 +196,20 @@ const EditItemModal: React.FC<{ item: any | null; onClose: () => void; onSaved: 
 
   const renderField = (k: string, v: any) => {
     const val = curVal(k);
-    const isBool = typeof full?.[k] === 'boolean' || /^(true|false)$/i.test(String(full?.[k] ?? '')) || /flag$/i.test(k);
-    const isNum = typeof full?.[k] === 'number';
+    const enumOpts = ENUM_OPTIONS[k.toLowerCase()];
+    const isBool = !enumOpts && (typeof full?.[k] === 'boolean' || /^(true|false)$/i.test(String(full?.[k] ?? '')) || /flag$/i.test(k));
+    const isNum = !enumOpts && typeof full?.[k] === 'number';
     return (
       <Col xs={24} md={12} key={k} style={{ marginBottom: 8 }}>
-        <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>{k}{k in edits && full?.[k] !== edits[k] ? <Tag color="warning" style={{ marginLeft: 6, fontSize: 9, lineHeight: '14px' }}>changed</Tag> : null}</div>
-        {isBool
-          ? <Select size="small" style={{ width: '100%' }} value={String(val)} onChange={x => setVal(k, x === 'true')}
-              options={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]} />
-          : isNum
-            ? <InputNumber size="small" style={{ width: '100%' }} value={val as number} onChange={x => setVal(k, x)} />
-            : <Input size="small" value={val == null ? '' : String(val)} onChange={e => setVal(k, e.target.value)} />}
+        <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>{k}{k in edits && String(full?.[k]) !== String(edits[k]) ? <Tag color="warning" style={{ marginLeft: 6, fontSize: 9, lineHeight: '14px' }}>changed</Tag> : null}</div>
+        {enumOpts
+          ? <Select size="small" showSearch style={{ width: '100%' }} value={val == null ? undefined : String(val)} onChange={x => setVal(k, x)} options={enumOpts} />
+          : isBool
+            ? <Select size="small" style={{ width: '100%' }} value={String(val)} onChange={x => setVal(k, x === 'true')}
+                options={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]} />
+            : isNum
+              ? <InputNumber size="small" style={{ width: '100%' }} value={val as number} onChange={x => setVal(k, x)} />
+              : <Input size="small" value={val == null ? '' : String(val)} onChange={e => setVal(k, e.target.value)} />}
       </Col>
     );
   };
