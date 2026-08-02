@@ -27,9 +27,12 @@ const ITEMS_URL = `${FUSION_BASE}/itemsV2`;
 const STAGED_TXN_URL = `${FUSION_BASE}/inventoryStagedTransactions`;
 // Synchronous processing: the Transaction Manager SOAP service lives on the same host
 // under /fscmService (not /fscmRestApi). In Electron we call the host directly.
+// insertAndProcessInterfaceRows both inserts the interface rows AND processes them.
 const FUSION_HOST = FUSION_BASE.replace(/\/fscmRestApi\/.*$/, '');
 const SOAP_TXN_URL = `${_isElectron ? FUSION_HOST : ''}/fscmService/TransactionManagerServiceV2`;
-const SOAP_NS = 'http://xmlns.oracle.com/apps/scm/inventory/materialTransactions/pendingTransactions/transactionManagerService/types/';
+const SOAP_TYP_NS = 'http://xmlns.oracle.com/apps/scm/inventory/materialTransactions/pendingTransactions/transactionManagerServiceV2/types/';
+const SOAP_STAG_NS = 'http://xmlns.oracle.com/apps/scm/inventory/materialTransactions/pendingTransactions/stagedInventoryTransactionServiceV2/';
+const SOAP_ACTION = 'http://xmlns.oracle.com/apps/scm/inventory/materialTransactions/pendingTransactions/transactionManagerServiceV2/insertAndProcessInterfaceRows';
 
 const REDWOOD = {
   primary: '#C74634', success: '#1D7B4D', warning: '#B07700', info: '#0572CE',
@@ -108,33 +111,87 @@ const checkStagedOnce = async (srcHeader: number, srcLine: number): Promise<{ st
   return { state: 'pending' };
 };
 
-// Build the TransactionManagerServiceV2 processInventoryTransaction envelope and call it.
-// This tells Fusion to process a staged batch (by TransactionHeaderId) synchronously.
-const buildTxnSoap = (headerId: string, tableType: number, validationLevel: number) =>
-  `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="${SOAP_NS}">
+// One interface row for insertAndProcessInterfaceRows.
+interface SoapTxnRow {
+  trxId: number;            // unique TransactionInterfaceId / HeaderId / SourceHeaderId
+  srcLine: number;          // SourceLineId
+  itemNumber: string; itemId?: string;
+  orgCode?: string; orgId?: string;
+  subinv: string; transferSubinv?: string; transferOrgId?: string; transferOrgCode?: string;
+  qty: number; uom: string; date: string; // date = YYYY-MM-DD
+  txnTypeName: string; lot?: string;
+}
+const xesc = (v: any) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// Build a TransactionManagerServiceV2 insertAndProcessInterfaceRows envelope. This single
+// call stages the row(s) AND runs the transaction manager synchronously (tableType 1).
+const buildTxnSoap = (r: SoapTxnRow, tableType: number, validationLevel: number): string => {
+  const uom = r.uom || 'Ea';
+  const qtyEl = (tag: string) => `<stag:${tag} unitCode="${xesc(uom)}">${r.qty}</stag:${tag}>`;
+  const lotBlock = r.lot ? `
+        <stag:StagedInventoryTransactionLot>
+          <stag:TransactionInterfaceId>${r.trxId}</stag:TransactionInterfaceId>
+          <stag:LotNumber>${xesc(r.lot)}</stag:LotNumber>
+          ${qtyEl('TransactionQuantity')}
+          ${qtyEl('PrimaryQuantity')}
+          <stag:StatusId>1</stag:StatusId>
+        </stag:StagedInventoryTransactionLot>` : '';
+  const transferBlock = r.transferSubinv ? `
+        <stag:TransferSubinventory>${xesc(r.transferSubinv)}</stag:TransferSubinventory>` : '';
+  const transferOrgBlock = r.transferOrgId ? `
+        <stag:TransferOrganization>${xesc(r.transferOrgId)}</stag:TransferOrganization>`
+    : r.transferOrgCode ? `
+        <stag:TransferOrganizationCode>${xesc(r.transferOrgCode)}</stag:TransferOrganizationCode>` : '';
+  const orgBlock = r.orgId ? `<stag:OrganizationId>${xesc(r.orgId)}</stag:OrganizationId>`
+    : `<stag:OrganizationCode>${xesc(r.orgCode)}</stag:OrganizationCode>`;
+  const itemIdBlock = r.itemId ? `
+        <stag:InventoryItemId>${xesc(r.itemId)}</stag:InventoryItemId>` : '';
+  return `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="${SOAP_TYP_NS}" xmlns:stag="${SOAP_STAG_NS}">
   <soapenv:Header/>
   <soapenv:Body>
-    <typ:processInventoryTransaction>
-      <typ:tableType>${tableType}</typ:tableType>
-      <typ:headerId>${headerId}</typ:headerId>
+    <typ:insertAndProcessInterfaceRows>
+      <typ:interfaceRows>
+        <stag:TransactionInterfaceId>${r.trxId}</stag:TransactionInterfaceId>
+        <stag:TransactionHeaderId>${r.trxId}</stag:TransactionHeaderId>
+        <stag:SourceCode>ReactERP</stag:SourceCode>
+        <stag:SourceLineId>${r.srcLine}</stag:SourceLineId>
+        <stag:SourceHeaderId>${r.trxId}</stag:SourceHeaderId>
+        <stag:ProcessCode>1</stag:ProcessCode>
+        <stag:TransactionMode>3</stag:TransactionMode>${itemIdBlock}
+        <stag:ItemNumber>${xesc(r.itemNumber)}</stag:ItemNumber>
+        ${orgBlock}
+        ${qtyEl('TransactionQuantity')}
+        ${qtyEl('PrimaryQuantity')}
+        <stag:TransactionUOM>${xesc(uom)}</stag:TransactionUOM>
+        <stag:TransactionDate>${r.date}T00:00:00.000-00:00</stag:TransactionDate>
+        <stag:SubinventoryCode>${xesc(r.subinv)}</stag:SubinventoryCode>${transferBlock}${transferOrgBlock}
+        <stag:TransactionTypeName>${xesc(r.txnTypeName)}</stag:TransactionTypeName>
+        <stag:UseCurrentCost>Y</stag:UseCurrentCost>${lotBlock}
+      </typ:interfaceRows>
+      <typ:headerId>${r.trxId}</typ:headerId>
       <typ:validationLevel>${validationLevel}</typ:validationLevel>
-    </typ:processInventoryTransaction>
+      <typ:tableType>${tableType}</typ:tableType>
+    </typ:insertAndProcessInterfaceRows>
   </soapenv:Body>
 </soapenv:Envelope>`;
+};
 
-const callTxnManager = async (headerId: string, tableType: number, validationLevel: number): Promise<{ ok: boolean; result: string; raw: string; envelope: string }> => {
-  const envelope = buildTxnSoap(headerId, tableType, validationLevel);
+const callTxnManager = async (r: SoapTxnRow, tableType: number, validationLevel: number): Promise<{ ok: boolean; result: string; raw: string; envelope: string }> => {
+  const envelope = buildTxnSoap(r, tableType, validationLevel);
   try {
-    const r = await fetch(SOAP_TXN_URL, { method: 'POST', headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: 'processInventoryTransaction', Authorization: AUTH_HEADER }, body: envelope });
-    const raw = await r.text();
+    const resp = await fetch(SOAP_TXN_URL, { method: 'POST', headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: SOAP_ACTION, Authorization: AUTH_HEADER }, body: envelope });
+    const raw = await resp.text();
     const fault = raw.match(/<faultstring>([\s\S]*?)<\/faultstring>/i)?.[1]?.trim();
-    const result = raw.match(/<(?:\w+:)?result>([\s\S]*?)<\/(?:\w+:)?result>/i)?.[1]?.trim();
-    if (!r.ok || fault) return { ok: false, result: fault || result || `HTTP ${r.status}`, raw, envelope };
-    return { ok: true, result: result || 'Processed', raw, envelope };
+    // insertAndProcessInterfaceRows echoes any processing error text in the response body.
+    const errMsg = raw.match(/<(?:\w+:)?ErrorExplanation>([\s\S]*?)<\/(?:\w+:)?ErrorExplanation>/i)?.[1]?.trim()
+      || raw.match(/<(?:\w+:)?ErrorMessage>([\s\S]*?)<\/(?:\w+:)?ErrorMessage>/i)?.[1]?.trim();
+    if (!resp.ok || fault) return { ok: false, result: fault || errMsg || `HTTP ${resp.status}`, raw, envelope };
+    if (errMsg) return { ok: false, result: errMsg, raw, envelope };
+    return { ok: true, result: 'Processed', raw, envelope };
   } catch (e: any) { return { ok: false, result: e?.message ?? String(e), raw: '', envelope }; }
 };
 
-interface OrgOpt { code: string; name: string; }
+interface OrgOpt { code: string; name: string; id?: string; }
 const ALL_ORGS = '__ALL__';
 type TxnMethod = 'rest' | 'soap';
 
@@ -144,7 +201,7 @@ type TxnMethod = 'rest' | 'soap';
 type TxnKind = 'issue' | 'receipt' | 'transfer';
 const TX_TYPE_NAME: Record<TxnKind, string> = { issue: 'Miscellaneous issue', receipt: 'Miscellaneous receipt', transfer: 'Subinventory transfer' };
 const TX_LABEL: Record<TxnKind, string> = { issue: 'Issue Out', receipt: 'Receive', transfer: 'Subinventory Transfer' };
-interface TxnLine { key: string; item: string; org: string; fromSub: string; toSub: string; lot: string; uom?: string; avail: number; qty: number; srcLine?: number; status?: 'pending' | 'ok' | 'processed' | 'error'; message?: string; }
+interface TxnLine { key: string; item: string; org: string; orgId?: string; itemId?: string; fromSub: string; toSub: string; lot: string; uom?: string; avail: number; qty: number; srcLine?: number; status?: 'pending' | 'ok' | 'processed' | 'error'; message?: string; }
 
 const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => void; onDone: () => void }> = ({ kind, rows, onClose, onDone }) => {
   const [date, setDate] = useState<Dayjs>(dayjs());
@@ -155,7 +212,7 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
   const [posting, setPosting] = useState(false);
   const [jsonOpen, setJsonOpen] = useState(false);
   const [method, setMethod] = useState<TxnMethod>('rest');
-  const [tableType, setTableType] = useState(80);
+  const [tableType, setTableType] = useState(1);
   const [validationLevel, setValidationLevel] = useState(1);
   const [soapResp, setSoapResp] = useState<{ envelope: string; raw: string } | null>(null);
 
@@ -164,6 +221,8 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
     setPosting(false); setDestSub(''); setAccount(''); setSoapResp(null);
     setLines(rows.map((r, i) => ({
       key: `l-${i}`, item: pf(r, ['ItemNumber']) ?? '', org: pf(r, ['OrganizationCode']) ?? '',
+      orgId: pf(r, ['OrganizationId']) != null ? String(pf(r, ['OrganizationId'])) : undefined,
+      itemId: pf(r, ['InventoryItemId']) != null ? String(pf(r, ['InventoryItemId'])) : undefined,
       fromSub: pf(r, ['SubinventoryCode']) ?? '', toSub: '', lot: pf(r, ['LotNumber']) ?? '',
       uom: pf(r, ['PrimaryUOMCode', 'PrimaryUnitOfMeasure', 'UOMCode']), avail: onhQtyOf(r), qty: onhQtyOf(r),
     })));
@@ -196,47 +255,55 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
     return body;
   };
 
+  const soapRowOf = (l: TxnLine, trxId: number, srcLine: number): SoapTxnRow => ({
+    trxId, srcLine, itemNumber: l.item, itemId: l.itemId, orgCode: l.org, orgId: l.orgId,
+    subinv: l.fromSub, qty: num(l.qty), uom: l.uom || '', date: date.format('YYYY-MM-DD'),
+    txnTypeName: TX_TYPE_NAME[kind!], lot: l.lot || undefined,
+    transferSubinv: kind === 'transfer' ? (destSub || l.toSub) : undefined,
+  });
+
   const post = async () => {
     if (kind === 'transfer' && !destSub && lines.every(l => !l.toSub)) { message.warning('Choose a destination subinventory'); return; }
     const targets = lines.filter(l => num(l.qty) > 0 && !l.status);
     if (!targets.length) { message.warning('Nothing to post'); return; }
     setPosting(true); setSoapResp(null);
-    const srcHeader = txnStamp();
-    const txnHeader = method === 'soap' ? srcHeader : undefined;
+    const base = txnStamp();
+
+    // SOAP: one insertAndProcessInterfaceRows call per line — stages AND processes instantly.
+    if (method === 'soap') {
+      message.info('Processing instantly via Transaction Manager…');
+      let last: { envelope: string; raw: string } | null = null; let idx = 0;
+      for (const l of targets) {
+        const trxId = base + idx, srcLine = idx; idx++;
+        l.srcLine = srcLine; upd(l.key, { status: 'pending', srcLine });
+        const res = await callTxnManager(soapRowOf(l, trxId, srcLine), tableType, validationLevel);
+        last = { envelope: res.envelope, raw: res.raw };
+        const chk = await checkStagedOnce(trxId, srcLine);
+        upd(l.key, chk.state === 'processed' ? { status: 'processed', message: 'Processed into inventory' }
+          : chk.state === 'error' ? { status: 'error', message: chk.message }
+          : res.ok ? { status: 'processed', message: 'Processed' }
+          : { status: 'error', message: res.result });
+      }
+      if (last) setSoapResp(last);
+      setPosting(false); onDone();
+      return;
+    }
+
+    // REST: stage to the interface, then rely on the background transaction manager.
+    const srcHeader = base;
     const staged: { key: string; srcLine: number }[] = [];
     let idx = 0;
     for (const l of targets) {
       const srcLine = idx++;
       l.srcLine = srcLine; upd(l.key, { status: 'pending', srcLine });
       try {
-        const r = await fetch(STAGED_TXN_URL, { method: 'POST', headers: JSON_HDRS, body: JSON.stringify(buildBody(l, srcHeader, txnHeader)) });
+        const r = await fetch(STAGED_TXN_URL, { method: 'POST', headers: JSON_HDRS, body: JSON.stringify(buildBody(l, srcHeader)) });
         const txt = await r.text(); let d: any = null; try { d = JSON.parse(txt); } catch { /* raw */ }
         if (r.ok) { upd(l.key, { status: 'ok', message: 'Submitted to interface…' }); staged.push({ key: l.key, srcLine }); }
         else upd(l.key, { status: 'error', message: errOf(d, txt) });
       } catch (e: any) { upd(l.key, { status: 'error', message: e?.message ?? String(e) }); }
     }
-
     if (!staged.length) { setPosting(false); message.error('Nothing was staged — see per-line errors'); return; }
-
-    if (method === 'soap') {
-      // Trigger the Transaction Manager to process this batch synchronously.
-      message.info('Processing synchronously via Transaction Manager…');
-      const res = await callTxnManager(String(txnHeader), tableType, validationLevel);
-      setSoapResp({ envelope: res.envelope, raw: res.raw });
-      // Reconcile each line against the interface (rows are gone if posted).
-      await Promise.all(staged.map(async s => {
-        const chk = await checkStagedOnce(srcHeader, s.srcLine);
-        upd(s.key, chk.state === 'processed' ? { status: 'processed', message: 'Processed into inventory' }
-          : chk.state === 'error' ? { status: 'error', message: chk.message }
-          : { status: res.ok ? 'processed' : 'error', message: res.ok ? 'Processed' : res.result });
-      }));
-      setPosting(false);
-      res.ok ? message.success('Transaction Manager processed the batch') : message.error(`Transaction Manager: ${res.result}`);
-      onDone();
-      return;
-    }
-
-    // REST path — rely on the background transaction manager, then poll.
     setPosting(false);
     message.info('Submitted to the interface — checking processing status…');
     await Promise.all(staged.map(async s => {
@@ -290,7 +357,7 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
           <InputNumber size="small" value={tableType} onChange={n => setTableType(Number(n) || 0)} style={{ width: 80 }} />
           <Text type="secondary" style={{ fontSize: 12 }}>Validation</Text>
           <InputNumber size="small" value={validationLevel} onChange={n => setValidationLevel(Number(n) || 0)} style={{ width: 70 }} />
-          <Tooltip title={`Stages the batch then calls TransactionManagerServiceV2.processInventoryTransaction so stock moves immediately. Endpoint: ${SOAP_TXN_URL}`}>
+          <Tooltip title={`Calls TransactionManagerServiceV2.insertAndProcessInterfaceRows — stages and processes the row in one synchronous call. Endpoint: ${SOAP_TXN_URL}`}>
             <ThunderboltOutlined style={{ color: REDWOOD.warning }} />
           </Tooltip>
         </>}
@@ -310,13 +377,12 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
         <Text style={{ fontSize: 12, fontWeight: 600 }}>Transaction Manager SOAP response</Text>
         <pre style={{ maxHeight: 160, overflow: 'auto', background: REDWOOD.neutral100, padding: 10, borderRadius: 6, fontSize: 11, marginTop: 4 }}>{soapResp.raw || '(empty response)'}</pre>
       </div>}
-      <Modal open={jsonOpen} onCancel={() => setJsonOpen(false)} width={760} title="API payloads" footer={<Button onClick={() => setJsonOpen(false)}>Close</Button>}>
-        <Text style={{ fontSize: 12, fontWeight: 600 }}>1 — POST {STAGED_TXN_URL}</Text>
-        <pre style={{ maxHeight: 300, overflow: 'auto', background: REDWOOD.neutral100, padding: 10, borderRadius: 6, fontSize: 11, marginTop: 4 }}>{JSON.stringify(lines.map((l, i) => buildBody({ ...l, srcLine: i }, 999, method === 'soap' ? 999 : undefined)), null, 2)}</pre>
-        {method === 'soap' && <div style={{ marginTop: 10 }}>
-          <Text style={{ fontSize: 12, fontWeight: 600 }}>2 — POST {SOAP_TXN_URL}</Text>
-          <pre style={{ maxHeight: 260, overflow: 'auto', background: REDWOOD.neutral100, padding: 10, borderRadius: 6, fontSize: 11, marginTop: 4 }}>{buildTxnSoap('«batchHeaderId»', tableType, validationLevel)}</pre>
-        </div>}
+      <Modal open={jsonOpen} onCancel={() => setJsonOpen(false)} width={760} title="API payload" footer={<Button onClick={() => setJsonOpen(false)}>Close</Button>}>
+        {method === 'rest'
+          ? <><Text style={{ fontSize: 12, fontWeight: 600 }}>POST {STAGED_TXN_URL}</Text>
+              <pre style={{ maxHeight: 380, overflow: 'auto', background: REDWOOD.neutral100, padding: 10, borderRadius: 6, fontSize: 11, marginTop: 4 }}>{JSON.stringify(lines.map((l, i) => buildBody({ ...l, srcLine: i }, 999)), null, 2)}</pre></>
+          : <><Text style={{ fontSize: 12, fontWeight: 600 }}>POST {SOAP_TXN_URL} · insertAndProcessInterfaceRows (per line)</Text>
+              <pre style={{ maxHeight: 420, overflow: 'auto', background: REDWOOD.neutral100, padding: 10, borderRadius: 6, fontSize: 11, marginTop: 4 }}>{lines[0] ? buildTxnSoap(soapRowOf(lines[0], 999, 0), tableType, validationLevel) : '(add lines to preview)'}</pre></>}
       </Modal>
     </Modal>
   );
@@ -437,7 +503,7 @@ const SearchOnhand: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Load / Issue — miscellaneous receipt / issue via inventoryStagedTransactions
 // ─────────────────────────────────────────────────────────────────────────────
-interface TxnRow { key: string; itemNumber: string; qty?: number; subinventory: string; locator?: string; lot?: string; uom?: string; srcLine?: number; status?: 'pending' | 'ok' | 'processed' | 'error'; message?: string; }
+interface TxnRow { key: string; itemNumber: string; qty?: number; subinventory: string; locator?: string; lot?: string; uom?: string; itemId?: string; srcLine?: number; status?: 'pending' | 'ok' | 'processed' | 'error'; message?: string; }
 const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   const [org, setOrg] = useState<string | undefined>();
   const [txnType, setTxnType] = useState<'receipt' | 'issue'>('receipt');
@@ -449,7 +515,7 @@ const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   const [posting, setPosting] = useState(false);
   const [jsonOpen, setJsonOpen] = useState(false);
   const [method, setMethod] = useState<TxnMethod>('rest');
-  const [tableType, setTableType] = useState(80);
+  const [tableType, setTableType] = useState(1);
   const [validationLevel, setValidationLevel] = useState(1);
   const [soapRaw, setSoapRaw] = useState<string | null>(null);
 
@@ -490,48 +556,66 @@ const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
     return body;
   };
 
+  const soapRowOf = (l: TxnRow, trxId: number, srcLine: number): SoapTxnRow => ({
+    trxId, srcLine, itemNumber: l.itemNumber, itemId: l.itemId,
+    orgCode: org, orgId: orgs.find(o => o.code === org)?.id,
+    subinv: l.subinventory, qty: num(l.qty), uom: l.uom || '', date: txnDate.format('YYYY-MM-DD'),
+    txnTypeName: txnType === 'receipt' ? 'Miscellaneous receipt' : 'Miscellaneous issue', lot: l.lot || undefined,
+  });
+
   const post = async () => {
     if (!org) { message.warning('Select an organization'); return; }
     const targets = rows.filter(r => r.itemNumber && num(r.qty) > 0 && r.subinventory && !r.status);
     if (!targets.length) { message.warning('Add lines with item, qty and subinventory'); return; }
-    setPosting(true);
-    // Fill UOM per item where missing.
+    setPosting(true); setSoapRaw(null);
+    // Fill UOM + item id per item where missing.
     await mapLimit(targets, 6, async (l) => {
-      if (!l.uom) { const m = await getItemMeta(l.itemNumber, org); const u = m?.PrimaryUOMValue ?? m?.PrimaryUnitOfMeasure ?? m?.PrimaryUOMCode; if (u) { l.uom = u; upd(l.key, { uom: u }); } }
+      if (!l.uom || !l.itemId) {
+        const m = await getItemMeta(l.itemNumber, org);
+        const u = m?.PrimaryUOMValue ?? m?.PrimaryUnitOfMeasure ?? m?.PrimaryUOMCode;
+        const patch: Partial<TxnRow> = {};
+        if (u && !l.uom) { l.uom = u; patch.uom = u; }
+        if (m?.InventoryItemId != null && !l.itemId) { l.itemId = String(m.InventoryItemId); patch.itemId = l.itemId; }
+        if (Object.keys(patch).length) upd(l.key, patch);
+      }
     });
-    setSoapRaw(null);
-    const srcHeader = txnStamp();
-    const txnHeader = method === 'soap' ? srcHeader : undefined;
+    const base = txnStamp();
+
+    // SOAP: one insertAndProcessInterfaceRows call per line — stages AND processes instantly.
+    if (method === 'soap') {
+      message.info('Processing instantly via Transaction Manager…');
+      let lastRaw = ''; let idx = 0;
+      for (const l of targets) {
+        const trxId = base + idx, srcLine = idx; idx++;
+        l.srcLine = srcLine; upd(l.key, { status: 'pending', srcLine });
+        const res = await callTxnManager(soapRowOf(l, trxId, srcLine), tableType, validationLevel);
+        lastRaw = res.raw || '(empty response)';
+        const chk = await checkStagedOnce(trxId, srcLine);
+        upd(l.key, chk.state === 'processed' ? { status: 'processed', message: 'Processed into inventory' }
+          : chk.state === 'error' ? { status: 'error', message: chk.message }
+          : res.ok ? { status: 'processed', message: 'Processed' }
+          : { status: 'error', message: res.result });
+      }
+      setSoapRaw(lastRaw);
+      setPosting(false);
+      return;
+    }
+
+    // REST: stage to the interface, then rely on the background transaction manager.
+    const srcHeader = base;
     const staged: { key: string; srcLine: number }[] = [];
     let idx = 0;
     for (const l of targets) {
       const srcLine = idx++;
       l.srcLine = srcLine; upd(l.key, { status: 'pending', srcLine });
       try {
-        const r = await fetch(STAGED_TXN_URL, { method: 'POST', headers: JSON_HDRS, body: JSON.stringify(buildBody(l, srcHeader, txnHeader)) });
+        const r = await fetch(STAGED_TXN_URL, { method: 'POST', headers: JSON_HDRS, body: JSON.stringify(buildBody(l, srcHeader)) });
         const txt = await r.text(); let d: any = null; try { d = JSON.parse(txt); } catch { /* raw */ }
         if (r.ok) { upd(l.key, { status: 'ok', message: 'Submitted to interface…' }); staged.push({ key: l.key, srcLine }); }
         else upd(l.key, { status: 'error', message: errOf(d, txt) });
       } catch (e: any) { upd(l.key, { status: 'error', message: e?.message ?? String(e) }); }
     }
-
     if (!staged.length) { setPosting(false); message.error('Nothing was staged — see per-line errors'); return; }
-
-    if (method === 'soap') {
-      message.info('Processing synchronously via Transaction Manager…');
-      const res = await callTxnManager(String(txnHeader), tableType, validationLevel);
-      setSoapRaw(res.raw || '(empty response)');
-      await Promise.all(staged.map(async s => {
-        const chk = await checkStagedOnce(srcHeader, s.srcLine);
-        upd(s.key, chk.state === 'processed' ? { status: 'processed', message: 'Processed into inventory' }
-          : chk.state === 'error' ? { status: 'error', message: chk.message }
-          : { status: res.ok ? 'processed' : 'error', message: res.ok ? 'Processed' : res.result });
-      }));
-      setPosting(false);
-      res.ok ? message.success('Transaction Manager processed the batch') : message.error(`Transaction Manager: ${res.result}`);
-      return;
-    }
-
     setPosting(false);
     message.info('Submitted to the interface — checking processing status…');
     await Promise.all(staged.map(async s => {
@@ -587,7 +671,7 @@ const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
           <InputNumber size="small" value={tableType} onChange={n => setTableType(Number(n) || 0)} style={{ width: 80 }} />
           <Text type="secondary" style={{ fontSize: 12 }}>Validation</Text>
           <InputNumber size="small" value={validationLevel} onChange={n => setValidationLevel(Number(n) || 0)} style={{ width: 70 }} />
-          <Tooltip title={`Stages the batch then calls TransactionManagerServiceV2.processInventoryTransaction. Endpoint: ${SOAP_TXN_URL}`}>
+          <Tooltip title={`Calls TransactionManagerServiceV2.insertAndProcessInterfaceRows — stages and processes each row in one synchronous call. Endpoint: ${SOAP_TXN_URL}`}>
             <ThunderboltOutlined style={{ color: REDWOOD.warning }} />
           </Tooltip>
         </>}
@@ -613,15 +697,12 @@ const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
         <pre style={{ maxHeight: 180, overflow: 'auto', background: REDWOOD.neutral100, padding: 10, borderRadius: 6, fontSize: 11, marginTop: 4 }}>{soapRaw}</pre>
       </div>}
 
-      <Modal open={jsonOpen} onCancel={() => setJsonOpen(false)} width={760} title="API payloads" footer={<Button onClick={() => setJsonOpen(false)}>Close</Button>}>
-        <div style={{ fontSize: 11, marginBottom: 6 }}><Tag color="green">POST</Tag> {STAGED_TXN_URL} · one request per line · TransactionTypeName <Tag>{txnType === 'receipt' ? 'Miscellaneous receipt' : 'Miscellaneous issue'}</Tag></div>
-        <pre style={{ maxHeight: 300, overflow: 'auto', background: REDWOOD.neutral100, padding: 10, borderRadius: 6, fontSize: 11 }}>
-          {JSON.stringify(rows.filter(r => r.itemNumber).map((r, i) => buildBody({ ...r, srcLine: i }, 999, method === 'soap' ? 999 : undefined)), null, 2)}
-        </pre>
-        {method === 'soap' && <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 11, marginBottom: 6 }}><Tag color="blue">SOAP</Tag> {SOAP_TXN_URL} · processInventoryTransaction</div>
-          <pre style={{ maxHeight: 260, overflow: 'auto', background: REDWOOD.neutral100, padding: 10, borderRadius: 6, fontSize: 11 }}>{buildTxnSoap('«batchHeaderId»', tableType, validationLevel)}</pre>
-        </div>}
+      <Modal open={jsonOpen} onCancel={() => setJsonOpen(false)} width={760} title="API payload" footer={<Button onClick={() => setJsonOpen(false)}>Close</Button>}>
+        {method === 'rest'
+          ? <><div style={{ fontSize: 11, marginBottom: 6 }}><Tag color="green">POST</Tag> {STAGED_TXN_URL} · one request per line · TransactionTypeName <Tag>{txnType === 'receipt' ? 'Miscellaneous receipt' : 'Miscellaneous issue'}</Tag></div>
+              <pre style={{ maxHeight: 380, overflow: 'auto', background: REDWOOD.neutral100, padding: 10, borderRadius: 6, fontSize: 11 }}>{JSON.stringify(rows.filter(r => r.itemNumber).map((r, i) => buildBody({ ...r, srcLine: i }, 999)), null, 2)}</pre></>
+          : <><div style={{ fontSize: 11, marginBottom: 6 }}><Tag color="blue">SOAP</Tag> {SOAP_TXN_URL} · insertAndProcessInterfaceRows (per line)</div>
+              <pre style={{ maxHeight: 420, overflow: 'auto', background: REDWOOD.neutral100, padding: 10, borderRadius: 6, fontSize: 11 }}>{rows.filter(r => r.itemNumber)[0] ? buildTxnSoap(soapRowOf(rows.filter(r => r.itemNumber)[0], 999, 0), tableType, validationLevel) : '(parse lines to preview)'}</pre></>}
       </Modal>
     </div>
   );
@@ -639,8 +720,8 @@ const StockOnhand: React.FC = () => {
       try {
         const all: OrgOpt[] = []; let offset = 0;
         while (true) {
-          const d = await fetchJson(`${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500&offset=${offset}&fields=OrganizationCode,OrganizationName`);
-          (d?.items ?? []).forEach((o: any) => { if (o.OrganizationCode) all.push({ code: o.OrganizationCode, name: o.OrganizationName ?? '' }); });
+          const d = await fetchJson(`${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500&offset=${offset}&fields=OrganizationCode,OrganizationName,OrganizationId`);
+          (d?.items ?? []).forEach((o: any) => { if (o.OrganizationCode) all.push({ code: o.OrganizationCode, name: o.OrganizationName ?? '', id: o.OrganizationId != null ? String(o.OrganizationId) : undefined }); });
           if (!d?.hasMore) break; offset += 500;
         }
         all.sort((a, b) => a.code.localeCompare(b.code));
