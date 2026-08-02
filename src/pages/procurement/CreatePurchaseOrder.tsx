@@ -2327,15 +2327,21 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
     const missing = Array.from(new Set(rows.filter(r => r.status !== 'valid').map(r => r.itemNumber)));
     if (missing.length && header?.shipToOrg) {
       const fusionMap = new Map<string, any>();
-      const chunk = 40;
-      for (let i = 0; i < missing.length; i += chunk) {
-        const list = missing.slice(i, i + chunk).map(n => `'${String(n).replace(/'/g, "''")}'`).join(',');
-        const url = `${FUSION_BASE}/itemsV2?q=OrganizationCode=${header.shipToOrg};ItemNumber in (${list})&limit=200&onlyData=true`;
-        try {
-          const r = await fetch(url, { headers: FUSION_HDRS });
-          if (r.ok) { const d = await r.json(); (d.items ?? []).forEach((it: any) => { if (it.ItemNumber) fusionMap.set(String(it.ItemNumber).toUpperCase(), it); }); }
-        } catch { /* ignore this chunk */ }
-      }
+      // itemsV2 doesn't accept `ItemNumber in (...)` — query one item at a time
+      // (ItemNumber = <value>), a few in parallel.
+      const org = header.shipToOrg;
+      let idx = 0;
+      const worker = async () => {
+        while (idx < missing.length) {
+          const num = missing[idx++];
+          const url = `${FUSION_BASE}/itemsV2?q=OrganizationCode=${org};ItemNumber=${encodeURIComponent(num)}&limit=1&onlyData=true`;
+          try {
+            const r = await fetch(url, { headers: FUSION_HDRS });
+            if (r.ok) { const d = await r.json(); const it = (d.items ?? [])[0]; if (it?.ItemNumber) fusionMap.set(String(it.ItemNumber).toUpperCase(), it); }
+          } catch { /* ignore this item */ }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(6, missing.length) }, worker));
       if (fusionMap.size) {
         rows = rows.map(r => {
           if (r.status === 'valid') return r;
