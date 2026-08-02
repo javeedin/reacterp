@@ -43,6 +43,9 @@ const REDWOOD = {
 
 const pf = (o: any, keys: string[]) => { for (const k of keys) { if (o?.[k] != null && o[k] !== '') return o[k]; } return undefined; };
 const num = (v: any) => { const n = Number(v); return isNaN(n) ? 0 : n; };
+// Miscellaneous issues (and negative/FOC types) post a NEGATIVE quantity to the interface;
+// receipts and subinventory transfers post positive. Sign the qty by transaction type name.
+const signedQty = (typeName: string, qty: number) => /issue|negative|foc/i.test(typeName || '') ? -Math.abs(num(qty)) : Math.abs(num(qty));
 // Unique-enough stamp to tag a post batch so we can poll its interface rows back.
 const txnStamp = () => Date.now();
 const fmtQty = (v: any) => v == null || isNaN(Number(v)) ? '—' : new Intl.NumberFormat('en-US').format(Number(v));
@@ -127,7 +130,8 @@ const xesc = (v: any) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&
 // call stages the row(s) AND runs the transaction manager synchronously (tableType 1).
 const buildTxnSoap = (r: SoapTxnRow, tableType: number, validationLevel: number): string => {
   const uom = r.uom || 'Ea';
-  const qtyEl = (tag: string) => `<stag:${tag} unitCode="${xesc(uom)}">${r.qty}</stag:${tag}>`;
+  const q = signedQty(r.txnTypeName, r.qty); // issues go negative
+  const qtyEl = (tag: string) => `<stag:${tag} unitCode="${xesc(uom)}">${q}</stag:${tag}>`;
   const lotBlock = r.lot ? `
         <stag:StagedInventoryTransactionLot>
           <stag:TransactionInterfaceId>${r.trxId}</stag:TransactionInterfaceId>
@@ -252,14 +256,14 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
       SourceCode: 'ReactERP', SourceHeaderId: srcHeader ?? 0, SourceLineId: l.srcLine ?? 0,
       OrganizationCode: l.org, ItemNumber: l.item,
       SubinventoryCode: l.fromSub,
-      TransactionQuantity: num(l.qty),
+      TransactionQuantity: signedQty(TX_TYPE_NAME[kind!], l.qty),
       TransactionUnitOfMeasure: l.uom || undefined,
       TransactionDate: date.format('YYYY-MM-DDTHH:mm:ss'),
     };
     if (txnHeader) body.TransactionHeaderId = txnHeader;
     if (kind === 'transfer') body.TransferSubinventoryCode = destSub || l.toSub;
     if (kind !== 'transfer' && account.trim()) body.DistributionAccountCombination = account.trim();
-    if (l.lot) body.lotItemLots = [{ LotNumber: l.lot, TransactionQuantity: num(l.qty) }];
+    if (l.lot) body.lotItemLots = [{ LotNumber: l.lot, TransactionQuantity: signedQty(TX_TYPE_NAME[kind!], l.qty) }];
     return body;
   };
 
@@ -552,20 +556,21 @@ const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   const upd = (key: string, patch: Partial<TxnRow>) => setRows(prev => prev.map(r => r.key === key ? { ...r, ...patch } : r));
 
   const buildBody = (l: TxnRow, srcHeader?: number, txnHeader?: number) => {
+    const typeName = txnType === 'receipt' ? 'Miscellaneous receipt' : 'Miscellaneous issue';
     const body: Record<string, any> = {
-      TransactionTypeName: txnType === 'receipt' ? 'Miscellaneous receipt' : 'Miscellaneous issue',
+      TransactionTypeName: typeName,
       SourceCode: 'ReactERP', SourceHeaderId: srcHeader ?? 0, SourceLineId: l.srcLine ?? 0,
       OrganizationCode: org,
       ItemNumber: l.itemNumber,
       SubinventoryCode: l.subinventory,
-      TransactionQuantity: num(l.qty),
+      TransactionQuantity: signedQty(typeName, l.qty),
       TransactionUnitOfMeasure: l.uom || undefined,
       TransactionDate: txnDate.format('YYYY-MM-DDTHH:mm:ss'),
     };
     if (txnHeader) body.TransactionHeaderId = txnHeader;
     if (l.locator) body.LocatorName = l.locator;
     if (account.trim()) body.DistributionAccountCombination = account.trim();
-    if (l.lot) body.lotItemLots = [{ LotNumber: l.lot, TransactionQuantity: num(l.qty) }];
+    if (l.lot) body.lotItemLots = [{ LotNumber: l.lot, TransactionQuantity: signedQty(typeName, l.qty) }];
     return body;
   };
 
