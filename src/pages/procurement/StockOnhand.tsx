@@ -218,10 +218,15 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
   const [tableType, setTableType] = useState(1);
   const [validationLevel, setValidationLevel] = useState(1);
   const [soapResp, setSoapResp] = useState<{ envelope: string; raw: string } | null>(null);
+  const [dirty, setDirty] = useState(false);
+
+  // Refresh the parent on-hand list only when the dialog is dismissed, so posting
+  // results (statuses + errors) stay visible on screen until the user closes it.
+  const handleClose = () => { onClose(); if (dirty) onDone(); };
 
   useEffect(() => {
     if (!kind) return;
-    setPosting(false); setDestSub(''); setAccount(''); setSoapResp(null);
+    setPosting(false); setDestSub(''); setAccount(''); setSoapResp(null); setDirty(false);
     setLines(rows.map((r, i) => ({
       key: `l-${i}`, item: pf(r, ['ItemNumber']) ?? '', org: pf(r, ['OrganizationCode']) ?? '',
       orgId: pf(r, ['OrganizationId']) != null ? String(pf(r, ['OrganizationId'])) : undefined,
@@ -288,7 +293,7 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
         else upd(l.key, { status: 'error', message: `SOAP ${codeTxt}${detail ? ' — ' + detail : ''}` });
       }
       if (last) setSoapResp(last);
-      setPosting(false); onDone();
+      setPosting(false); setDirty(true);
       return;
     }
 
@@ -315,7 +320,7 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
         : res.state === 'error' ? { status: 'error', message: res.message }
         : { status: 'ok', message: 'Submitted — still pending in interface (transaction manager not run yet)' });
     }));
-    onDone();
+    setDirty(true);
   };
 
   const cols: ColumnsType<TxnLine> = [
@@ -338,10 +343,10 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
   ];
 
   return (
-    <Modal open={!!kind} onCancel={() => { if (!posting) onClose(); }} width={960} maskClosable={false}
+    <Modal open={!!kind} onCancel={() => { if (!posting) handleClose(); }} width={960} maskClosable={false}
       title={<Space>{kind === 'issue' ? <LogoutOutlined /> : kind === 'receipt' ? <LoginOutlined /> : <DatabaseOutlined />}{kind ? TX_LABEL[kind] : ''} — {rows.length} line(s)</Space>}
       footer={<Space>
-        <Button onClick={onClose} disabled={posting}>Close</Button>
+        <Button onClick={handleClose} disabled={posting}>Close</Button>
         {lines.length > 0 && <Button icon={<ApiOutlined />} onClick={() => setJsonOpen(true)}>View JSON</Button>}
         <Button type="primary" loading={posting} onClick={post} icon={method === 'soap' ? <ThunderboltOutlined /> : undefined}
           style={{ background: kind === 'issue' ? REDWOOD.primary : REDWOOD.success, borderColor: kind === 'issue' ? REDWOOD.primary : REDWOOD.success }}>
@@ -376,6 +381,11 @@ const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => voi
               <Input value={account} onChange={e => setAccount(e.target.value)} placeholder="Code combination" /></Col>}
       </Row>
       <Table size="small" rowKey="key" columns={cols} dataSource={lines} pagination={false} scroll={{ x: 900, y: 340 }} />
+      {lines.some(l => l.status === 'error') && <Alert type="error" showIcon style={{ marginTop: 10 }}
+        message={`${lines.filter(l => l.status === 'error').length} line(s) failed`}
+        description={<ul style={{ margin: 0, paddingLeft: 18 }}>{lines.filter(l => l.status === 'error').map(l => <li key={l.key} style={{ fontSize: 12 }}><b>{l.item}</b>: {l.message}</li>)}</ul>} />}
+      {lines.some(l => l.status === 'processed') && !lines.some(l => l.status === 'error') &&
+        <Alert type="success" showIcon style={{ marginTop: 10 }} message={`${lines.filter(l => l.status === 'processed').length} line(s) processed`} />}
       {soapResp && <div style={{ marginTop: 10 }}>
         <Text style={{ fontSize: 12, fontWeight: 600 }}>Transaction Manager SOAP response</Text>
         <pre style={{ maxHeight: 160, overflow: 'auto', background: REDWOOD.neutral100, padding: 10, borderRadius: 6, fontSize: 11, marginTop: 4 }}>{soapResp.raw || '(empty response)'}</pre>
@@ -694,6 +704,12 @@ const LoadTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
       {rows.length > 0 && (
         <Table size="small" rowKey="key" columns={cols} dataSource={rows} pagination={false} scroll={{ y: 340 }} style={{ marginTop: 12 }} />
       )}
+
+      {rows.some(r => r.status === 'error') && <Alert type="error" showIcon style={{ marginTop: 12 }}
+        message={`${rows.filter(r => r.status === 'error').length} line(s) failed`}
+        description={<ul style={{ margin: 0, paddingLeft: 18 }}>{rows.filter(r => r.status === 'error').map(r => <li key={r.key} style={{ fontSize: 12 }}><b>{r.itemNumber}</b>: {r.message}</li>)}</ul>} />}
+      {rows.some(r => r.status === 'processed') && !rows.some(r => r.status === 'error') &&
+        <Alert type="success" showIcon style={{ marginTop: 12 }} message={`${rows.filter(r => r.status === 'processed').length} line(s) processed`} />}
 
       {soapRaw && <div style={{ marginTop: 12 }}>
         <Text style={{ fontSize: 12, fontWeight: 600 }}>Transaction Manager SOAP response</Text>
