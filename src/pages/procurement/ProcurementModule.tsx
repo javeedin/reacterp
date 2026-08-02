@@ -257,8 +257,9 @@ const procurementItems: MenuItemType[] = [
     key: 'onhand-loading', group: 'Loading',
     icon: <DatabaseOutlined />,
     label: 'Stock Onhand',
-    description: 'Load opening / stock on-hand balances from Excel',
+    description: 'Search on-hand balances, and load on-hand (receipt) or issue stock out',
     color: REDWOOD.success,
+    path: '/procurement/onhand-loading',
   },
   {
     key: 'ar-inv-loading', group: 'Loading',
