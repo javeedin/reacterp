@@ -99,10 +99,12 @@ const EditItemModal: React.FC<{ item: any | null; onClose: () => void; onSaved: 
   const [edits, setEdits] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
   const [resp, setResp] = useState<string>('');
+  const [applyAllOrgs, setApplyAllOrgs] = useState(false);
+  const [orgResults, setOrgResults] = useState<{ org: string; ok: boolean; msg?: string }[]>([]);
 
   useEffect(() => {
     if (!item) return;
-    setFull(null); setEdits({}); setResp(''); setSelfHref('');
+    setFull(null); setEdits({}); setResp(''); setSelfHref(''); setOrgResults([]); setApplyAllOrgs(false);
     (async () => {
       setLoading(true);
       try {
@@ -132,17 +134,36 @@ const EditItemModal: React.FC<{ item: any | null; onClose: () => void; onSaved: 
   const curVal = (k: string) => (k in edits ? edits[k] : full?.[k]);
 
   const save = async () => {
-    if (!selfHref) { message.error('No item self link to update'); return; }
     const body = Object.fromEntries(Object.entries(edits).filter(([k]) => full?.[k] !== edits[k]));
     if (Object.keys(body).length === 0) { message.warning('No changes to save'); return; }
-    setSaving(true); setResp('');
+    setSaving(true); setResp(''); setOrgResults([]);
     try {
-      const r = await fetch(selfHref, { method: 'PATCH', headers: RESITEM_HDRS, body: JSON.stringify(body) });
-      const txt = await r.text();
-      if (!r.ok) { setResp(`HTTP ${r.status}: ${txt.slice(0, 500)}`); message.error('Update failed — see details'); }
-      else {
-        try { setFull(JSON.parse(txt)); } catch { /* keep */ }
-        setEdits({}); message.success('Item updated'); onSaved();
+      if (applyAllOrgs) {
+        // Apply the same changes to this item in every organization it exists in.
+        const d = await fetchJson(`${ITEMS_URL}?q=ItemNumber=${encodeURIComponent(item.ItemNumber)}&onlyData=false&limit=500`);
+        const orgRows: any[] = d?.items ?? [];
+        if (!orgRows.length) { setResp('No organization records found for this item'); setSaving(false); return; }
+        const results: { org: string; ok: boolean; msg?: string }[] = [];
+        for (const row of orgRows) {
+          const self = (row.links ?? []).find((x: any) => x.rel === 'self')?.href;
+          const orgCode = row.OrganizationCode ?? '?';
+          if (!self) { results.push({ org: orgCode, ok: false, msg: 'no self link' }); continue; }
+          try {
+            const r = await fetch(fusionHref(self), { method: 'PATCH', headers: RESITEM_HDRS, body: JSON.stringify(body) });
+            const t = await r.text();
+            results.push({ org: orgCode, ok: r.ok, msg: r.ok ? undefined : errOf({ data: (() => { try { return JSON.parse(t); } catch { return null; } })(), text: t }) });
+          } catch (e: any) { results.push({ org: orgCode, ok: false, msg: e?.message ?? String(e) }); }
+        }
+        setOrgResults(results);
+        const okN = results.filter(r => r.ok).length;
+        if (okN === results.length) { message.success(`Updated in all ${okN} organization(s)`); setEdits({}); onSaved(); }
+        else message.warning(`Updated ${okN}/${results.length} org(s) — see details`);
+      } else {
+        if (!selfHref) { message.error('No item self link to update'); setSaving(false); return; }
+        const r = await fetch(selfHref, { method: 'PATCH', headers: RESITEM_HDRS, body: JSON.stringify(body) });
+        const txt = await r.text();
+        if (!r.ok) { setResp(`HTTP ${r.status}: ${txt.slice(0, 500)}`); message.error('Update failed — see details'); }
+        else { try { setFull(JSON.parse(txt)); } catch { /* keep */ } setEdits({}); message.success('Item updated'); onSaved(); }
       }
     } catch (e: any) { setResp(`Error: ${e?.message ?? e}`); message.error('Update failed'); }
     finally { setSaving(false); }
@@ -169,9 +190,12 @@ const EditItemModal: React.FC<{ item: any | null; onClose: () => void; onSaved: 
     <Modal open={!!item} onCancel={() => { if (!saving) onClose(); }} width={820} maskClosable={false}
       title={<Space><ProfileOutlined style={{ color: REDWOOD.info }} />Edit Item — {item?.ItemNumber} <Tag>{item?.OrganizationCode}</Tag></Space>}
       footer={<Space>
+        <Checkbox checked={applyAllOrgs} onChange={e => setApplyAllOrgs(e.target.checked)}>Apply to all organizations</Checkbox>
         <Button onClick={onClose} disabled={saving}>Close</Button>
-        <Button type="primary" loading={saving} disabled={!selfHref || Object.keys(edits).length === 0}
-          onClick={save} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>Save Changes</Button>
+        <Button type="primary" loading={saving} disabled={(!selfHref && !applyAllOrgs) || Object.keys(edits).length === 0}
+          onClick={save} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
+          {applyAllOrgs ? 'Save to All Orgs' : 'Save Changes'}
+        </Button>
       </Space>}>
       {loading ? <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
         : !full ? <Empty description="Item not found" />
@@ -183,6 +207,12 @@ const EditItemModal: React.FC<{ item: any | null; onClose: () => void; onSaved: 
               </Card>
             ))}
             {groups.length === 0 && <Empty style={{ marginTop: 12 }} description="No editable lot/serial/account attributes found on this item" />}
+            {applyAllOrgs && <Alert type="info" showIcon style={{ marginTop: 10 }} message={`Changes will be applied to this item in every organization it exists in.`} />}
+            {orgResults.length > 0 && <Card size="small" title="Per-organization result" style={{ marginTop: 10 }} styles={{ body: { padding: 8 } }}>
+              <Space size={[6, 6]} wrap>
+                {orgResults.map(r => <Tooltip key={r.org} title={r.msg}><Tag color={r.ok ? 'green' : 'red'} icon={r.ok ? <CheckCircleTwoTone twoToneColor={REDWOOD.success} /> : <CloseCircleTwoTone twoToneColor={REDWOOD.error} />}>{r.org}</Tag></Tooltip>)}
+              </Space>
+            </Card>}
             {resp && <Alert type="error" showIcon style={{ marginTop: 12 }} message="Update response"
               description={<pre style={{ whiteSpace: 'pre-wrap', fontSize: 11, margin: 0, maxHeight: 200, overflow: 'auto' }}>{resp}</pre>} />}
           </div>}
@@ -193,9 +223,10 @@ const EditItemModal: React.FC<{ item: any | null; onClose: () => void; onSaved: 
 // ─────────────────────────────────────────────────────────────────────────────
 // Search tab — query itemsV2 by org + item / description
 // ─────────────────────────────────────────────────────────────────────────────
+const ALL_ORGS = '__ALL__';
 const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
-  const [org, setOrg] = useState<string>(MASTER_ORG);
-  const [itemNumber, setItemNumber] = useState('');
+  const [org, setOrg] = useState<string>(ALL_ORGS);
+  const [itemsText, setItemsText] = useState('');
   const [description, setDescription] = useState('');
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -204,19 +235,39 @@ const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   const [editItem, setEditItem] = useState<any | null>(null);
 
   const run = useCallback(async () => {
-    const q: string[] = [`OrganizationCode=${org}`];
-    if (itemNumber) q.push(`ItemNumber LIKE ${itemNumber}%`);
-    if (description) q.push(`ItemDescription LIKE ${description}%`);
-    const url = `${ITEMS_URL}?q=${q.join(';')}&limit=200&onlyData=true`;
-    setLastUrl(url); setLoading(true); setErr('');
+    const orgClause = org && org !== ALL_ORGS ? `OrganizationCode=${org};` : '';
+    // Parse the pasted item numbers (one per line, or tab/comma separated).
+    const nums = Array.from(new Set(itemsText.split(/\r?\n|,|\t|\s{2,}/).map(s => s.trim()).filter(Boolean)));
+    setLoading(true); setErr('');
     try {
-      const r = await fetch(url, { headers: FUSION_HDRS });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const d = await r.json();
-      setRows(d.items ?? []);
+      if (nums.length) {
+        // itemsV2 has no `in (...)` — query each item number (a few in parallel),
+        // returning it across all orgs (or the one chosen org).
+        const out: any[] = []; let idx = 0;
+        const worker = async () => {
+          while (idx < nums.length) {
+            const n = nums[idx++];
+            const url = `${ITEMS_URL}?q=${orgClause}ItemNumber=${encodeURIComponent(n)}&limit=500&onlyData=true`;
+            setLastUrl(url);
+            try { const r = await fetch(url, { headers: FUSION_HDRS }); if (r.ok) { const d = await r.json(); (d.items ?? []).forEach((it: any) => out.push(it)); } } catch { /* skip */ }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(6, nums.length) }, worker));
+        out.sort((a, b) => String(a.ItemNumber).localeCompare(String(b.ItemNumber)) || String(a.OrganizationCode).localeCompare(String(b.OrganizationCode)));
+        setRows(out);
+      } else if (description.trim()) {
+        if (org === ALL_ORGS) { message.warning('Pick an organization for a description search, or paste item numbers'); setLoading(false); return; }
+        const url = `${ITEMS_URL}?q=${orgClause}ItemDescription LIKE ${description.trim()}%&limit=500&onlyData=true`;
+        setLastUrl(url);
+        const r = await fetch(url, { headers: FUSION_HDRS });
+        const d = r.ok ? await r.json() : { items: [] };
+        setRows(d.items ?? []);
+      } else {
+        message.warning('Paste one or more item numbers to search'); setLoading(false); return;
+      }
     } catch (e: any) { setErr(e?.message ?? String(e)); setRows([]); }
     finally { setLoading(false); }
-  }, [org, itemNumber, description]);
+  }, [org, itemsText, description]);
 
   const cols: ColumnsType<any> = [
     { title: 'Item Number', dataIndex: 'ItemNumber', width: 160, render: v => <Text strong>{v}</Text> },
@@ -234,18 +285,21 @@ const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   return (
     <div>
       <Row gutter={12} style={{ marginBottom: 12 }}>
-        <Col xs={24} md={6}><div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Organization</div>
+        <Col xs={24} md={7}><div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Organization</div>
           <Select showSearch style={{ width: '100%' }} value={org} onChange={setOrg} optionFilterProp="label"
-            options={orgs.map(o => ({ value: o.code, label: `${o.code}${o.name ? ' — ' + o.name : ''}` }))} /></Col>
-        <Col xs={24} md={6}><div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Item Number (prefix)</div>
-          <Input value={itemNumber} onChange={e => setItemNumber(e.target.value)} onPressEnter={run} allowClear /></Col>
-        <Col xs={24} md={6}><div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Description (prefix)</div>
-          <Input value={description} onChange={e => setDescription(e.target.value)} onPressEnter={run} allowClear /></Col>
-        <Col xs={24} md={6} style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
-          <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={run}
+            options={[{ value: ALL_ORGS, label: '— All organizations —' }, ...orgs.map(o => ({ value: o.code, label: `${o.code}${o.name ? ' — ' + o.name : ''}` }))]} />
+          <div style={{ fontSize: 12, color: REDWOOD.neutral600, margin: '10px 0 4px' }}>Description (prefix, single org)</div>
+          <Input value={description} onChange={e => setDescription(e.target.value)} onPressEnter={run} allowClear placeholder="Only used when no item numbers are pasted" /></Col>
+        <Col xs={24} md={11}><div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Item Numbers — paste one per line</div>
+          <Input.TextArea rows={5} value={itemsText} onChange={e => setItemsText(e.target.value)} style={{ fontFamily: 'monospace', fontSize: 12 }}
+            placeholder={'460-BDXV\nDLPB14255-01\n450-BFFP'} /></Col>
+        <Col xs={24} md={6} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', gap: 8 }}>
+          <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>&nbsp;</div>
+          <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={run} block
             style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
           {lastUrl && <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{lastUrl}</span>}>
-            <Button icon={<ApiOutlined />} style={{ color: REDWOOD.info }} /></Tooltip>}
+            <Button icon={<ApiOutlined />} style={{ color: REDWOOD.info }} block>Last API call</Button></Tooltip>}
+          <Text type="secondary" style={{ fontSize: 11 }}>{rows.length ? `${rows.length} row(s) · ${new Set(rows.map(r => r.ItemNumber)).size} item(s)` : ''}</Text>
         </Col>
       </Row>
       {err && <Alert type="error" showIcon message={err} style={{ marginBottom: 12 }} />}
