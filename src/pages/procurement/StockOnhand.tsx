@@ -235,28 +235,46 @@ const SearchOnhand: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   const [lastUrl, setLastUrl] = useState('');
   const [selKeys, setSelKeys] = useState<React.Key[]>([]);
   const [txnKind, setTxnKind] = useState<TxnKind | null>(null);
-  const selectedRows = rows.filter((_, i) => selKeys.includes(String(i)));
+  const [filter, setFilter] = useState('');
+  const [truncated, setTruncated] = useState(false);
+  const selectedRows = rows.filter(r => selKeys.includes(r.__k));
 
   const run = useCallback(async () => {
-    const orgClause = org && org !== ALL_ORGS ? `OrganizationCode=${org};` : '';
     const nums = Array.from(new Set(itemsText.split(/\r?\n|,|\t|\s{2,}/).map(s => s.trim()).filter(Boolean)));
-    if (!nums.length) { message.warning('Paste one or more item numbers'); return; }
-    setLoading(true); setErr(''); setSelKeys([]);
+    const orgClause = org && org !== ALL_ORGS ? `OrganizationCode=${org}` : '';
+    // No item numbers → list all on-hand for the org (requires a specific org, capped).
+    if (!nums.length && !orgClause) { message.warning('Select an organization to list all its on-hand, or paste item numbers'); return; }
+    setLoading(true); setErr(''); setSelKeys([]); setTruncated(false);
     try {
       const out: any[] = [];
-      await mapLimit(nums, 6, async (n) => {
-        const url = `${ONHAND_URL}?q=${orgClause}ItemNumber=${encodeURIComponent(n)}&limit=500&onlyData=true`;
+      if (!nums.length) {
+        const url = `${ONHAND_URL}?q=${orgClause}&limit=500&onlyData=true`;
         setLastUrl(url);
-        try { const r = await fetch(url, { headers: FUSION_HDRS }); if (r.ok) { const d = await r.json(); (d.items ?? []).forEach((b: any) => out.push(b)); } } catch { /* skip */ }
-      });
+        const r = await fetch(url, { headers: FUSION_HDRS });
+        if (r.ok) { const d = await r.json(); (d.items ?? []).forEach((b: any) => out.push(b)); if (d.hasMore) setTruncated(true); }
+        else { const t = await r.text(); let j: any = null; try { j = JSON.parse(t); } catch { /* raw */ } setErr(errOf(j, t)); }
+      } else {
+        await mapLimit(nums, 6, async (n) => {
+          const url = `${ONHAND_URL}?q=${orgClause ? orgClause + ';' : ''}ItemNumber=${encodeURIComponent(n)}&limit=500&onlyData=true`;
+          setLastUrl(url);
+          try { const r = await fetch(url, { headers: FUSION_HDRS }); if (r.ok) { const d = await r.json(); (d.items ?? []).forEach((b: any) => out.push(b)); } } catch { /* skip */ }
+        });
+      }
       out.sort((a, b) => String(pf(a, ['ItemNumber'])).localeCompare(String(pf(b, ['ItemNumber']))));
+      out.forEach((r, i) => { r.__k = String(i); });
       setRows(out);
-      if (!out.length) message.info('No on-hand found for those items');
+      if (!out.length && !err) message.info(nums.length ? 'No on-hand found for those items' : 'No on-hand found for this organization');
     } catch (e: any) { setErr(e?.message ?? String(e)); setRows([]); }
     finally { setLoading(false); }
   }, [org, itemsText]);
 
-  const total = useMemo(() => rows.reduce((s, r) => s + onhQtyOf(r), 0), [rows]);
+  const filteredRows = useMemo(() => {
+    const f = filter.trim().toLowerCase();
+    if (!f) return rows;
+    const keys = ['ItemNumber', 'ItemDescription', 'OrganizationCode', 'SubinventoryCode', 'LocatorName', 'Locator', 'LotNumber', 'MaterialStatus'];
+    return rows.filter(r => keys.some(k => String(pf(r, [k]) ?? '').toLowerCase().includes(f)));
+  }, [rows, filter]);
+  const total = useMemo(() => filteredRows.reduce((s, r) => s + onhQtyOf(r), 0), [filteredRows]);
   const cols: ColumnsType<any> = [
     { title: 'Item', dataIndex: 'ItemNumber', width: 170, render: (_, r) => <Text strong>{pf(r, ['ItemNumber'])}</Text> },
     { title: 'Description', width: 220, ellipsis: true, render: (_, r) => pf(r, ['ItemDescription']) ?? '—' },
@@ -276,8 +294,8 @@ const SearchOnhand: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
         <Col xs={24} md={7}><div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Organization</div>
           <Select showSearch style={{ width: '100%' }} value={org} onChange={setOrg} optionFilterProp="label"
             options={[{ value: ALL_ORGS, label: '— All organizations —' }, ...orgs.map(o => ({ value: o.code, label: `${o.code}${o.name ? ' — ' + o.name : ''}` }))]} /></Col>
-        <Col xs={24} md={11}><div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Item Numbers — paste one per line</div>
-          <Input.TextArea rows={4} value={itemsText} onChange={e => setItemsText(e.target.value)} style={{ fontFamily: 'monospace', fontSize: 12 }} placeholder={'460-BDXV\nDLPB14255-01'} /></Col>
+        <Col xs={24} md={11}><div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Item Numbers — paste one per line <Text type="secondary" style={{ fontSize: 11 }}>(leave blank to list all on-hand for the org)</Text></div>
+          <Input.TextArea rows={4} value={itemsText} onChange={e => setItemsText(e.target.value)} style={{ fontFamily: 'monospace', fontSize: 12 }} placeholder={'460-BDXV\nDLPB14255-01\n\n(or leave blank for all items)'} /></Col>
         <Col xs={24} md={6} style={{ display: 'flex', flexDirection: 'column', gap: 8, justifyContent: 'flex-start' }}>
           <div style={{ fontSize: 12, marginBottom: 4 }}>&nbsp;</div>
           <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={run} block style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search On-Hand</Button>
@@ -285,6 +303,14 @@ const SearchOnhand: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
         </Col>
       </Row>
       {err && <Alert type="error" showIcon message={err} style={{ marginBottom: 12 }} />}
+      {truncated && <Alert type="warning" showIcon style={{ marginBottom: 12 }} message="Showing the first 500 rows — narrow by item number or filter to see the rest." />}
+      {rows.length > 0 && (
+        <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <Input allowClear prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />} placeholder="Filter results — item, description, subinventory, lot, status…"
+            value={filter} onChange={e => setFilter(e.target.value)} style={{ maxWidth: 420 }} />
+          <Text type="secondary" style={{ fontSize: 12 }}>{filteredRows.length} of {rows.length} row(s)</Text>
+        </div>
+      )}
       {selKeys.length > 0 && (
         <div style={{ marginBottom: 8, padding: '6px 10px', background: REDWOOD.neutral100, borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <Text strong style={{ fontSize: 12 }}>{selKeys.length} selected</Text>
@@ -294,14 +320,14 @@ const SearchOnhand: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
           <Button size="small" icon={<DatabaseOutlined />} onClick={() => setTxnKind('transfer')} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Subinventory Transfer</Button>
         </div>
       )}
-      <Table size="small" rowKey={(_, i) => String(i)} columns={cols} dataSource={rows} loading={loading}
-        rowSelection={{ selectedRowKeys: selKeys, onChange: setSelKeys, preserveSelectedRowKeys: false }}
+      <Table size="small" rowKey={(r) => r.__k} columns={cols} dataSource={filteredRows} loading={loading}
+        rowSelection={{ selectedRowKeys: selKeys, onChange: setSelKeys, preserveSelectedRowKeys: true }}
         pagination={{ pageSize: 25, showSizeChanger: true }} scroll={{ x: 1310 }}
-        locale={{ emptyText: 'No on-hand — paste items and search' }}
-        summary={() => rows.length === 0 ? null : (
+        locale={{ emptyText: 'No on-hand — paste items (or leave blank for all) and search' }}
+        summary={() => filteredRows.length === 0 ? null : (
           <Table.Summary fixed><Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
             <Table.Summary.Cell index={-1} />
-            <Table.Summary.Cell index={0} colSpan={6}><Text strong>Total on-hand ({rows.length} row(s))</Text></Table.Summary.Cell>
+            <Table.Summary.Cell index={0} colSpan={6}><Text strong>Total on-hand ({filteredRows.length} row(s))</Text></Table.Summary.Cell>
             <Table.Summary.Cell index={6} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtQty(total)}</Text></Table.Summary.Cell>
             <Table.Summary.Cell index={7} colSpan={3} />
           </Table.Summary.Row></Table.Summary>
