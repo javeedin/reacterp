@@ -330,6 +330,42 @@ const PODetailTab: React.FC<{ poNumber: string; asn?: string; initialLines: Rece
     return Array.from(set).sort();
   }, [subinvs, lines, rcvLineData]);
 
+  // Lot / serial control per item (from itemsV2) — drives whether the receiving
+  // JSON carries lotSerialItemLots (only for lot-controlled items) and serials.
+  const [itemCtl, setItemCtl] = useState<Record<string, { lot: boolean; serial: boolean }>>({});
+  useEffect(() => {
+    const org = lines[0]?.ToOrganizationCode;
+    const nums = Array.from(new Set(lines.map(l => String(l.ItemNumber ?? '').trim()).filter(Boolean)));
+    if (!org || !nums.length) return;
+    let cancelled = false;
+    (async () => {
+      const map: Record<string, { lot: boolean; serial: boolean }> = {};
+      let idx = 0;
+      const worker = async () => {
+        while (idx < nums.length) {
+          const n = nums[idx++];
+          try {
+            const r = await fetch(`${FUSION_BASE}/itemsV2?q=OrganizationCode=${encodeURIComponent(org)};ItemNumber=${encodeURIComponent(n)}&limit=1&onlyData=true`, { headers: FUSION_HDRS });
+            if (r.ok) {
+              const it = ((await r.json()).items ?? [])[0];
+              if (it) {
+                const lc = it.LotControlCode, sc = it.SerialNumberControlCode;
+                const lot = lc != null ? Number(lc) !== 1 : /full lot/i.test(String(it.LotControlValue ?? ''));
+                const serial = sc != null ? Number(sc) !== 1 : (!!it.SerialNumberControlValue && !/no\s*serial/i.test(String(it.SerialNumberControlValue)));
+                map[n.toUpperCase()] = { lot, serial };
+              }
+            }
+          } catch { /* skip item */ }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(6, nums.length) }, worker));
+      if (!cancelled) setItemCtl(map);
+    })();
+    return () => { cancelled = true; };
+  }, [lines]);
+  const lineLotCtl = (l: ReceiptLine) => itemCtl[String(l.ItemNumber ?? '').toUpperCase()]?.lot ?? false;
+  const lineSerialCtl = (l: ReceiptLine) => itemCtl[String(l.ItemNumber ?? '').toUpperCase()]?.serial ?? false;
+
   const handleRefresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -394,15 +430,19 @@ const PODetailTab: React.FC<{ poNumber: string; asn?: string; initialLines: Rece
       UnitOfMeasure:      String(line.UnitOfMeasure ?? line.UOMCode ?? ''),
     };
     if (d?.locator) base.Locator = d.locator;
-    if (d?.lotNumber) {
+    // Only lot-controlled items carry lotSerialItemLots; serials only when the
+    // item is serial-controlled. A plain (non-lot, non-serial) item gets neither.
+    const lotCtl = lineLotCtl(line);
+    const serialCtl = lineSerialCtl(line);
+    if (lotCtl && d?.lotNumber) {
       base.lotSerialItemLots = [{
         LotNumber:           d.lotNumber,
         TransactionQuantity: d.qty,
-        ...(d.fromSerial ? { lotSerialItemSerials: [{ FromSerialNumber: d.fromSerial, ToSerialNumber: d.toSerial }] } : {}),
+        ...(serialCtl && d.fromSerial ? { lotSerialItemSerials: [{ FromSerialNumber: d.fromSerial, ToSerialNumber: d.toSerial }] } : {}),
       }];
     }
     return base;
-  }, [poNumber]);
+  }, [poNumber, itemCtl]);
 
   // One receivingReceiptRequests body per line (mirrors the WMS PL/SQL, which
   // posts each line separately with a per-line ShipmentNumber).
@@ -563,6 +603,14 @@ const PODetailTab: React.FC<{ poNumber: string; asn?: string; initialLines: Rece
       } },
     { title: 'UOM', dataIndex: 'UOMCode', key: 'UOMCode', width: 60, align: 'center' as const,
       render: (v: string) => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: <Tooltip title="Item lot / serial control — drives whether lotSerialItemLots is sent">Lot / Serial</Tooltip>, key: 'ctl', width: 120, align: 'center' as const,
+      render: (_: unknown, r: ReceiptLine) => {
+        const lot = lineLotCtl(r), ser = lineSerialCtl(r);
+        return <Space size={2}>
+          <Tag color={lot ? 'green' : 'default'} style={{ margin: 0, fontSize: 10 }}>Lot {lot ? '✓' : '✗'}</Tag>
+          <Tag color={ser ? 'blue' : 'default'} style={{ margin: 0, fontSize: 10 }}>Ser {ser ? '✓' : '✗'}</Tag>
+        </Space>;
+      } },
     { title: <span><span style={{ color: REDWOOD.primary, marginRight: 2 }}>*</span>Subinventory</span>, key: 'subinventory', width: 200,
       render: (_: unknown, r: ReceiptLine) => {
         const k = String(r.DocumentLineId ?? '');
