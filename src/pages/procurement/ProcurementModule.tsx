@@ -5,7 +5,7 @@ import {
   DatabaseOutlined, CheckCircleOutlined, LockOutlined, BugOutlined,
   ApartmentOutlined, BankOutlined, SafetyCertificateOutlined, InboxOutlined,
   DollarOutlined, ReconciliationOutlined, CloudOutlined, HistoryOutlined,
-  SwapOutlined, CarOutlined, CheckSquareOutlined, FileSearchOutlined, UploadOutlined,
+  SwapOutlined, CarOutlined, CheckSquareOutlined, FileSearchOutlined, UploadOutlined, RollbackOutlined,
   RightOutlined, SettingOutlined, ShoppingOutlined, TagsOutlined, ProfileOutlined,
   SyncOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
@@ -131,6 +131,14 @@ const procurementItems: MenuItemType[] = [
     description: 'Transfer stock between inventory organizations (search & create via SCO)',
     color: REDWOOD.info,
     path: '/procurement/transfer-orders',
+  },
+  {
+    key: 'supplier-returns', group: 'Inventory',
+    icon: <RollbackOutlined />,
+    label: 'Supplier Returns',
+    description: 'Return received PO quantities to the supplier (Return to Vendor)',
+    color: REDWOOD.primary,
+    path: '/procurement/supplier-returns',
   },
   {
     key: 'shipment-lines', group: 'Inventory',

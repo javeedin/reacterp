@@ -145,6 +145,7 @@ const PriceList               = lazy(() => import('./pages/procurement').then(m 
 const PurchaseOrderLoading    = lazy(() => import('./pages/procurement').then(m => ({ default: m.PurchaseOrderLoading })));
 const ItemLoading             = lazy(() => import('./pages/procurement').then(m => ({ default: m.ItemLoading })));
 const StockOnhand             = lazy(() => import('./pages/procurement').then(m => ({ default: m.StockOnhand })));
+const SupplierReturns         = lazy(() => import('./pages/procurement').then(m => ({ default: m.SupplierReturns })));
 const FusionArchitecture      = lazy(() => import('./pages/procurement').then(m => ({ default: m.FusionArchitecture })));
 const ParallelRunStrategy     = lazy(() => import('./pages/procurement').then(m => ({ default: m.ParallelRunStrategy })));
 const SetupDataExplorer       = lazy(() => import('./pages/procurement').then(m => ({ default: m.SetupDataExplorer })));
@@ -298,6 +299,7 @@ function App() {
               <Route path="procurement/po-loading" element={<PurchaseOrderLoading />} />
               <Route path="procurement/item-loading" element={<ItemLoading />} />
               <Route path="procurement/onhand-loading" element={<StockOnhand />} />
+              <Route path="procurement/supplier-returns" element={<SupplierReturns />} />
               <Route path="procurement/architecture" element={<FusionArchitecture />} />
               <Route path="procurement/parallel-run" element={<ParallelRunStrategy />} />
               <Route path="procurement/setup-data/financials" element={<SetupDataExplorer defaultModule="Financials" />} />
