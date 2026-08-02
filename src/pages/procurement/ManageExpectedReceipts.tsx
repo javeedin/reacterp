@@ -367,10 +367,16 @@ const PODetailTab: React.FC<{ poNumber: string; asn?: string; initialLines: Rece
   // Map one PO line + its receiving data into a receivingReceiptRequests line.
   const mapReceiveLine = useCallback((line: ReceiptLine, d: RcvData): Record<string, unknown> => {
     const lr = line as Record<string, unknown>;
+    // Receiving against an Advance Shipment Notice: match on the specific expected
+    // shipment line, not the PO schedule. Without the shipment reference Fusion
+    // resolves to the PO line (over-receipt tolerance 0) — which is what raises
+    // "quantity must be less than the tolerance quantity of 0", especially when an
+    // ASN is split across multiple shipment lines (e.g. 9 → 1 + 8).
+    const isAsn = String(line.SourceDocumentCode ?? '').toUpperCase() === 'ASN' || !!String(line.ASNNumber ?? '').trim();
     const base: Record<string, unknown> = {
       POHeaderId:       String(lr.POHeaderId ?? ''),
       POLineLocationId: String(lr.POLineLocationId ?? ''),
-      SourceDocumentCode: String(line.SourceDocumentCode ?? 'PO'),
+      SourceDocumentCode: isAsn ? 'ASN' : String(line.SourceDocumentCode ?? 'PO'),
       ReceiptSourceCode:  String(lr.ReceiptSourceCode ?? 'VENDOR'),
       TransactionType:    'RECEIVE',
       AutoTransactCode:   'DELIVER',
@@ -383,6 +389,14 @@ const PODetailTab: React.FC<{ poNumber: string; asn?: string; initialLines: Rece
       FromOrganizationCode: null,
       UnitOfMeasure:      String(line.UnitOfMeasure ?? line.UOMCode ?? ''),
     };
+    if (isAsn) {
+      // Point the receipt at the exact expected shipment line so its own available
+      // quantity (1 or 8) is used, not the PO schedule's.
+      if (lr.ShipmentHeaderId != null && lr.ShipmentHeaderId !== '') base.ShipmentHeaderId = String(lr.ShipmentHeaderId);
+      if (lr.ShipmentLineId != null && lr.ShipmentLineId !== '') base.ShipmentLineId = String(lr.ShipmentLineId);
+      if (String(line.ASNNumber ?? '').trim()) base.ASNNumber = String(line.ASNNumber).trim();
+      if (lr.ASNLineNumber != null && lr.ASNLineNumber !== '') base.ASNLineNumber = String(lr.ASNLineNumber);
+    }
     if (d?.locator) base.Locator = d.locator;
     if (d?.lotNumber) {
       base.lotSerialItemLots = [{
