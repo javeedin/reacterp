@@ -55,6 +55,122 @@ const ALL_ORGS = '__ALL__';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Search on-hand
+// ── Inventory-transaction modal — issue / receive / subinventory transfer ─────
+type TxnKind = 'issue' | 'receipt' | 'transfer';
+const TX_TYPE_NAME: Record<TxnKind, string> = { issue: 'Miscellaneous issue', receipt: 'Miscellaneous receipt', transfer: 'Subinventory transfer' };
+const TX_LABEL: Record<TxnKind, string> = { issue: 'Issue Out', receipt: 'Receive', transfer: 'Subinventory Transfer' };
+interface TxnLine { key: string; item: string; org: string; fromSub: string; toSub: string; lot: string; uom?: string; avail: number; qty: number; status?: 'pending' | 'ok' | 'error'; message?: string; }
+
+const TxnModal: React.FC<{ kind: TxnKind | null; rows: any[]; onClose: () => void; onDone: () => void }> = ({ kind, rows, onClose, onDone }) => {
+  const [date, setDate] = useState<Dayjs>(dayjs());
+  const [account, setAccount] = useState('');
+  const [destSub, setDestSub] = useState<string>('');
+  const [lines, setLines] = useState<TxnLine[]>([]);
+  const [subinvs, setSubinvs] = useState<string[]>([]);
+  const [posting, setPosting] = useState(false);
+  const [jsonOpen, setJsonOpen] = useState(false);
+
+  useEffect(() => {
+    if (!kind) return;
+    setPosting(false); setDestSub(''); setAccount('');
+    setLines(rows.map((r, i) => ({
+      key: `l-${i}`, item: pf(r, ['ItemNumber']) ?? '', org: pf(r, ['OrganizationCode']) ?? '',
+      fromSub: pf(r, ['SubinventoryCode']) ?? '', toSub: '', lot: pf(r, ['LotNumber']) ?? '',
+      uom: pf(r, ['PrimaryUOMCode', 'PrimaryUnitOfMeasure', 'UOMCode']), avail: onhQtyOf(r), qty: onhQtyOf(r),
+    })));
+  }, [kind, rows]);
+
+  const org = pf(rows[0] ?? {}, ['OrganizationCode']);
+  const multiOrg = new Set(rows.map(r => pf(r, ['OrganizationCode']))).size > 1;
+  useEffect(() => {
+    if (!kind || kind !== 'transfer' || !org) return;
+    fetchJson(`${FUSION_BASE}/subinventories?q=OrganizationCode=${encodeURIComponent(org)}&onlyData=true&limit=500`)
+      .then(d => setSubinvs(Array.from(new Set((d?.items ?? []).map((i: any) => i.SecondaryInventoryName).filter(Boolean))) as string[]))
+      .catch(() => setSubinvs([]));
+  }, [kind, org]);
+
+  const upd = (key: string, patch: Partial<TxnLine>) => setLines(prev => prev.map(l => l.key === key ? { ...l, ...patch } : l));
+  const buildBody = (l: TxnLine): Record<string, any> => {
+    const body: Record<string, any> = {
+      TransactionTypeName: TX_TYPE_NAME[kind!],
+      SourceCode: 'ReactERP', SourceLineNumber: l.key,
+      OrganizationCode: l.org, ItemNumber: l.item,
+      SubinventoryCode: l.fromSub,
+      TransactionQuantity: num(l.qty),
+      TransactionUnitOfMeasure: l.uom || undefined,
+      TransactionDate: date.format('YYYY-MM-DDTHH:mm:ss'),
+    };
+    if (kind === 'transfer') body.TransferSubinventoryCode = destSub || l.toSub;
+    if (kind !== 'transfer' && account.trim()) body.DistributionAccountCombination = account.trim();
+    if (l.lot) body.lotItemLots = [{ LotNumber: l.lot, TransactionQuantity: num(l.qty) }];
+    return body;
+  };
+
+  const post = async () => {
+    if (kind === 'transfer' && !destSub && lines.every(l => !l.toSub)) { message.warning('Choose a destination subinventory'); return; }
+    const targets = lines.filter(l => num(l.qty) > 0 && !l.status);
+    if (!targets.length) { message.warning('Nothing to post'); return; }
+    setPosting(true);
+    for (const l of targets) {
+      upd(l.key, { status: 'pending' });
+      try {
+        const r = await fetch(STAGED_TXN_URL, { method: 'POST', headers: JSON_HDRS, body: JSON.stringify(buildBody(l)) });
+        const txt = await r.text(); let d: any = null; try { d = JSON.parse(txt); } catch { /* raw */ }
+        upd(l.key, r.ok ? { status: 'ok', message: `Staged #${d?.TransactionInterfaceId ?? ''}` } : { status: 'error', message: errOf(d, txt) });
+      } catch (e: any) { upd(l.key, { status: 'error', message: e?.message ?? String(e) }); }
+    }
+    setPosting(false); onDone();
+    message.success('Done — see per-line status');
+  };
+
+  const cols: ColumnsType<TxnLine> = [
+    { title: 'Item', dataIndex: 'item', width: 160, render: v => <Text strong>{v}</Text> },
+    { title: 'Org', dataIndex: 'org', width: 120, render: v => <Tag>{v}</Tag> },
+    { title: kind === 'transfer' ? 'From Subinv' : 'Subinventory', dataIndex: 'fromSub', width: 130, render: v => v ? <Tag color="cyan">{v}</Tag> : '—' },
+    ...(kind === 'transfer' ? [{ title: 'To Subinv', dataIndex: 'toSub', width: 150, render: (_: any, l: TxnLine) => (
+        <Select size="small" showSearch allowClear style={{ width: 130 }} value={l.toSub || destSub || undefined} placeholder="Dest"
+          options={Array.from(new Set([...subinvs, l.toSub].filter(Boolean))).map(s => ({ value: s, label: s }))}
+          onChange={x => upd(l.key, { toSub: x || '' })} /> ) } as any] : []),
+    { title: 'Lot', dataIndex: 'lot', width: 130, render: v => v ? <Tag color="geekblue">{v}</Tag> : '—' },
+    { title: 'Avail', dataIndex: 'avail', width: 80, align: 'right' as const, render: v => fmtQty(v) },
+    { title: 'Qty', dataIndex: 'qty', width: 100, align: 'right' as const, render: (v, l) => <InputNumber size="small" min={0} max={kind === 'receipt' ? undefined : l.avail} value={v} onChange={n => upd(l.key, { qty: Number(n) || 0 })} style={{ width: 90 }} /> },
+    { title: 'UOM', dataIndex: 'uom', width: 60, render: v => v ?? '—' },
+    { title: 'Status', width: 150, render: (_, l) => l.status === 'pending' ? <Spin size="small" />
+      : l.status === 'ok' ? <Tooltip title={l.message}><Tag color="green" icon={<CheckCircleTwoTone twoToneColor={REDWOOD.success} />}>Staged</Tag></Tooltip>
+      : l.status === 'error' ? <Tooltip title={l.message}><Tag color="red" icon={<CloseCircleTwoTone twoToneColor={REDWOOD.error} />} style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.message}</Tag></Tooltip>
+      : <Text type="secondary">—</Text> },
+  ];
+
+  return (
+    <Modal open={!!kind} onCancel={() => { if (!posting) onClose(); }} width={960} maskClosable={false}
+      title={<Space>{kind === 'issue' ? <LogoutOutlined /> : kind === 'receipt' ? <LoginOutlined /> : <DatabaseOutlined />}{kind ? TX_LABEL[kind] : ''} — {rows.length} line(s)</Space>}
+      footer={<Space>
+        <Button onClick={onClose} disabled={posting}>Close</Button>
+        {lines.length > 0 && <Button icon={<ApiOutlined />} onClick={() => setJsonOpen(true)}>View JSON</Button>}
+        <Button type="primary" loading={posting} onClick={post}
+          style={{ background: kind === 'issue' ? REDWOOD.primary : REDWOOD.success, borderColor: kind === 'issue' ? REDWOOD.primary : REDWOOD.success }}>
+          {kind ? TX_LABEL[kind] : ''}
+        </Button>
+      </Space>}>
+      {multiOrg && <Alert type="warning" showIcon style={{ marginBottom: 10 }} message="Selected rows span multiple organizations — transactions post per row's own org." />}
+      <Row gutter={12} style={{ marginBottom: 10 }}>
+        <Col xs={12} md={6}><div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Transaction Date</div>
+          <DatePicker style={{ width: '100%' }} value={date} onChange={d => d && setDate(d)} allowClear={false} /></Col>
+        {kind === 'transfer'
+          ? <Col xs={12} md={6}><div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Destination subinventory (all)</div>
+              <Select showSearch allowClear style={{ width: '100%' }} value={destSub || undefined} placeholder="Apply to all lines"
+                options={subinvs.map(s => ({ value: s, label: s }))} onChange={v => setDestSub(v || '')} /></Col>
+          : <Col xs={12} md={6}><div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Account (optional)</div>
+              <Input value={account} onChange={e => setAccount(e.target.value)} placeholder="Code combination" /></Col>}
+      </Row>
+      <Table size="small" rowKey="key" columns={cols} dataSource={lines} pagination={false} scroll={{ x: 900, y: 340 }} />
+      <Modal open={jsonOpen} onCancel={() => setJsonOpen(false)} width={720} title={`POST ${STAGED_TXN_URL}`} footer={<Button onClick={() => setJsonOpen(false)}>Close</Button>}>
+        <pre style={{ maxHeight: 380, overflow: 'auto', background: REDWOOD.neutral100, padding: 10, borderRadius: 6, fontSize: 11 }}>{JSON.stringify(lines.map(buildBody), null, 2)}</pre>
+      </Modal>
+    </Modal>
+  );
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 const SearchOnhand: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   const [org, setOrg] = useState<string>(ALL_ORGS);
@@ -63,12 +179,15 @@ const SearchOnhand: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [lastUrl, setLastUrl] = useState('');
+  const [selKeys, setSelKeys] = useState<React.Key[]>([]);
+  const [txnKind, setTxnKind] = useState<TxnKind | null>(null);
+  const selectedRows = rows.filter((_, i) => selKeys.includes(String(i)));
 
   const run = useCallback(async () => {
     const orgClause = org && org !== ALL_ORGS ? `OrganizationCode=${org};` : '';
     const nums = Array.from(new Set(itemsText.split(/\r?\n|,|\t|\s{2,}/).map(s => s.trim()).filter(Boolean)));
     if (!nums.length) { message.warning('Paste one or more item numbers'); return; }
-    setLoading(true); setErr('');
+    setLoading(true); setErr(''); setSelKeys([]);
     try {
       const out: any[] = [];
       await mapLimit(nums, 6, async (n) => {
@@ -112,16 +231,28 @@ const SearchOnhand: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
         </Col>
       </Row>
       {err && <Alert type="error" showIcon message={err} style={{ marginBottom: 12 }} />}
+      {selKeys.length > 0 && (
+        <div style={{ marginBottom: 8, padding: '6px 10px', background: REDWOOD.neutral100, borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <Text strong style={{ fontSize: 12 }}>{selKeys.length} selected</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>— perform an inventory transaction:</Text>
+          <Button size="small" icon={<LogoutOutlined />} onClick={() => setTxnKind('issue')} style={{ color: REDWOOD.primary, borderColor: REDWOOD.primary }}>Issue Out</Button>
+          <Button size="small" icon={<LoginOutlined />} onClick={() => setTxnKind('receipt')} style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}>Receive</Button>
+          <Button size="small" icon={<DatabaseOutlined />} onClick={() => setTxnKind('transfer')} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Subinventory Transfer</Button>
+        </div>
+      )}
       <Table size="small" rowKey={(_, i) => String(i)} columns={cols} dataSource={rows} loading={loading}
-        pagination={{ pageSize: 25, showSizeChanger: true }} scroll={{ x: 1260 }}
+        rowSelection={{ selectedRowKeys: selKeys, onChange: setSelKeys, preserveSelectedRowKeys: false }}
+        pagination={{ pageSize: 25, showSizeChanger: true }} scroll={{ x: 1310 }}
         locale={{ emptyText: 'No on-hand — paste items and search' }}
         summary={() => rows.length === 0 ? null : (
           <Table.Summary fixed><Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+            <Table.Summary.Cell index={-1} />
             <Table.Summary.Cell index={0} colSpan={6}><Text strong>Total on-hand ({rows.length} row(s))</Text></Table.Summary.Cell>
             <Table.Summary.Cell index={6} align="right"><Text strong style={{ color: REDWOOD.success }}>{fmtQty(total)}</Text></Table.Summary.Cell>
             <Table.Summary.Cell index={7} colSpan={3} />
           </Table.Summary.Row></Table.Summary>
         )} />
+      <TxnModal kind={txnKind} rows={selectedRows} onClose={() => setTxnKind(null)} onDone={() => { setSelKeys([]); run(); }} />
     </div>
   );
 };
