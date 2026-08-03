@@ -152,6 +152,45 @@ const CostManagement: React.FC = () => {
   const persist = (next: CostStep[]) => { setSteps(next); localStorage.setItem(STEPS_KEY, JSON.stringify(next)); };
   const updateStep = (key: string, field: keyof CostStep, value: string) =>
     persist(steps.map(s => s.key === key ? { ...s, [field]: value } : s));
+  const updateStepFields = (key: string, patch: Partial<CostStep>) =>
+    persist(steps.map(s => s.key === key ? { ...s, ...patch } : s));
+
+  // Learn the JobPackageName / JobDefName for a step from one of its completed
+  // ESS requests (the Process ID from Scheduled Processes). The scheduler detail
+  // carries the job definition + package, so we don't have to hardcode them.
+  const [probeIds, setProbeIds] = useState<Record<string, string>>({
+    '1': '1697657', '2': '1697653', '3': '1697660', '4': '1697667', '5': '',
+  });
+  const [detecting, setDetecting] = useState<Record<string, boolean>>({});
+
+  const detectFromRequest = async (stepKey: string) => {
+    const reqId = (probeIds[stepKey] || '').trim();
+    if (!reqId) { message.warning('Enter a Process ID (from Scheduled Processes) first.'); return; }
+    setDetecting(prev => ({ ...prev, [stepKey]: true }));
+    try {
+      const res = await fetch(`${SCHEDULER_URL}/${reqId}`, { headers: HDRS });
+      const text = await res.text();
+      let d: any = {}; try { d = JSON.parse(text); } catch { /* non-json */ }
+      if (!res.ok) { Modal.error({ title: `Request ${reqId} — HTTP ${res.status}`, width: 620, content: <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 260, overflow: 'auto' }}>{text}</pre> }); return; }
+      // Try the common field names the scheduler exposes.
+      let pkg = d.jobPackageName ?? d.jobDefinitionPackage ?? d.packageName ?? d.jobPackage ?? '';
+      let def = d.jobDefinitionName ?? d.jobDefName ?? d.definitionName ?? d.jobName ?? '';
+      // Some pods return one combined "package/DefName" path.
+      if (!pkg && def && String(def).includes('/')) { const parts = String(def).split('/'); def = parts.pop() || ''; pkg = parts.join('/'); }
+      if (!def) {
+        Modal.info({ title: `No job coordinates in request ${reqId}`, width: 640,
+          content: <div style={{ fontSize: 12 }}><p>Couldn't find the job package/definition automatically. Copy them from this response into the Job Package / Job Definition fields:</p>
+            <pre style={{ fontSize: 10.5, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 320, overflow: 'auto', background: '#0d0d0d', color: '#79c0ff', padding: 8, borderRadius: 4 }}>{JSON.stringify(d, null, 2)}</pre></div> });
+        return;
+      }
+      updateStepFields(stepKey, { jobPackage: String(pkg || ''), jobDef: String(def) });
+      message.success(`Detected job: ${def}`);
+    } catch (e: any) {
+      Modal.error({ title: 'Detect — network error', content: e?.message });
+    } finally {
+      setDetecting(prev => ({ ...prev, [stepKey]: false }));
+    }
+  };
 
   // ── Submit an ESS job via erpintegrations / submitESSJobRequest ─────────────
   const submitBody = (s: CostStep) => ({
@@ -270,6 +309,14 @@ ${JSON.stringify(body, null, 2)}`}
       render: (v, r) => <Input size="small" value={v} placeholder="JobDefName" onChange={e => updateStep(r.key, 'jobDef', e.target.value)} style={{ fontFamily: 'monospace', fontSize: 11 }} /> },
     { title: 'Params', dataIndex: 'params', width: 150,
       render: (v, r) => <Input size="small" value={v} placeholder="p1,p2,…" onChange={e => updateStep(r.key, 'params', e.target.value)} style={{ fontSize: 11 }} /> },
+    { title: <Tooltip title="Fill Job Package + Definition automatically from a completed run of this process (its Process ID from Scheduled Processes)">Detect from run</Tooltip>, key: 'detect', width: 190,
+      render: (_, r) => (
+        <Space.Compact size="small" style={{ width: '100%' }}>
+          <Input size="small" value={probeIds[r.key] ?? ''} placeholder="Process ID" style={{ fontSize: 11 }}
+            onChange={e => setProbeIds(prev => ({ ...prev, [r.key]: e.target.value }))} />
+          <Button size="small" loading={detecting[r.key]} onClick={() => detectFromRequest(r.key)}>Detect</Button>
+        </Space.Compact>
+      ) },
     { title: 'Run', key: 'run', width: 90, fixed: 'right',
       render: (_, r) => <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => confirmRun(r)}
         style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Run</Button> },
@@ -327,19 +374,21 @@ ${JSON.stringify(body, null, 2)}`}
                     <>
                       <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
                         message="Costing flow after a PO receipt"
-                        description="Run each step in order with the Run button. Params are pre-filled from Process Details — adjust if needed. Fill the Job Package + Job Definition once per pod (saved locally). Use the ↻ next to each status, or Refresh all, to poll the ESS request." />
+                        description={<>First click <b>Detect all</b> to learn each job's package/definition from a completed run (Process IDs are pre-filled from your recent runs), then hit <b>Run</b> on each step in order. Params are pre-filled from Process Details. Poll status with the ↻ button or Refresh all.</>} />
                       <Steps
                         direction="horizontal" size="small" responsive
                         current={-1}
                         style={{ marginBottom: 16 }}
                         items={steps.map(s => ({ title: `${s.seq}`, description: s.name.length > 28 ? s.name.slice(0, 28) + '…' : s.name }))}
                       />
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                        <Button size="small" type="primary" icon={<ApiOutlined />} onClick={() => steps.forEach(s => { if ((probeIds[s.key] || '').trim()) detectFromRequest(s.key); })}
+                          style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>Detect all job coordinates</Button>
                         <Button size="small" icon={<ReloadOutlined />} onClick={() => Object.keys(stepRuns).forEach(k => refreshStep(k))}
                           disabled={Object.keys(stepRuns).length === 0}>Refresh all statuses</Button>
                         <Text type="secondary" style={{ fontSize: 11 }}>Submits via <Text code style={{ fontSize: 10 }}>submitESSJobRequest</Text>, polls via <Text code style={{ fontSize: 10 }}>getESSJobStatus</Text>.</Text>
                       </div>
-                      <Table rowKey="key" size="small" bordered dataSource={steps} columns={flowColumns} pagination={false} scroll={{ x: 1500 }} />
+                      <Table rowKey="key" size="small" bordered dataSource={steps} columns={flowColumns} pagination={false} scroll={{ x: 1700 }} />
                     </>
                   ),
                 },
