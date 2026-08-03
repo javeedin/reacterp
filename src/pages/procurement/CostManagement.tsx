@@ -45,26 +45,38 @@ interface CostStep {
 
 // Default costing flow after a PO receipt. Job package/def are left blank —
 // fill them from Scheduled Processes → Process Details for your instance.
+// Params are positional ESSParameters (comma-separated), taken from Scheduled
+// Processes → Process Details → "All Parameter Values" for each job. Empty
+// positions = null. Job Package / Definition are filled per pod.
 const DEFAULT_STEPS: CostStep[] = [
   { key: '1', seq: 1, name: 'Transfer Transactions from Receiving to Costing', subledger: 'Receipt Accounting',
     description: 'Pulls receiving transactions into costing.', jobPackage: '', jobDef: '', params: '' },
   { key: '2', seq: 2, name: 'Transfer Transactions from Inventory to Costing', subledger: 'Cost Accounting',
-    description: 'Pulls the inventory delivery transactions into costing.', jobPackage: '', jobDef: '', params: '' },
+    description: 'Pulls the inventory delivery transactions into costing. Params: Cost Organization, Commit Limit.', jobPackage: '', jobDef: '', params: ',500000' },
   { key: '3', seq: 3, name: 'Create Receipt Accounting Distributions', subledger: 'Receipt Accounting',
-    description: 'Costs & creates distributions for the receipt / accrual side.', jobPackage: '', jobDef: '', params: '' },
+    description: 'Costs & creates distributions for the receipt / accrual side. Commit 100000, 10 workers.', jobPackage: '', jobDef: '', params: ',,100000,10,0,,,,,' },
   { key: '4', seq: 4, name: 'Create Cost Accounting Distributions', subledger: 'Cost Accounting',
-    description: 'The cost processor — values transactions and creates cost distributions.', jobPackage: '', jobDef: '', params: '' },
+    description: 'The cost processor — values transactions and creates cost distributions. Run Control AMS_RUN_CTRL.', jobPackage: '', jobDef: '', params: 'AMS_RUN_CTRL' },
   { key: '5', seq: 5, name: 'Create Accounting (Cost & Receipt Accounting)', subledger: 'Subledger Accounting',
     description: 'Creates subledger journal entries and (optionally) posts to GL.', jobPackage: '', jobDef: '', params: '' },
 ];
 
 const STEPS_KEY = 'cost_mgmt_steps';
+// Merge saved steps over the defaults by name: keep the user's Job Package/Definition
+// and any params they set, but pick up new default params where they left it blank.
 const loadSteps = (): CostStep[] => {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STEPS_KEY) || 'null');
-    if (Array.isArray(saved) && saved.length) return saved;
-  } catch { /* ignore */ }
-  return DEFAULT_STEPS;
+  let saved: CostStep[] = [];
+  try { const s = JSON.parse(localStorage.getItem(STEPS_KEY) || 'null'); if (Array.isArray(s)) saved = s; } catch { /* ignore */ }
+  return DEFAULT_STEPS.map(def => {
+    const prev = saved.find(s => s.name === def.name);
+    if (!prev) return def;
+    return {
+      ...def,
+      jobPackage: prev.jobPackage || def.jobPackage,
+      jobDef:     prev.jobDef || def.jobDef,
+      params:     (prev.params && prev.params.trim()) ? prev.params : def.params,
+    };
+  });
 };
 
 interface EssJob {
@@ -89,6 +101,8 @@ const CostManagement: React.FC = () => {
   const [steps, setSteps] = useState<CostStep[]>(loadSteps());
   const [jobs, setJobs]   = useState<EssJob[]>([]);
   const [checkId, setCheckId] = useState('');
+  // Per-step last run: request id + latest status, shown inline on the Cost Flow tab.
+  const [stepRuns, setStepRuns] = useState<Record<string, { reqId: string; status: string; at: string; busy?: boolean }>>({});
 
   // ── ESS Monitor (Scheduler REST — list all requests) ────────────────────────
   const [monRows, setMonRows]       = useState<any[]>([]);
@@ -190,10 +204,26 @@ ${JSON.stringify(body, null, 2)}`}
         status: 'RUNNING', submittedAt: new Date().toLocaleString(), response: text,
       };
       setJobs(prev => [job, ...prev]);
+      setStepRuns(prev => ({ ...prev, [s.key]: { reqId: String(reqId), status: 'RUNNING', at: new Date().toLocaleTimeString() } }));
       message.success(`Submitted — request ${reqId}`);
       refreshJob(job.requestId);
+      refreshStep(s.key, String(reqId));
     } catch (e: any) {
       Modal.error({ title: 'Submit — network error', content: e?.message });
+    }
+  };
+
+  // Refresh the status of a step's last submitted request (Cost Flow tab).
+  const refreshStep = async (stepKey: string, reqIdOverride?: string) => {
+    const reqId = reqIdOverride ?? stepRuns[stepKey]?.reqId;
+    if (!reqId) return;
+    setStepRuns(prev => ({ ...prev, [stepKey]: { ...prev[stepKey], busy: true } }));
+    try {
+      const { status, raw } = await fetchStatus(reqId);
+      setStepRuns(prev => ({ ...prev, [stepKey]: { reqId, status, at: new Date().toLocaleTimeString() } }));
+      setJobs(prev => prev.map(j => j.requestId === reqId ? { ...j, status, response: raw } : j));
+    } catch {
+      setStepRuns(prev => ({ ...prev, [stepKey]: { ...prev[stepKey], busy: false } }));
     }
   };
 
@@ -240,6 +270,20 @@ ${JSON.stringify(body, null, 2)}`}
       render: (v, r) => <Input size="small" value={v} placeholder="JobDefName" onChange={e => updateStep(r.key, 'jobDef', e.target.value)} style={{ fontFamily: 'monospace', fontSize: 11 }} /> },
     { title: 'Params', dataIndex: 'params', width: 150,
       render: (v, r) => <Input size="small" value={v} placeholder="p1,p2,…" onChange={e => updateStep(r.key, 'params', e.target.value)} style={{ fontSize: 11 }} /> },
+    { title: 'Run', key: 'run', width: 90, fixed: 'right',
+      render: (_, r) => <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => confirmRun(r)}
+        style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Run</Button> },
+    { title: 'Status', key: 'status', width: 210, fixed: 'right', render: (_, r) => {
+        const run = stepRuns[r.key];
+        if (!run) return <Text type="secondary" style={{ fontSize: 11 }}>—</Text>;
+        return (
+          <Space size={4} wrap>
+            <Tooltip title={`Request ${run.reqId} · ${run.at}`}><Text code style={{ fontSize: 10 }}>{run.reqId}</Text></Tooltip>
+            <Tag color={statusColor(run.status) as any} style={{ fontSize: 10, margin: 0 }}>{run.status}</Tag>
+            <Button size="small" type="text" icon={<ReloadOutlined spin={run.busy} />} onClick={() => refreshStep(r.key)} />
+          </Space>
+        );
+      } },
   ];
 
   // ── ESS tab: per-step run + jobs monitor ────────────────────────────────────
@@ -283,14 +327,19 @@ ${JSON.stringify(body, null, 2)}`}
                     <>
                       <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
                         message="Costing flow after a PO receipt"
-                        description="Run these in order (steps 1–4 are often on a schedule). Fill the Job Package + Job Definition for each from Scheduled Processes → Process Details on your pod; they are saved locally and used by the ESS tab." />
+                        description="Run each step in order with the Run button. Params are pre-filled from Process Details — adjust if needed. Fill the Job Package + Job Definition once per pod (saved locally). Use the ↻ next to each status, or Refresh all, to poll the ESS request." />
                       <Steps
                         direction="horizontal" size="small" responsive
                         current={-1}
                         style={{ marginBottom: 16 }}
                         items={steps.map(s => ({ title: `${s.seq}`, description: s.name.length > 28 ? s.name.slice(0, 28) + '…' : s.name }))}
                       />
-                      <Table rowKey="key" size="small" bordered dataSource={steps} columns={flowColumns} pagination={false} scroll={{ x: 1200 }} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <Button size="small" icon={<ReloadOutlined />} onClick={() => Object.keys(stepRuns).forEach(k => refreshStep(k))}
+                          disabled={Object.keys(stepRuns).length === 0}>Refresh all statuses</Button>
+                        <Text type="secondary" style={{ fontSize: 11 }}>Submits via <Text code style={{ fontSize: 10 }}>submitESSJobRequest</Text>, polls via <Text code style={{ fontSize: 10 }}>getESSJobStatus</Text>.</Text>
+                      </div>
+                      <Table rowKey="key" size="small" bordered dataSource={steps} columns={flowColumns} pagination={false} scroll={{ x: 1500 }} />
                     </>
                   ),
                 },
