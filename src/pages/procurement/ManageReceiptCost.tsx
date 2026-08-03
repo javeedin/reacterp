@@ -180,10 +180,8 @@ const buildQueryUrl = (vals: SearchVals): string => {
   const clauses: string[] = [];
   if (vals.inventoryOrg) clauses.push(`InventoryOrganizationName=${vals.inventoryOrg}`);
   if (vals.reference)    clauses.push(`ReferenceNumber=${vals.reference}`);
-  // Fusion q row-finder: string literals use single quotes and % as the wildcard.
-  // The previous `Item like "val*"` (double quotes, * wildcard) was invalid syntax
-  // and got silently dropped, so the item filter was never applied.
-  if (vals.item)         clauses.push(`Item LIKE '${String(vals.item).trim()}%'`);
+  // Exact item match (Item=<value>), not a LIKE prefix.
+  if (vals.item)         clauses.push(`Item=${String(vals.item).trim()}`);
   if (vals.costDate) {
     const op = vals.costDateOp || '=';
     const d = typeof vals.costDate === 'string' ? vals.costDate : dayjs(vals.costDate).format('YYYY-MM-DD');
