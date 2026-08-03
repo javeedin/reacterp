@@ -928,6 +928,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
   const [apiTestLoading, setATL]    = useState(false);
   const [apiResult, setApiResult]   = useState<{ status: number; body: string } | null>(null);
   const [lineCountMap, setLineCountMap] = useState<Map<number, number>>(new Map());
+  const [shipToMap, setShipToMap] = useState<Map<number, string>>(new Map());
   const [lineCountsLoading, setLineCountsLoading] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const [approving, setApproving]       = useState(false);
@@ -1003,23 +1004,30 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
   };
 
   const fetchLineCounts = useCallback(async (pos: RawPO[]) => {
-    if (pos.length === 0) { setLineCountMap(new Map()); return; }
+    if (pos.length === 0) { setLineCountMap(new Map()); setShipToMap(new Map()); return; }
     setLineCountsLoading(true);
     try {
       const results = await Promise.allSettled(
         pos.map(async (po) => {
+          // One call gets the line count (totalResults) and, via the expanded
+          // schedule, the ship-to location (which lives on the schedule, not the header).
           const r = await fetch(
-            `${BASE_URL}/purchaseOrders/${po.POHeaderId}/child/lines?limit=1&totalResults=true`,
+            `${BASE_URL}/purchaseOrders/${po.POHeaderId}/child/lines?limit=1&totalResults=true&expand=schedules`,
             { headers: { Authorization: AUTH_HEADER, Accept: 'application/json' } }
           );
-          if (!r.ok) return { id: po.POHeaderId, count: 0 };
+          if (!r.ok) return { id: po.POHeaderId, count: 0, shipTo: '' };
           const j = await r.json();
-          return { id: po.POHeaderId, count: j.totalResults ?? j.count ?? (j.items?.length ?? 0) };
+          const line = j.items?.[0];
+          const sched = line?.schedules?.items?.[0] ?? line?.schedules?.[0];
+          const shipTo = sched?.ShipToLocationCode ?? sched?.ShipToLocation ?? '';
+          return { id: po.POHeaderId, count: j.totalResults ?? j.count ?? (j.items?.length ?? 0), shipTo: String(shipTo) };
         })
       );
       const map = new Map<number, number>();
-      results.forEach(r => { if (r.status === 'fulfilled') map.set(r.value.id, r.value.count); });
+      const stMap = new Map<number, string>();
+      results.forEach(r => { if (r.status === 'fulfilled') { map.set(r.value.id, r.value.count); stMap.set(r.value.id, r.value.shipTo); } });
       setLineCountMap(map);
+      setShipToMap(stMap);
     } catch {
       // line counts are supplementary — fail silently
     } finally {
@@ -1054,7 +1062,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
     fetchLineCounts(items);
   };
 
-  const handleReset = () => { form.resetFields(); setSearchParams({}); setPage(1); setData([]); setTotal(0); setHasSearched(false); setLineCountMap(new Map()); };
+  const handleReset = () => { form.resetFields(); setSearchParams({}); setPage(1); setData([]); setTotal(0); setHasSearched(false); setLineCountMap(new Map()); setShipToMap(new Map()); };
 
   // Deep-link: ?orderNumber=<PO> (e.g. drill-down from cost-distribution reference)
   // prefills the form and runs the search automatically.
@@ -1113,6 +1121,14 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
     {
       title: 'Supplier', dataIndex: 'Supplier', ellipsis: true, width: 200,
       render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text>,
+    },
+    {
+      title: 'Ship To', key: 'shipTo', width: 150, ellipsis: true,
+      render: (_: unknown, rec: RawPO) => {
+        const st = shipToMap.get(rec.POHeaderId);
+        if (st === undefined) return lineCountsLoading ? <Spin size="small" /> : <Text type="secondary">—</Text>;
+        return st ? <Tooltip title={`Ship-to location (from first schedule)`}><Text style={{ fontSize: 12, color: REDWOOD.info }}>{st}</Text></Tooltip> : <Text type="secondary">—</Text>;
+      },
     },
     { title: 'Status', dataIndex: 'StatusCode', width: 160, render: s => getStatusTag(s) },
     {
