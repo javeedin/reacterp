@@ -162,31 +162,48 @@ const CostManagement: React.FC = () => {
     '1': '1697657', '2': '1697653', '3': '1697660', '4': '1697667', '5': '',
   });
   const [detecting, setDetecting] = useState<Record<string, boolean>>({});
+  const [detectRaw, setDetectRaw] = useState<{ id: string; step: string; raw: string } | null>(null);
 
-  const detectFromRequest = async (stepKey: string) => {
+  // Recursively find the first string value whose key matches a pattern.
+  const deepFind = (obj: any, re: RegExp): string => {
+    const stack = [obj];
+    while (stack.length) {
+      const cur = stack.pop();
+      if (cur && typeof cur === 'object') {
+        for (const [k, v] of Object.entries(cur)) {
+          if (typeof v === 'string' && v.trim() && re.test(k)) return v.trim();
+          if (v && typeof v === 'object') stack.push(v);
+        }
+      }
+    }
+    return '';
+  };
+
+  const detectFromRequest = async (stepKey: string): Promise<boolean> => {
     const reqId = (probeIds[stepKey] || '').trim();
-    if (!reqId) { message.warning('Enter a Process ID (from Scheduled Processes) first.'); return; }
+    if (!reqId) { message.warning('Enter a Process ID (from Scheduled Processes) first.'); return false; }
     setDetecting(prev => ({ ...prev, [stepKey]: true }));
     try {
       const res = await fetch(`${SCHEDULER_URL}/${reqId}`, { headers: HDRS });
       const text = await res.text();
       let d: any = {}; try { d = JSON.parse(text); } catch { /* non-json */ }
-      if (!res.ok) { Modal.error({ title: `Request ${reqId} — HTTP ${res.status}`, width: 620, content: <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 260, overflow: 'auto' }}>{text}</pre> }); return; }
-      // Try the common field names the scheduler exposes.
-      let pkg = d.jobPackageName ?? d.jobDefinitionPackage ?? d.packageName ?? d.jobPackage ?? '';
-      let def = d.jobDefinitionName ?? d.jobDefName ?? d.definitionName ?? d.jobName ?? '';
-      // Some pods return one combined "package/DefName" path.
-      if (!pkg && def && String(def).includes('/')) { const parts = String(def).split('/'); def = parts.pop() || ''; pkg = parts.join('/'); }
-      if (!def) {
-        Modal.info({ title: `No job coordinates in request ${reqId}`, width: 640,
-          content: <div style={{ fontSize: 12 }}><p>Couldn't find the job package/definition automatically. Copy them from this response into the Job Package / Job Definition fields:</p>
-            <pre style={{ fontSize: 10.5, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 320, overflow: 'auto', background: '#0d0d0d', color: '#79c0ff', padding: 8, borderRadius: 4 }}>{JSON.stringify(d, null, 2)}</pre></div> });
-        return;
-      }
-      updateStepFields(stepKey, { jobPackage: String(pkg || ''), jobDef: String(def) });
-      message.success(`Detected job: ${def}`);
+      const stepName = steps.find(s => s.key === stepKey)?.name ?? stepKey;
+      const pretty = (() => { try { return JSON.stringify(d, null, 2); } catch { return text; } })();
+      setDetectRaw({ id: reqId, step: stepName, raw: res.ok ? pretty : `HTTP ${res.status}\n\n${text}` });
+      if (!res.ok) { message.error(`Request ${reqId}: HTTP ${res.status}`); return false; }
+      // Deep-scan for package + definition under any key name the pod uses.
+      let pkg = deepFind(d, /package/i);
+      let def = deepFind(d, /(jobdef(inition)?name|definitionname|jobdefname|^jobdefinition$|^jobname$|^jobdef$)/i);
+      if (!pkg && def && def.includes('/')) { const p = def.split('/'); def = p.pop() || ''; pkg = p.join('/'); }
+      // A combined package path sometimes carries the def as its last segment.
+      if (pkg && !def && pkg.includes('/')) { const p = pkg.split('/'); def = p.pop() || ''; pkg = p.join('/'); }
+      if (!def) { message.warning(`Couldn't auto-read the job for ${reqId} — see the response below and copy Job Package / Definition manually.`); return false; }
+      updateStepFields(stepKey, { jobPackage: pkg || '', jobDef: def });
+      message.success(`Detected: ${def}`);
+      return true;
     } catch (e: any) {
       Modal.error({ title: 'Detect — network error', content: e?.message });
+      return false;
     } finally {
       setDetecting(prev => ({ ...prev, [stepKey]: false }));
     }
@@ -389,6 +406,18 @@ ${JSON.stringify(body, null, 2)}`}
                         <Text type="secondary" style={{ fontSize: 11 }}>Submits via <Text code style={{ fontSize: 10 }}>submitESSJobRequest</Text>, polls via <Text code style={{ fontSize: 10 }}>getESSJobStatus</Text>.</Text>
                       </div>
                       <Table rowKey="key" size="small" bordered dataSource={steps} columns={flowColumns} pagination={false} scroll={{ x: 1700 }} />
+                      {detectRaw && (
+                        <div style={{ marginTop: 12 }}>
+                          <Space style={{ marginBottom: 4 }}>
+                            <Text strong style={{ fontSize: 12 }}>Scheduler response — request {detectRaw.id} ({detectRaw.step})</Text>
+                            <Button size="small" type="text" onClick={() => setDetectRaw(null)}>hide</Button>
+                          </Space>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
+                            If the Job Package / Definition didn't fill, copy them from here (look for the job definition path) into the fields above.
+                          </Text>
+                          <pre style={{ fontSize: 10.5, background: '#0d0d0d', color: '#79c0ff', borderRadius: 4, padding: 8, margin: 0, maxHeight: 300, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{detectRaw.raw}</pre>
+                        </div>
+                      )}
                     </>
                   ),
                 },
