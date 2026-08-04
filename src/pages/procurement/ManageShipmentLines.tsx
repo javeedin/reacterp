@@ -19,11 +19,7 @@ const { Content } = Layout;
 const { Title, Text } = Typography;
 
 // Electron goes direct (no CORS); browser dev routes via the Vite proxy.
-const _isElectron = !!(window as unknown as { electron?: unknown; electronAPI?: unknown }).electron
-  || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
-const FUSION_BASE = _isElectron
-  ? `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`
-  : '/fusion-api';
+const FUSION_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
 const AUTH_HEADER = FUSION_POD_AUTH;
 const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 const PAGE_LIMIT = 500;

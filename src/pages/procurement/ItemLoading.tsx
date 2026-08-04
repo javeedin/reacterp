@@ -16,11 +16,7 @@ import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
 const { Content } = Layout;
 const { Title, Text } = Typography;
 
-const _isElectron = !!(window as unknown as { electron?: unknown; electronAPI?: unknown }).electron
-  || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
-const FUSION_BASE = _isElectron
-  ? `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`
-  : '/fusion-api';
+const FUSION_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
 const AUTH_HEADER = FUSION_POD_AUTH;
 const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 const JSON_HDRS = { ...FUSION_HDRS, 'Content-Type': 'application/json' };
@@ -55,7 +51,7 @@ const mapLimit = async <T, R>(items: T[], limit: number, fn: (t: T, i: number) =
 // First present value among keys.
 const pfv = (o: any, keys: string[]) => { for (const k of keys) { if (o?.[k] != null && o[k] !== '') return o[k]; } return undefined; };
 // Rewrite an absolute Fusion self href onto the proxy base (web) or keep it (electron).
-const fusionHref = (href: string) => _isElectron ? href : href.replace(/^https?:\/\/[^/]+\/fscmRestApi\/resources\/[^/]+/, '/fusion-api');
+const fusionHref = (href: string) => href;
 const RESITEM_HDRS = { ...FUSION_HDRS, 'Content-Type': 'application/vnd.oracle.adf.resourceitem+json' };
 const fetchJson = async (url: string): Promise<any> => { const r = await fetch(url, { headers: FUSION_HDRS }); return r.ok ? r.json() : null; };
 // Exact-match GET of one item in an org.

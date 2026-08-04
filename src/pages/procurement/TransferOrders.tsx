@@ -20,11 +20,7 @@ const { Title, Text } = Typography;
 
 // Electron goes direct (no CORS); browser dev routes via the Vite proxy.
 // preload exposes window.electronAPI (not window.electron) — detect via that.
-const _isElectron = !!(window as unknown as { electron?: unknown; electronAPI?: unknown }).electron
-  || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
-const FUSION_BASE = _isElectron
-  ? `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`
-  : '/fusion-api';
+const FUSION_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
 // itemCosts is exposed on the "latest" resource version (same as Manage Item Cost).
 const LATEST_URL = `${FUSION_POD_HOST}/fscmRestApi/resources/latest`;
 const AUTH_HEADER = FUSION_POD_AUTH;

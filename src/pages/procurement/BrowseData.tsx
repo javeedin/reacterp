@@ -22,9 +22,7 @@ const { Text, Title, Paragraph } = Typography;
 // direct URL under Electron) with Basic auth.
 const _isElectron = typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent)
   || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
-const FUSION_BASE = _isElectron
-  ? `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`
-  : '/fusion-api';
+const FUSION_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
 const FUSION_HDRS = { Authorization: FUSION_POD_AUTH, Accept: 'application/json' };
 
 const RW = {
