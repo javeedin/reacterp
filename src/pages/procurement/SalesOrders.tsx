@@ -74,6 +74,25 @@ const mapLimit = async <T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
   return out;
 };
 
+// Fusion PODs can be unreachable (VPN / wrong region) — without a timeout the
+// request hangs and the page spins forever. Abort after 30s with a clear error.
+const FETCH_TIMEOUT_MS = 30000;
+const fetchWithTimeout = async (url: string, init?: RequestInit): Promise<Response> => {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } catch (e: any) {
+    if (e?.name === 'AbortError') {
+      const host = (() => { try { return new URL(url, window.location.href).host; } catch { return url; } })();
+      throw new Error(`Request timed out after ${FETCH_TIMEOUT_MS / 1000}s — ${host} did not respond (check the POD/instance is reachable).`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(t);
+  }
+};
+
 const fetchAllPages = async (baseUrl: string): Promise<any[]> => {
   const stripped = baseUrl.replace(/[?&]limit=\d+/gi, '').replace(/[?&]offset=\d+/gi, '').replace(/\?&/, '?').replace(/&&/g, '&');
   const all: any[] = [];
@@ -81,7 +100,7 @@ const fetchAllPages = async (baseUrl: string): Promise<any[]> => {
   while (true) {
     const sep = stripped.includes('?') ? '&' : '?';
     const url = `${stripped}${sep}limit=${PAGE_LIMIT}&offset=${offset}`;
-    const r = await fetch(url, { headers: FUSION_HDRS });
+    const r = await fetchWithTimeout(url, { headers: FUSION_HDRS });
     if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
     const d = await r.json();
     const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
