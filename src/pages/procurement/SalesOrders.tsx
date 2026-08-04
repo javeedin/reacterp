@@ -22,7 +22,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
+import { FUSION_POD_HOST, FUSION_POD_AUTH, getFusionInstance } from '../../config/fusionInstance';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -1654,7 +1654,22 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState('');
   const [apiOpen, setApiOpen] = useState(false);
+  const [apiRun, setApiRun] = useState<{ running: boolean; status?: string; body?: string; ok?: boolean } | null>(null);
   const [filterText, setFilterText] = useState('');
+
+  // Execute an API URL straight from the dialog — shows HTTP status, timing and
+  // the raw response (or the error) so an unreachable POD is easy to diagnose.
+  const runApi = async (url: string) => {
+    setApiRun({ running: true });
+    const started = Date.now();
+    try {
+      const r = await fetchWithTimeout(url, { headers: FUSION_HDRS });
+      const text = await r.text();
+      setApiRun({ running: false, ok: r.ok, status: `HTTP ${r.status} ${r.statusText} · ${text.length} bytes · ${Date.now() - started}ms`, body: text.slice(0, 4000) });
+    } catch (e: any) {
+      setApiRun({ running: false, ok: false, status: `Failed after ${Date.now() - started}ms`, body: e?.message || String(e) });
+    }
+  };
   const [showDooRef, setShowDooRef] = useState(false);
   const [detail, setDetail] = useState<any | null>(null);
   const [totalsOrder, setTotalsOrder] = useState<any | null>(null);
@@ -1834,13 +1849,17 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
         footer={<Button onClick={() => setApiOpen(false)}>Close</Button>}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {[
-            { lbl: 'Search sales orders', url: decodeURIComponent(searchUrl) },
-            { lbl: 'Order lines (per order)', url: `${FUSION_BASE}/salesOrdersForOrderHub/{OrderKey}/child/lines` },
-          ].map(({ lbl, url }) => (
+            { lbl: 'Search sales orders', url: decodeURIComponent(searchUrl), runUrl: searchUrl },
+            { lbl: 'Order lines (per order)', url: `${FUSION_BASE}/salesOrdersForOrderHub/{OrderKey}/child/lines`, runUrl: '' },
+          ].map(({ lbl, url, runUrl }) => (
             <div key={lbl}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>{lbl}</Text>
-                <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: 'auto' }}
+                {runUrl && (
+                  <Button size="small" type="primary" icon={<ThunderboltOutlined />} style={{ marginLeft: 'auto', background: REDWOOD.success, borderColor: REDWOOD.success }}
+                    loading={apiRun?.running} onClick={() => runApi(runUrl)}>Run</Button>
+                )}
+                <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginLeft: runUrl ? 0 : 'auto' }}
                   onClick={() => { navigator.clipboard.writeText(url); message.success('Copied'); }}>Copy</Button>
               </div>
               <div style={{ marginTop: 4, padding: '8px 12px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
@@ -1848,7 +1867,21 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
               </div>
             </div>
           ))}
-          <Text type="secondary" style={{ fontSize: 11 }}>Dates unquoted (TransactionOn&gt;2026-01-16); text uses SQL LIKE; codes exact ('value'). Auth: Basic [emparun].</Text>
+          {apiRun && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>Response</Text>
+                {apiRun.status && <Tag color={apiRun.ok ? 'green' : 'red'}>{apiRun.status}</Tag>}
+              </div>
+              <div style={{ padding: '8px 12px', borderRadius: 6, background: '#1e1e1e', color: '#d4d4d4', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 260, overflow: 'auto' }}>
+                {apiRun.running ? 'Running…' : (apiRun.body || '(empty response)')}
+              </div>
+            </div>
+          )}
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            Instance: <b>{getFusionInstance().label}</b> ({getFusionInstance().host.replace(/^https?:\/\//, '')}) · Auth: Basic [{getFusionInstance().username}] ·
+            Dates unquoted; text uses SQL LIKE; codes exact ('value').
+          </Text>
         </div>
       </Modal>
 
