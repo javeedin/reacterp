@@ -709,28 +709,44 @@ const RevenueRecognition: React.FC = () => {
   // Per contract: recognized monthly cells (like the Schedule Matrix) grouped by
   // fiscal year with a yearly subtotal, plus a deferred-revenue rollforward for the
   // chosen fiscal year:
-  //   Closing (unrecognized before the FY) + Additions (invoiced in FY)
-  //     − Schedules (recognized in FY) = Available (deferred at FY end).
+  //   Closing (unrecognized before the FY) + Additions − Schedules (recognized in FY)
+  //     = Available (deferred at FY end).
+  // Additions come from RR_CONTRACTS: the full contract value of every contract
+  // whose start date falls inside the fiscal year (e.g. a contract starting
+  // 1-Apr-2026 is an addition of FY26/27).
   const glMatrix = useMemo(() => {
     const curStart = new Date(glFyStartYear, FY_START_MONTH, 1);
     const curEnd = new Date(glFyStartYear + 1, FY_START_MONTH, 1);   // exclusive
     const months: { name: string; date: string; fy: number }[] = [];
     const seen = new Set<string>();
     const byContract = new Map<number, any>();
+    const newRow = (id: number, trxNumber: any, unit: string, tenant: string) => ({ key: id, contractId: id, trxNumber, unit, tenant, cells: {} as Record<string, RevenueSchedule>, fySub: {} as Record<number, number>, closing: 0, additions: 0, additionStart: '' as string, schedulesFy: 0 });
     filteredSchedules.forEach(s => {
       const d = parseYMD(s.periodDate);
       const fy = d ? fyStartYearOf(d) : glFyStartYear;
       if (!seen.has(s.periodName)) { seen.add(s.periodName); months.push({ name: s.periodName, date: s.periodDate, fy }); }
       let row = byContract.get(s.contractId);
-      if (!row) { row = { key: s.contractId, contractId: s.contractId, trxNumber: s.trxNumber, unit: s.unit, tenant: s.tenant, cells: {} as Record<string, RevenueSchedule>, fySub: {} as Record<number, number>, closing: 0, additions: 0, schedulesFy: 0 }; byContract.set(s.contractId, row); }
+      if (!row) { row = newRow(s.contractId, s.trxNumber, s.unit, s.tenant); byContract.set(s.contractId, row); }
       row.cells[s.periodName] = s;
       const amt = Number(s.amount) || 0;
       const acct = isAccounted(s);
       if (acct) row.fySub[fy] = (row.fySub[fy] || 0) + amt;    // recognized per fiscal year (yearly subtotal)
       if (d) {
         if (d < curStart) { if (!acct) row.closing += amt; }   // invoiced-but-not-recognized before this FY
-        else if (d < curEnd) { row.additions += amt; if (acct) row.schedulesFy += amt; }
+        else if (d < curEnd && acct) row.schedulesFy += amt;   // recognized in this FY
       }
+    });
+    // Additions from the contracts table: contracts whose start date is in this FY.
+    const q = scheduleSearch.trim().toLowerCase();
+    const matchesSearch = (c: RevenueContract) => !q || [c.trxNumber, c.unit, c.location, c.tenant, c.status].some(v => v != null && String(v).toLowerCase().includes(q));
+    contracts.forEach(c => {
+      const sd = parseYMD(c.contractStartDate);
+      if (!sd || sd < curStart || sd >= curEnd) return;
+      if (!byContract.has(c.id) && !matchesSearch(c)) return;   // respect the filter for contract-only rows
+      let row = byContract.get(c.id);
+      if (!row) { row = newRow(c.id, c.trxNumber, c.unit, c.tenant); byContract.set(c.id, row); }
+      row.additions += Number(c.rentTotal) || 0;
+      row.additionStart = c.contractStartDate;
     });
     months.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const fyOrder: number[] = [];
@@ -741,7 +757,7 @@ const RevenueRecognition: React.FC = () => {
       schedulesFy: a.schedulesFy + r.schedulesFy, available: a.available + r.available,
     }), { closing: 0, additions: 0, schedulesFy: 0, available: 0 });
     return { months, fyOrder, rows, totals };
-  }, [filteredSchedules, glFyStartYear]);
+  }, [filteredSchedules, contracts, scheduleSearch, glFyStartYear]);
 
   const glColumns: ColumnsType<any> = useMemo(() => {
     const cols: ColumnsType<any> = [
@@ -770,8 +786,8 @@ const RevenueRecognition: React.FC = () => {
     cols.push(
       { title: <Tooltip title={`Invoiced but not yet recognized before ${fyLabel(glFyStartYear)} (opening deferred)`}><span>Closing (opening)</span></Tooltip>, dataIndex: 'closing', key: 'closing', width: 130, align: 'right' as const, fixed: 'right' as const,
         render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
-      { title: <Tooltip title={`Invoiced (scheduled) in ${fyLabel(glFyStartYear)} — additions`}><span>+ Additions</span></Tooltip>, dataIndex: 'additions', key: 'additions', width: 120, align: 'right' as const, fixed: 'right' as const,
-        render: (v: number) => <Text style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(v)}</Text> },
+      { title: <Tooltip title={`Contract value of contracts starting in ${fyLabel(glFyStartYear)} (from RR_AR_REVENUE_CONTRACT)`}><span>+ Additions</span></Tooltip>, dataIndex: 'additions', key: 'additions', width: 120, align: 'right' as const, fixed: 'right' as const,
+        render: (v: number, row: any) => v ? <Tooltip title={row.additionStart ? `Contract starts ${row.additionStart}` : undefined}><Text style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(v)}</Text></Tooltip> : <Text type="secondary">—</Text> },
       { title: <Tooltip title={`Recognized (accounted) in ${fyLabel(glFyStartYear)}`}><span>− Schedules</span></Tooltip>, dataIndex: 'schedulesFy', key: 'schedulesFy', width: 120, align: 'right' as const, fixed: 'right' as const,
         render: (v: number) => <Text style={{ fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{fmt(v)}</Text> },
       { title: <Tooltip title="Closing + Additions − Schedules = deferred at FY end"><span>= Available</span></Tooltip>, dataIndex: 'available', key: 'available', width: 130, align: 'right' as const, fixed: 'right' as const,
@@ -1127,7 +1143,7 @@ const RevenueRecognition: React.FC = () => {
                         <Col xs={12} md={5}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>= Available (deferred)</Text>} value={glMatrix.totals.available} precision={2} valueStyle={{ fontSize: 15, color: REDWOOD.primary }} /></Card></Col>
                       </Row>
                       <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
-                        message={<>Rollforward for <b>{fyLabel(glFyStartYear)}</b> (Apr {glFyStartYear} – Mar {glFyStartYear + 1}): <b>Closing</b> (invoiced but not recognized before the year) <b>+ Additions</b> (invoiced in the year) <b>− Schedules</b> (recognized in the year) <b>= Available</b>. Additions are taken from the invoiced schedule lines; tell me if they must come from a separate AR-invoice query.</>} />
+                        message={<>Rollforward for <b>{fyLabel(glFyStartYear)}</b> (Apr {glFyStartYear} – Mar {glFyStartYear + 1}): <b>Closing</b> (invoiced but not recognized before the year) <b>+ Additions</b> (contract value of contracts starting in the year, from RR_AR_REVENUE_CONTRACT) <b>− Schedules</b> (recognized in the year) <b>= Available</b>.</>} />
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
                         <Space wrap>
                           <Text style={{ fontSize: 12 }}>Fiscal year</Text>
