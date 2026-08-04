@@ -565,7 +565,7 @@ const ProcurementHome: React.FC = () => {
               <Tooltip title={getFusionInstance().host}>
                 <Select
                   value={getFusionInstanceKey()}
-                  style={{ minWidth: 220 }}
+                  style={{ minWidth: 140 }}
                   onChange={(key) => {
                     if (key === getFusionInstanceKey()) return;
                     const inst = FUSION_INSTANCES.find(i => i.key === key);
@@ -573,17 +573,7 @@ const ProcurementHome: React.FC = () => {
                     message.success(`Switched to ${inst?.label} — reloading…`);
                     setTimeout(() => window.location.reload(), 600);
                   }}
-                  options={FUSION_INSTANCES.map(i => ({
-                    value: i.key,
-                    label: (
-                      <span>
-                        <b>{i.label}</b>
-                        <span style={{ color: REDWOOD.neutral600, fontSize: 11, marginLeft: 8 }}>
-                          {i.host.replace(/^https?:\/\//, '')}
-                        </span>
-                      </span>
-                    ),
-                  }))}
+                  options={FUSION_INSTANCES.map(i => ({ value: i.key, label: <b>{i.label}</b> }))}
                 />
               </Tooltip>
             </div>
