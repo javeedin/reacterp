@@ -5,12 +5,13 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { HomeOutlined, SafetyCertificateOutlined, SearchOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
+import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
 
-const FUSION_BASE = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
-const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
+const FUSION_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
+const AUTH_HEADER = FUSION_POD_AUTH;
 const HEADERS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 
 const REDWOOD = {

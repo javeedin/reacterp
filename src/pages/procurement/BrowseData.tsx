@@ -5,6 +5,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
+import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
 import {
   DatabaseOutlined, ApiOutlined, PlayCircleOutlined, ReloadOutlined, CheckCircleTwoTone,
   CloseCircleTwoTone, MinusCircleOutlined, LoadingOutlined, SearchOutlined, CopyOutlined,
@@ -22,9 +23,9 @@ const { Text, Title, Paragraph } = Typography;
 const _isElectron = typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent)
   || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
 const FUSION_BASE = _isElectron
-  ? 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05'
+  ? `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`
   : '/fusion-api';
-const FUSION_HDRS = { Authorization: 'Basic ' + btoa('emparun:Fusion@1234'), Accept: 'application/json' };
+const FUSION_HDRS = { Authorization: FUSION_POD_AUTH, Accept: 'application/json' };
 
 const RW = {
   primary: '#C74634', info: '#0572CE', success: '#1D7B4D', warn: '#D4A800', error: '#C74634',
