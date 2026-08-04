@@ -759,42 +759,41 @@ const RevenueRecognition: React.FC = () => {
     return { months, fyOrder, rows, totals };
   }, [filteredSchedules, contracts, scheduleSearch, glFyStartYear]);
 
+  // Only the selected fiscal year's periods are shown (Apr..Mar); everything before
+  // it is collapsed into the single Opening-balance column.
+  const glFyMonths = useMemo(() => glMatrix.months.filter(m => m.fy === glFyStartYear), [glMatrix.months, glFyStartYear]);
+  const openingLabel = `Opening (Mar-${String(glFyStartYear % 100).padStart(2, '0')})`;
+
   const glColumns: ColumnsType<any> = useMemo(() => {
     const cols: ColumnsType<any> = [
       { title: 'Trx #', dataIndex: 'trxNumber', key: 'trxNumber', width: 90, fixed: 'left' as const, render: (v: any) => <Text strong>{v ?? '—'}</Text> },
       { title: 'Unit', dataIndex: 'unit', key: 'unit', width: 110, fixed: 'left' as const },
       { title: 'Tenant', dataIndex: 'tenant', key: 'tenant', width: 150, fixed: 'left' as const, ellipsis: true },
-    ];
-    glMatrix.fyOrder.forEach(fy => {
-      glMatrix.months.filter(m => m.fy === fy).forEach(m => {
-        cols.push({
-          title: m.name, key: m.name, width: 100, align: 'center' as const,
-          render: (_: any, row: any) => {
-            const s: RevenueSchedule | undefined = row.cells[m.name];
-            if (!s) return <Text type="secondary">—</Text>;
-            const acct = isAccounted(s);
-            return <div style={{ fontFamily: 'monospace', fontSize: 12, color: acct ? undefined : REDWOOD.neutral500 }}>{acct ? fmt(s.amount) : fmt(0)}</div>;
-          },
-        });
-      });
-      cols.push({
-        title: <Tooltip title={`Recognized in ${fyLabel(fy)}`}><span>{fyLabel(fy)}</span></Tooltip>, key: `fy-${fy}`, width: 120, align: 'right' as const,
+      { title: <Tooltip title={`Opening balance as of Mar-${String(glFyStartYear % 100).padStart(2, '0')} (position carried into ${fyLabel(glFyStartYear)})`}><span>{openingLabel}</span></Tooltip>, dataIndex: 'closing', key: 'closing', width: 130, align: 'right' as const,
         onCell: () => ({ style: { background: '#f6faf6' } }),
-        render: (_: any, row: any) => <Text strong style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmt(row.fySub[fy] || 0)}</Text>,
+        render: (v: number) => <Text strong style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
+    ];
+    glFyMonths.forEach(m => {
+      cols.push({
+        title: m.name, key: m.name, width: 100, align: 'center' as const,
+        render: (_: any, row: any) => {
+          const s: RevenueSchedule | undefined = row.cells[m.name];
+          if (!s) return <Text type="secondary">—</Text>;
+          const acct = isAccounted(s);
+          return <div style={{ fontFamily: 'monospace', fontSize: 12, color: acct ? undefined : REDWOOD.neutral500 }}>{acct ? fmt(s.amount) : fmt(0)}</div>;
+        },
       });
     });
     cols.push(
-      { title: <Tooltip title={`Invoiced but not yet recognized before ${fyLabel(glFyStartYear)} (opening deferred)`}><span>Closing (opening)</span></Tooltip>, dataIndex: 'closing', key: 'closing', width: 130, align: 'right' as const, fixed: 'right' as const,
-        render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
       { title: <Tooltip title={`Contract value of contracts starting in ${fyLabel(glFyStartYear)} (from RR_AR_REVENUE_CONTRACT)`}><span>+ Additions</span></Tooltip>, dataIndex: 'additions', key: 'additions', width: 120, align: 'right' as const, fixed: 'right' as const,
         render: (v: number, row: any) => v ? <Tooltip title={row.additionStart ? `Contract starts ${row.additionStart}` : undefined}><Text style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(v)}</Text></Tooltip> : <Text type="secondary">—</Text> },
       { title: <Tooltip title={`Recognized (accounted) in ${fyLabel(glFyStartYear)}`}><span>− Schedules</span></Tooltip>, dataIndex: 'schedulesFy', key: 'schedulesFy', width: 120, align: 'right' as const, fixed: 'right' as const,
         render: (v: number) => <Text style={{ fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{fmt(v)}</Text> },
-      { title: <Tooltip title="Closing + Additions − Schedules = deferred at FY end"><span>= Available</span></Tooltip>, dataIndex: 'available', key: 'available', width: 130, align: 'right' as const, fixed: 'right' as const,
+      { title: <Tooltip title="Opening + Additions − Schedules = available (closing) balance at year end"><span>= Available</span></Tooltip>, dataIndex: 'available', key: 'available', width: 130, align: 'right' as const, fixed: 'right' as const,
         render: (v: number) => <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(v)}</Text> },
     );
     return cols;
-  }, [glMatrix, glFyStartYear]);
+  }, [glFyMonths, glFyStartYear, openingLabel]);
 
   // ── Columns ────────────────────────────────────────────────────────────────
   const contractCols: ColumnsType<RevenueContract> = [
@@ -909,13 +908,12 @@ const RevenueRecognition: React.FC = () => {
 
   const exportMatrixGl = () => {
     if (glMatrix.rows.length === 0) { message.warning('No schedules to export'); return; }
+    const fyMonths = glMatrix.months.filter(m => m.fy === glFyStartYear);
+    const openLbl = `Opening (Mar-${String(glFyStartYear % 100).padStart(2, '0')})`;
     const buildRow = (r: any): Record<string, any> => {
       const row: Record<string, any> = { 'Trx #': r.trxNumber, 'Unit': r.unit, 'Tenant': r.tenant };
-      glMatrix.fyOrder.forEach(fy => {
-        glMatrix.months.filter(m => m.fy === fy).forEach(m => { const c = r.cells[m.name]; row[m.name] = (c && isAccounted(c)) ? (Number(c.amount) || 0) : 0; });
-        row[fyLabel(fy)] = r.fySub[fy] || 0;
-      });
-      row['Closing (opening)'] = r.closing;
+      row[openLbl] = r.closing;
+      fyMonths.forEach(m => { const c = r.cells[m.name]; row[m.name] = (c && isAccounted(c)) ? (Number(c.amount) || 0) : 0; });
       row['Additions'] = r.additions;
       row['Schedules'] = r.schedulesFy;
       row['Available'] = r.available;
@@ -923,11 +921,8 @@ const RevenueRecognition: React.FC = () => {
     };
     const data = glMatrix.rows.map(buildRow);
     const grand: Record<string, any> = { 'Trx #': `Grand Total (${glMatrix.rows.length})`, 'Unit': '', 'Tenant': '' };
-    glMatrix.fyOrder.forEach(fy => {
-      glMatrix.months.filter(m => m.fy === fy).forEach(m => { grand[m.name] = glMatrix.rows.reduce((s: number, r: any) => { const c = r.cells[m.name]; return s + (c && isAccounted(c) ? (Number(c.amount) || 0) : 0); }, 0); });
-      grand[fyLabel(fy)] = glMatrix.rows.reduce((s: number, r: any) => s + (r.fySub[fy] || 0), 0);
-    });
-    grand['Closing (opening)'] = glMatrix.totals.closing;
+    grand[openLbl] = glMatrix.totals.closing;
+    fyMonths.forEach(m => { grand[m.name] = glMatrix.rows.reduce((s: number, r: any) => { const c = r.cells[m.name]; return s + (c && isAccounted(c) ? (Number(c.amount) || 0) : 0); }, 0); });
     grand['Additions'] = glMatrix.totals.additions;
     grand['Schedules'] = glMatrix.totals.schedulesFy;
     grand['Available'] = glMatrix.totals.available;
@@ -1137,13 +1132,13 @@ const RevenueRecognition: React.FC = () => {
                   children: (
                     <>
                       <Row gutter={12} style={{ marginBottom: 12 }}>
-                        <Col xs={12} md={5}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>Closing (opening deferred)</Text>} value={glMatrix.totals.closing} precision={2} valueStyle={{ fontSize: 15 }} /></Card></Col>
+                        <Col xs={12} md={5}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>{openingLabel}</Text>} value={glMatrix.totals.closing} precision={2} valueStyle={{ fontSize: 15 }} /></Card></Col>
                         <Col xs={12} md={5}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>+ Additions ({fyLabel(glFyStartYear)})</Text>} value={glMatrix.totals.additions} precision={2} valueStyle={{ fontSize: 15, color: REDWOOD.success }} /></Card></Col>
                         <Col xs={12} md={5}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>− Schedules ({fyLabel(glFyStartYear)})</Text>} value={glMatrix.totals.schedulesFy} precision={2} valueStyle={{ fontSize: 15, color: REDWOOD.neutral600 }} /></Card></Col>
-                        <Col xs={12} md={5}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>= Available (deferred)</Text>} value={glMatrix.totals.available} precision={2} valueStyle={{ fontSize: 15, color: REDWOOD.primary }} /></Card></Col>
+                        <Col xs={12} md={5}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>= Available</Text>} value={glMatrix.totals.available} precision={2} valueStyle={{ fontSize: 15, color: REDWOOD.primary }} /></Card></Col>
                       </Row>
                       <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
-                        message={<>Rollforward for <b>{fyLabel(glFyStartYear)}</b> (Apr {glFyStartYear} – Mar {glFyStartYear + 1}): <b>Closing</b> (invoiced but not recognized before the year) <b>+ Additions</b> (contract value of contracts starting in the year, from RR_AR_REVENUE_CONTRACT) <b>− Schedules</b> (recognized in the year) <b>= Available</b>.</>} />
+                        message={<>Rollforward for <b>{fyLabel(glFyStartYear)}</b> (Apr {glFyStartYear} – Mar {glFyStartYear + 1}): <b>{openingLabel}</b> balance, then that year's periods only. <b>Opening + Additions</b> (contract value of contracts starting in the year, from RR_AR_REVENUE_CONTRACT) <b>− Schedules</b> (recognized in the year) <b>= Available</b>.</>} />
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
                         <Space wrap>
                           <Text style={{ fontSize: 12 }}>Fiscal year</Text>
@@ -1164,7 +1159,7 @@ const RevenueRecognition: React.FC = () => {
                         loading={schedulesLoading}
                         size="small"
                         bordered
-                        scroll={{ x: 300 + glMatrix.months.length * 100 + glMatrix.fyOrder.length * 120 + 500 }}
+                        scroll={{ x: 300 + 130 + glFyMonths.length * 100 + 380 }}
                         pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} contracts` }}
                         locale={{ emptyText: 'No schedules — generate them from the Contracts tab' }}
                         summary={() => glMatrix.rows.length === 0 ? null : (
@@ -1174,15 +1169,11 @@ const RevenueRecognition: React.FC = () => {
                               {(() => {
                                 const cells: React.ReactNode[] = [];
                                 let idx = 3;
-                                glMatrix.fyOrder.forEach(fy => {
-                                  glMatrix.months.filter(m => m.fy === fy).forEach(m => {
-                                    const t = glMatrix.rows.reduce((s: number, r: any) => { const c = r.cells[m.name]; return s + (c && isAccounted(c) ? (Number(c.amount) || 0) : 0); }, 0);
-                                    cells.push(<Table.Summary.Cell key={m.name} index={idx++} align="center"><Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(t)}</Text></Table.Summary.Cell>);
-                                  });
-                                  const fyt = glMatrix.rows.reduce((s: number, r: any) => s + (r.fySub[fy] || 0), 0);
-                                  cells.push(<Table.Summary.Cell key={`fy-${fy}`} index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(fyt)}</Text></Table.Summary.Cell>);
-                                });
                                 cells.push(<Table.Summary.Cell key="closing" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(glMatrix.totals.closing)}</Text></Table.Summary.Cell>);
+                                glFyMonths.forEach(m => {
+                                  const t = glMatrix.rows.reduce((s: number, r: any) => { const c = r.cells[m.name]; return s + (c && isAccounted(c) ? (Number(c.amount) || 0) : 0); }, 0);
+                                  cells.push(<Table.Summary.Cell key={m.name} index={idx++} align="center"><Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(t)}</Text></Table.Summary.Cell>);
+                                });
                                 cells.push(<Table.Summary.Cell key="additions" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(glMatrix.totals.additions)}</Text></Table.Summary.Cell>);
                                 cells.push(<Table.Summary.Cell key="schedulesFy" index={idx++} align="right"><Text style={{ fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{fmt(glMatrix.totals.schedulesFy)}</Text></Table.Summary.Cell>);
                                 cells.push(<Table.Summary.Cell key="available" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(glMatrix.totals.available)}</Text></Table.Summary.Cell>);
