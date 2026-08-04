@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layout, Breadcrumb, Typography, Card, Row, Col, Input, Button, Form, Alert, Divider, message, Tag, Select, Tooltip } from 'antd';
+import { Layout, Breadcrumb, Typography, Card, Row, Col, Input, Button, Form, Alert, Divider, message, Tag, Select, Tooltip, Checkbox } from 'antd';
 import { FUSION_INSTANCES, getFusionInstanceKey, setFusionInstanceKey, getFusionInstance } from '../../config/fusionInstance';
 import {
   HomeOutlined, ShoppingCartOutlined, TeamOutlined, AppstoreOutlined,
@@ -382,6 +382,20 @@ const PasswordGate: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [fusionLoading, setFusionLoading] = useState(false);
+  const [instKey, setInstKey] = useState(getFusionInstanceKey());
+  const [useCloudLogin, setUseCloudLogin] = useState(false);
+
+  // Switching the POD only changes the base URL + hardcoded credentials the API
+  // calls use; endpoints are identical. The base is resolved at module load, so
+  // persist the choice and reload to re-resolve it everywhere.
+  const changeInstance = (key: string) => {
+    setInstKey(key);
+    if (key === getFusionInstanceKey()) return;
+    const inst = FUSION_INSTANCES.find(i => i.key === key);
+    setFusionInstanceKey(key);
+    message.success(`Switched to ${inst?.label} — reloading…`);
+    setTimeout(() => window.location.reload(), 600);
+  };
 
   // Open the real Oracle Cloud (IDCS) sign-in window. On success, capture the
   // username and unlock the module.
@@ -471,6 +485,20 @@ const PasswordGate: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
           />
         )}
 
+        {/* Instance / POD selector — switches base URL + credentials for all groups */}
+        <div style={{ marginBottom: 16 }}>
+          <Text style={{ fontSize: 12, color: REDWOOD.neutral600, display: 'block', marginBottom: 4 }}>
+            <CloudOutlined /> Fusion Instance (POD)
+          </Text>
+          <Select
+            value={instKey}
+            onChange={changeInstance}
+            size="large"
+            style={{ width: '100%' }}
+            options={FUSION_INSTANCES.map(i => ({ value: i.key, label: <b>{i.label}</b> }))}
+          />
+        </div>
+
         <Form onFinish={handleLogin}>
           <Form.Item style={{ marginBottom: 16 }}>
             <Input.Password
@@ -501,21 +529,33 @@ const PasswordGate: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
           </Button>
         </Form>
 
-        <Divider plain style={{ fontSize: 12, color: REDWOOD.neutral600, margin: '20px 0 16px' }}>or</Divider>
+        <div style={{ marginTop: 16 }}>
+          <Checkbox checked={useCloudLogin} onChange={e => setUseCloudLogin(e.target.checked)}>
+            Login using Fusion Cloud sign in
+          </Checkbox>
+          <Tooltip title="Optional — data calls already use the instance's stored credentials. Use this only if you need an interactive Oracle Cloud session for this POD.">
+            <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>(optional)</Text>
+          </Tooltip>
+        </div>
 
-        <Button
-          block
-          size="large"
-          icon={<CloudOutlined />}
-          loading={fusionLoading}
-          onClick={handleFusionLogin}
-          style={{ height: 44, fontWeight: 600, borderColor: REDWOOD.info, color: REDWOOD.info }}
-        >
-          Login to Fusion — {getFusionInstance().label}
-        </Button>
-        <Text type="secondary" style={{ fontSize: 11, display: 'block', textAlign: 'center', marginTop: 8 }}>
-          Sign in to <b>{getFusionInstance().label}</b> ({getFusionInstance().host.replace(/^https?:\/\//, '')})
-        </Text>
+        {useCloudLogin && (
+          <>
+            <Divider plain style={{ fontSize: 12, color: REDWOOD.neutral600, margin: '16px 0' }}>Oracle Cloud sign in</Divider>
+            <Button
+              block
+              size="large"
+              icon={<CloudOutlined />}
+              loading={fusionLoading}
+              onClick={handleFusionLogin}
+              style={{ height: 44, fontWeight: 600, borderColor: REDWOOD.info, color: REDWOOD.info }}
+            >
+              Login to Fusion — {getFusionInstance().label}
+            </Button>
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', textAlign: 'center', marginTop: 8 }}>
+              Sign in to <b>{getFusionInstance().label}</b> ({getFusionInstance().host.replace(/^https?:\/\//, '')})
+            </Text>
+          </>
+        )}
       </Card>
     </div>
   );
@@ -571,13 +611,12 @@ const ProcurementHome: React.FC = () => {
                   onChange={(key) => {
                     if (key === getFusionInstanceKey()) return;
                     const inst = FUSION_INSTANCES.find(i => i.key === key);
+                    // Switching the POD only changes the base URL + credentials the
+                    // API calls use — endpoints are identical. Reload so the
+                    // module-level base/auth re-resolve for every group.
                     setFusionInstanceKey(key);
-                    // Each POD needs its own sign-in session — force the Fusion
-                    // login gate to reappear for the newly-selected instance.
-                    sessionStorage.removeItem(SESSION_KEY);
-                    sessionStorage.removeItem('fusion_user');
-                    message.success(`Switched to ${inst?.label} — sign in to this instance…`);
-                    setTimeout(() => window.location.reload(), 700);
+                    message.success(`Switched to ${inst?.label} — reloading…`);
+                    setTimeout(() => window.location.reload(), 600);
                   }}
                   options={FUSION_INSTANCES.map(i => ({ value: i.key, label: <b>{i.label}</b> }))}
                 />
