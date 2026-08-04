@@ -5,12 +5,15 @@ import {
 } from 'antd';
 import {
   HomeOutlined, ReloadOutlined, ThunderboltOutlined, SearchOutlined,
-  FileExcelOutlined, ApiOutlined, DollarOutlined,
+  FileExcelOutlined, FilePdfOutlined, ApiOutlined, DollarOutlined,
   TableOutlined, AuditOutlined, FileSearchOutlined, DownOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import ExcelJS from 'exceljs';
 import type { ColumnsType } from 'antd/es/table';
 import FloatingMenu from '../../components/FloatingMenu';
 import { APEX_DB_CONFIG } from '../../config/api.config';
@@ -780,6 +783,12 @@ const RevenueRecognition: React.FC = () => {
       { title: 'Trx #', dataIndex: 'trxNumber', key: 'trxNumber', width: 90, fixed: 'left' as const, sorter: (a: any, b: any) => (a.trxNumber || 0) - (b.trxNumber || 0), render: (v: any) => <Text strong>{v ?? '—'}</Text> },
       { title: 'Unit', dataIndex: 'unit', key: 'unit', width: 110, fixed: 'left' as const, sorter: (a: any, b: any) => String(a.unit || '').localeCompare(String(b.unit || '')) },
       { title: 'Tenant', dataIndex: 'tenant', key: 'tenant', width: 150, fixed: 'left' as const, ellipsis: true },
+      { title: <Tooltip title="Contract value (RENT_TOTAL) — control amount"><span>Control Amount</span></Tooltip>, dataIndex: 'controlAmount', key: 'controlAmount', width: 130, align: 'right' as const,
+        render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
+      { title: 'Start Date', dataIndex: 'startDate', key: 'startDate', width: 110, align: 'center' as const,
+        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+      { title: 'End Date', dataIndex: 'endDate', key: 'endDate', width: 110, align: 'center' as const,
+        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
       { title: <Tooltip title={`Revenue recognized up to and including Mar-${String(glFyStartYear % 100).padStart(2, '0')} (opening balance carried into ${fyLabel(glFyStartYear)})`}><span>{openingLabel}</span></Tooltip>, dataIndex: 'closing', key: 'closing', width: 130, align: 'right' as const,
         onCell: () => ({ style: { background: '#f6faf6' } }),
         render: (v: number) => <Text strong style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
@@ -803,12 +812,6 @@ const RevenueRecognition: React.FC = () => {
         render: (v: number) => <Text style={{ fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{fmt(v)}</Text> },
       { title: <Tooltip title="Opening + Additions − Schedules = available (closing) balance at year end"><span>= Available</span></Tooltip>, dataIndex: 'available', key: 'available', width: 130, align: 'right' as const,
         render: (v: number) => <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(v)}</Text> },
-      { title: 'Start Date', dataIndex: 'startDate', key: 'startDate', width: 110, align: 'center' as const,
-        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-      { title: 'End Date', dataIndex: 'endDate', key: 'endDate', width: 110, align: 'center' as const,
-        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-      { title: <Tooltip title="Contract value (RENT_TOTAL) — control amount"><span>Control Amount</span></Tooltip>, dataIndex: 'controlAmount', key: 'controlAmount', width: 130, align: 'right' as const,
-        render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
     );
     return cols;
   }, [glFyMonths, glFyStartYear, openingLabel]);
@@ -924,36 +927,110 @@ const RevenueRecognition: React.FC = () => {
     saveWb(wb, 'revenue_matrix');
   };
 
-  const exportMatrixGl = () => {
-    if (glMatrix.rows.length === 0) { message.warning('No schedules to export'); return; }
+  // Shared export model — same column order as the on-screen Revenue Matrix GL.
+  const buildGlExport = () => {
     const fyMonths = glMatrix.months.filter(m => m.fy === glFyStartYear);
     const openLbl = `Opening (Mar-${String(glFyStartYear % 100).padStart(2, '0')})`;
-    const buildRow = (r: any): Record<string, any> => {
-      const row: Record<string, any> = { 'Trx #': r.trxNumber, 'Unit': r.unit, 'Tenant': r.tenant };
-      row[openLbl] = r.closing;
-      row['Additions'] = r.additions;
-      fyMonths.forEach(m => { const c = r.cells[m.name]; row[m.name] = (c && isAccounted(c)) ? (Number(c.amount) || 0) : 0; });
-      row['Schedules'] = r.schedulesFy;
-      row['Available'] = r.available;
-      row['Start Date'] = r.startDate;
-      row['End Date'] = r.endDate;
-      row['Control Amount'] = r.controlAmount;
-      return row;
-    };
-    const data = glMatrix.rows.map(buildRow);
-    const grand: Record<string, any> = { 'Trx #': `Grand Total (${glMatrix.rows.length})`, 'Unit': '', 'Tenant': '' };
-    grand[openLbl] = glMatrix.totals.closing;
-    grand['Additions'] = glMatrix.totals.additions;
-    fyMonths.forEach(m => { grand[m.name] = glMatrix.rows.reduce((s: number, r: any) => { const c = r.cells[m.name]; return s + (c && isAccounted(c) ? (Number(c.amount) || 0) : 0); }, 0); });
-    grand['Schedules'] = glMatrix.totals.schedulesFy;
-    grand['Available'] = glMatrix.totals.available;
-    grand['Start Date'] = '';
-    grand['End Date'] = '';
-    grand['Control Amount'] = glMatrix.totals.control;
-    data.push(grand);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), `Revenue Matrix ${fyLabel(glFyStartYear)}`);
-    saveWb(wb, `revenue_matrix_gl_${fyLabel(glFyStartYear).replace('/', '-')}`);
+    const header = ['Trx #', 'Unit', 'Tenant', 'Control Amount', 'Start Date', 'End Date', openLbl, '+ Additions', ...fyMonths.map(m => m.name), '- Schedules', '= Available'];
+    const monthStart = 8;
+    const numCols = new Set<number>([3, 6, 7]);
+    fyMonths.forEach((_, i) => numCols.add(monthStart + i));
+    numCols.add(monthStart + fyMonths.length);       // Schedules
+    numCols.add(monthStart + fyMonths.length + 1);   // Available
+    const rowVals = (r: any): (string | number)[] => ([
+      r.trxNumber ?? '', r.unit ?? '', r.tenant ?? '',
+      r.controlAmount ?? 0, r.startDate || '', r.endDate || '',
+      r.closing ?? 0, r.additions ?? 0,
+      ...fyMonths.map(m => { const c = r.cells[m.name]; return (c && isAccounted(c)) ? (Number(c.amount) || 0) : 0; }),
+      r.schedulesFy ?? 0, r.available ?? 0,
+    ]);
+    const body = glMatrix.rows.map(rowVals);
+    const totals: (string | number)[] = [
+      `Grand Total (${glMatrix.rows.length})`, '', '',
+      glMatrix.totals.control, '', '',
+      glMatrix.totals.closing, glMatrix.totals.additions,
+      ...fyMonths.map(m => glMatrix.rows.reduce((s: number, r: any) => { const c = r.cells[m.name]; return s + (c && isAccounted(c) ? (Number(c.amount) || 0) : 0); }, 0)),
+      glMatrix.totals.schedulesFy, glMatrix.totals.available,
+    ];
+    return { fyMonths, openLbl, header, body, totals, numCols };
+  };
+
+  const exportMatrixGl = async () => {
+    if (glMatrix.rows.length === 0) { message.warning('No schedules to export'); return; }
+    const { header, body, totals, numCols } = buildGlExport();
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet(`Revenue Matrix ${fyLabel(glFyStartYear).replace('/', '-')}`, { views: [{ state: 'frozen', xSplit: 3, ySplit: 3 }] });
+    const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    // Title + subtitle
+    ws.mergeCells(1, 1, 1, header.length);
+    Object.assign(ws.getCell(1, 1), { value: 'Revenue Recognition — Revenue Matrix GL' });
+    ws.getCell(1, 1).font = { bold: true, size: 14, color: { argb: 'FFC74634' } };
+    ws.mergeCells(2, 1, 2, header.length);
+    ws.getCell(2, 1).value = `${fyLabel(glFyStartYear)}  (Apr ${glFyStartYear} – Mar ${glFyStartYear + 1})     Generated ${today}`;
+    ws.getCell(2, 1).font = { italic: true, size: 9, color: { argb: 'FF8C8C8C' } };
+    // Header row (row 3)
+    const headerRow = ws.getRow(3);
+    header.forEach((h, i) => {
+      const cell = headerRow.getCell(i + 1);
+      cell.value = h;
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC74634' } };
+      cell.alignment = { horizontal: numCols.has(i) ? 'right' : 'left', vertical: 'middle', wrapText: true };
+    });
+    headerRow.height = 24;
+    // Body rows
+    body.forEach(vals => {
+      const row = ws.addRow(vals);
+      vals.forEach((_, i) => { const cell = row.getCell(i + 1); if (numCols.has(i)) { cell.numFmt = '#,##0.00'; cell.alignment = { horizontal: 'right' }; } });
+    });
+    // Grand-total row
+    const tr = ws.addRow(totals);
+    tr.eachCell((cell, col) => {
+      cell.font = { bold: true };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+      cell.border = { top: { style: 'thin', color: { argb: 'FF999999' } } };
+      if (numCols.has(col - 1)) { cell.numFmt = '#,##0.00'; cell.alignment = { horizontal: 'right' }; }
+    });
+    ws.columns.forEach((col, i) => { col.width = i === 2 ? 26 : (i < 6 ? 15 : 13); });
+    const buf = await wb.xlsx.writeBuffer();
+    saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `revenue_matrix_gl_${fyLabel(glFyStartYear).replace('/', '-')}.xlsx`);
+  };
+
+  const exportMatrixGlPdf = () => {
+    if (glMatrix.rows.length === 0) { message.warning('No schedules to export'); return; }
+    const { header, body, totals, numCols } = buildGlExport();
+    const doc = new jsPDF('landscape', 'mm', 'a4');
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    doc.setFontSize(15); doc.setFont('helvetica', 'bold'); doc.setTextColor(199, 70, 52);
+    doc.text('Revenue Recognition — Revenue Matrix GL', 10, 13);
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(90);
+    const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    doc.text(`${fyLabel(glFyStartYear)}  (Apr ${glFyStartYear} – Mar ${glFyStartYear + 1})`, 10, 19);
+    doc.text(`Generated ${today}`, pageW - 10, 19, { align: 'right' });
+    const fmtCell = (v: any, i: number) => numCols.has(i) ? (typeof v === 'number' ? v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : v) : (v ?? '');
+    const columnStyles: any = {}; numCols.forEach(i => { columnStyles[i] = { halign: 'right' }; });
+    autoTable(doc, {
+      startY: 23,
+      head: [header],
+      body: body.map(row => row.map((v, i) => fmtCell(v, i))),
+      foot: [totals.map((v, i) => fmtCell(v, i))],
+      styles: { fontSize: 6.5, cellPadding: 1.1, overflow: 'linebreak', lineColor: [221, 221, 221], lineWidth: 0.1 },
+      headStyles: { fillColor: [199, 70, 52], textColor: 255, fontStyle: 'bold', halign: 'center' },
+      footStyles: { fillColor: [242, 242, 242], textColor: 20, fontStyle: 'bold', halign: 'right' },
+      alternateRowStyles: { fillColor: [250, 248, 247] },
+      columnStyles,
+      margin: { left: 8, right: 8 },
+      tableWidth: 'auto',
+    });
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i); doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(150);
+      doc.text('Generated by ReactERP', pageW / 2, pageH - 6, { align: 'center' });
+      doc.text(`Page ${i} / ${pageCount}`, pageW - 10, pageH - 6, { align: 'right' });
+      doc.setTextColor(0);
+    }
+    doc.save(`revenue_matrix_gl_${fyLabel(glFyStartYear).replace('/', '-')}.pdf`);
   };
 
   const exportSchedules = () => {
@@ -1172,6 +1249,7 @@ const RevenueRecognition: React.FC = () => {
                             value={scheduleSearch} onChange={e => setScheduleSearch(e.target.value)} style={{ width: 220 }} />
                         </Space>
                         <Space>
+                          <Button icon={<FilePdfOutlined />} style={{ color: REDWOOD.primary, borderColor: REDWOOD.primary }} onClick={exportMatrixGlPdf}>PDF</Button>
                           <Button icon={<FileExcelOutlined />} style={{ color: REDWOOD.success, borderColor: REDWOOD.success }} onClick={exportMatrixGl}>Excel</Button>
                           <Button icon={<ReloadOutlined />} onClick={loadSchedules} loading={schedulesLoading}>Refresh</Button>
                         </Space>
@@ -1193,17 +1271,17 @@ const RevenueRecognition: React.FC = () => {
                               {(() => {
                                 const cells: React.ReactNode[] = [];
                                 let idx = 3;
+                                cells.push(<Table.Summary.Cell key="control" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(glMatrix.totals.control)}</Text></Table.Summary.Cell>);
+                                cells.push(<Table.Summary.Cell key="startDate" index={idx++} />);
+                                cells.push(<Table.Summary.Cell key="endDate" index={idx++} />);
                                 cells.push(<Table.Summary.Cell key="closing" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(glMatrix.totals.closing)}</Text></Table.Summary.Cell>);
                                 cells.push(<Table.Summary.Cell key="additions" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(glMatrix.totals.additions)}</Text></Table.Summary.Cell>);
                                 glFyMonths.forEach(m => {
                                   const t = glMatrix.rows.reduce((s: number, r: any) => { const c = r.cells[m.name]; return s + (c && isAccounted(c) ? (Number(c.amount) || 0) : 0); }, 0);
                                   cells.push(<Table.Summary.Cell key={m.name} index={idx++} align="center"><Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(t)}</Text></Table.Summary.Cell>);
                                 });
-                                cells.push(<Table.Summary.Cell key="schedulesFy" index={idx++} align="right"><Text style={{ fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{fmt(glMatrix.totals.schedulesFy)}</Text></Table.Summary.Cell>);
+                                cells.push(<Table.Summary.Cell key="schedulesFy" index={idx++} align="right"><Text style={{ fontFamily: 'monospace', color: REDWOOD.neutral500 }}>{fmt(glMatrix.totals.schedulesFy)}</Text></Table.Summary.Cell>);
                                 cells.push(<Table.Summary.Cell key="available" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(glMatrix.totals.available)}</Text></Table.Summary.Cell>);
-                                cells.push(<Table.Summary.Cell key="startDate" index={idx++} />);
-                                cells.push(<Table.Summary.Cell key="endDate" index={idx++} />);
-                                cells.push(<Table.Summary.Cell key="control" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(glMatrix.totals.control)}</Text></Table.Summary.Cell>);
                                 return cells;
                               })()}
                             </Table.Summary.Row>
