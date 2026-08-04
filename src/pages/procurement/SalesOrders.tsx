@@ -91,7 +91,9 @@ const fetchWithTimeout = async (url: string, init?: RequestInit): Promise<Respon
   }
 };
 
-const fetchAllPages = async (baseUrl: string): Promise<any[]> => {
+// maxRows caps the paging so a huge result set (or Fusion's slow deep-offset
+// paging) can't make the page grind forever — it stops once the cap is reached.
+const fetchAllPages = async (baseUrl: string, maxRows = Infinity): Promise<any[]> => {
   const stripped = baseUrl.replace(/[?&]limit=\d+/gi, '').replace(/[?&]offset=\d+/gi, '').replace(/\?&/, '?').replace(/&&/g, '&');
   const all: any[] = [];
   let offset = 0;
@@ -103,7 +105,7 @@ const fetchAllPages = async (baseUrl: string): Promise<any[]> => {
     const d = await r.json();
     const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
     all.push(...items);
-    if (!d.hasMore || items.length < PAGE_LIMIT) break;
+    if (!d.hasMore || items.length < PAGE_LIMIT || all.length >= maxRows) break;
     offset += PAGE_LIMIT;
   }
   return all;
@@ -1697,12 +1699,21 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
     return `${FUSION_BASE}/salesOrdersForOrderHub?${qs}orderBy=TransactionOn:desc`;
   }, [filters, buildQ]);
 
+  // Fetch a single page of the most-recent matches (no deep paging) so the search
+  // stays fast on large PODs. Narrow the filters to reach older orders.
+  const SEARCH_LIMIT = 50;
   const runSearch = useCallback(async () => {
     setLoading(true); setError(''); setSearched(true);
     try {
-      const items = await fetchAllPages(searchUrl);
+      const stripped = searchUrl.replace(/[?&]limit=\d+/gi, '').replace(/[?&]offset=\d+/gi, '').replace(/\?&/, '?').replace(/&&/g, '&');
+      const sep = stripped.includes('?') ? '&' : '?';
+      const r = await fetchWithTimeout(`${stripped}${sep}limit=${SEARCH_LIMIT}`, { headers: FUSION_HDRS });
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+      const d = await r.json();
+      const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
       setRows(items);
       if (items.length === 0) setError('No sales orders matched.');
+      else if (d.hasMore) setError(`Showing the first ${SEARCH_LIMIT} orders — narrow the date range or filters to see more.`);
     } catch (e: any) { setError(e.message); setRows([]); }
     finally { setLoading(false); }
   }, [searchUrl]);
