@@ -737,6 +737,7 @@ const RevenueRecognition: React.FC = () => {
       }
     });
     // Additions from the contracts table: contracts whose start date is in this FY.
+    const cById = new Map(contracts.map(c => [c.id, c]));
     const q = scheduleSearch.trim().toLowerCase();
     const matchesSearch = (c: RevenueContract) => !q || [c.trxNumber, c.unit, c.location, c.tenant, c.status].some(v => v != null && String(v).toLowerCase().includes(q));
     contracts.forEach(c => {
@@ -751,11 +752,21 @@ const RevenueRecognition: React.FC = () => {
     months.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const fyOrder: number[] = [];
     months.forEach(m => { if (!fyOrder.includes(m.fy)) fyOrder.push(m.fy); });
-    const rows = Array.from(byContract.values()).map((r: any) => ({ ...r, available: r.closing + r.additions - r.schedulesFy }));
+    const rows = Array.from(byContract.values()).map((r: any) => {
+      const c = cById.get(r.contractId);
+      return {
+        ...r,
+        available: r.closing + r.additions - r.schedulesFy,
+        startDate: c?.contractStartDate || r.additionStart || '',
+        endDate: c?.contractEndDate || '',
+        controlAmount: c ? Number(c.rentTotal) || 0 : 0,
+      };
+    });
     const totals = rows.reduce((a: any, r: any) => ({
       closing: a.closing + r.closing, additions: a.additions + r.additions,
       schedulesFy: a.schedulesFy + r.schedulesFy, available: a.available + r.available,
-    }), { closing: 0, additions: 0, schedulesFy: 0, available: 0 });
+      control: a.control + (r.controlAmount || 0),
+    }), { closing: 0, additions: 0, schedulesFy: 0, available: 0, control: 0 });
     return { months, fyOrder, rows, totals };
   }, [filteredSchedules, contracts, scheduleSearch, glFyStartYear]);
 
@@ -766,12 +777,15 @@ const RevenueRecognition: React.FC = () => {
 
   const glColumns: ColumnsType<any> = useMemo(() => {
     const cols: ColumnsType<any> = [
-      { title: 'Trx #', dataIndex: 'trxNumber', key: 'trxNumber', width: 90, fixed: 'left' as const, render: (v: any) => <Text strong>{v ?? '—'}</Text> },
-      { title: 'Unit', dataIndex: 'unit', key: 'unit', width: 110, fixed: 'left' as const },
+      { title: 'Trx #', dataIndex: 'trxNumber', key: 'trxNumber', width: 90, fixed: 'left' as const, sorter: (a: any, b: any) => (a.trxNumber || 0) - (b.trxNumber || 0), render: (v: any) => <Text strong>{v ?? '—'}</Text> },
+      { title: 'Unit', dataIndex: 'unit', key: 'unit', width: 110, fixed: 'left' as const, sorter: (a: any, b: any) => String(a.unit || '').localeCompare(String(b.unit || '')) },
       { title: 'Tenant', dataIndex: 'tenant', key: 'tenant', width: 150, fixed: 'left' as const, ellipsis: true },
       { title: <Tooltip title={`Revenue recognized up to and including Mar-${String(glFyStartYear % 100).padStart(2, '0')} (opening balance carried into ${fyLabel(glFyStartYear)})`}><span>{openingLabel}</span></Tooltip>, dataIndex: 'closing', key: 'closing', width: 130, align: 'right' as const,
         onCell: () => ({ style: { background: '#f6faf6' } }),
         render: (v: number) => <Text strong style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
+      { title: <Tooltip title={`Contract value of contracts starting in ${fyLabel(glFyStartYear)} (from RR_AR_REVENUE_CONTRACT)`}><span>+ Additions</span></Tooltip>, dataIndex: 'additions', key: 'additions', width: 120, align: 'right' as const,
+        onCell: () => ({ style: { background: '#f6faf6' } }),
+        render: (v: number, row: any) => v ? <Tooltip title={row.additionStart ? `Contract starts ${row.additionStart}` : undefined}><Text style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(v)}</Text></Tooltip> : <Text type="secondary">—</Text> },
     ];
     glFyMonths.forEach(m => {
       cols.push({
@@ -785,12 +799,16 @@ const RevenueRecognition: React.FC = () => {
       });
     });
     cols.push(
-      { title: <Tooltip title={`Contract value of contracts starting in ${fyLabel(glFyStartYear)} (from RR_AR_REVENUE_CONTRACT)`}><span>+ Additions</span></Tooltip>, dataIndex: 'additions', key: 'additions', width: 120, align: 'right' as const, fixed: 'right' as const,
-        render: (v: number, row: any) => v ? <Tooltip title={row.additionStart ? `Contract starts ${row.additionStart}` : undefined}><Text style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(v)}</Text></Tooltip> : <Text type="secondary">—</Text> },
-      { title: <Tooltip title={`Recognized (accounted) in ${fyLabel(glFyStartYear)}`}><span>− Schedules</span></Tooltip>, dataIndex: 'schedulesFy', key: 'schedulesFy', width: 120, align: 'right' as const, fixed: 'right' as const,
+      { title: <Tooltip title={`Recognized (accounted) in ${fyLabel(glFyStartYear)}`}><span>− Schedules</span></Tooltip>, dataIndex: 'schedulesFy', key: 'schedulesFy', width: 120, align: 'right' as const,
         render: (v: number) => <Text style={{ fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{fmt(v)}</Text> },
-      { title: <Tooltip title="Opening + Additions − Schedules = available (closing) balance at year end"><span>= Available</span></Tooltip>, dataIndex: 'available', key: 'available', width: 130, align: 'right' as const, fixed: 'right' as const,
+      { title: <Tooltip title="Opening + Additions − Schedules = available (closing) balance at year end"><span>= Available</span></Tooltip>, dataIndex: 'available', key: 'available', width: 130, align: 'right' as const,
         render: (v: number) => <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(v)}</Text> },
+      { title: 'Start Date', dataIndex: 'startDate', key: 'startDate', width: 110, align: 'center' as const,
+        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+      { title: 'End Date', dataIndex: 'endDate', key: 'endDate', width: 110, align: 'center' as const,
+        render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+      { title: <Tooltip title="Contract value (RENT_TOTAL) — control amount"><span>Control Amount</span></Tooltip>, dataIndex: 'controlAmount', key: 'controlAmount', width: 130, align: 'right' as const,
+        render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
     );
     return cols;
   }, [glFyMonths, glFyStartYear, openingLabel]);
@@ -913,19 +931,25 @@ const RevenueRecognition: React.FC = () => {
     const buildRow = (r: any): Record<string, any> => {
       const row: Record<string, any> = { 'Trx #': r.trxNumber, 'Unit': r.unit, 'Tenant': r.tenant };
       row[openLbl] = r.closing;
-      fyMonths.forEach(m => { const c = r.cells[m.name]; row[m.name] = (c && isAccounted(c)) ? (Number(c.amount) || 0) : 0; });
       row['Additions'] = r.additions;
+      fyMonths.forEach(m => { const c = r.cells[m.name]; row[m.name] = (c && isAccounted(c)) ? (Number(c.amount) || 0) : 0; });
       row['Schedules'] = r.schedulesFy;
       row['Available'] = r.available;
+      row['Start Date'] = r.startDate;
+      row['End Date'] = r.endDate;
+      row['Control Amount'] = r.controlAmount;
       return row;
     };
     const data = glMatrix.rows.map(buildRow);
     const grand: Record<string, any> = { 'Trx #': `Grand Total (${glMatrix.rows.length})`, 'Unit': '', 'Tenant': '' };
     grand[openLbl] = glMatrix.totals.closing;
-    fyMonths.forEach(m => { grand[m.name] = glMatrix.rows.reduce((s: number, r: any) => { const c = r.cells[m.name]; return s + (c && isAccounted(c) ? (Number(c.amount) || 0) : 0); }, 0); });
     grand['Additions'] = glMatrix.totals.additions;
+    fyMonths.forEach(m => { grand[m.name] = glMatrix.rows.reduce((s: number, r: any) => { const c = r.cells[m.name]; return s + (c && isAccounted(c) ? (Number(c.amount) || 0) : 0); }, 0); });
     grand['Schedules'] = glMatrix.totals.schedulesFy;
     grand['Available'] = glMatrix.totals.available;
+    grand['Start Date'] = '';
+    grand['End Date'] = '';
+    grand['Control Amount'] = glMatrix.totals.control;
     data.push(grand);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), `Revenue Matrix ${fyLabel(glFyStartYear)}`);
@@ -1159,7 +1183,7 @@ const RevenueRecognition: React.FC = () => {
                         loading={schedulesLoading}
                         size="small"
                         bordered
-                        scroll={{ x: 300 + 130 + glFyMonths.length * 100 + 380 }}
+                        scroll={{ x: 350 + 130 + 120 + glFyMonths.length * 100 + 250 + 350 }}
                         pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} contracts` }}
                         locale={{ emptyText: 'No schedules — generate them from the Contracts tab' }}
                         summary={() => glMatrix.rows.length === 0 ? null : (
@@ -1170,13 +1194,16 @@ const RevenueRecognition: React.FC = () => {
                                 const cells: React.ReactNode[] = [];
                                 let idx = 3;
                                 cells.push(<Table.Summary.Cell key="closing" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(glMatrix.totals.closing)}</Text></Table.Summary.Cell>);
+                                cells.push(<Table.Summary.Cell key="additions" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(glMatrix.totals.additions)}</Text></Table.Summary.Cell>);
                                 glFyMonths.forEach(m => {
                                   const t = glMatrix.rows.reduce((s: number, r: any) => { const c = r.cells[m.name]; return s + (c && isAccounted(c) ? (Number(c.amount) || 0) : 0); }, 0);
                                   cells.push(<Table.Summary.Cell key={m.name} index={idx++} align="center"><Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(t)}</Text></Table.Summary.Cell>);
                                 });
-                                cells.push(<Table.Summary.Cell key="additions" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(glMatrix.totals.additions)}</Text></Table.Summary.Cell>);
                                 cells.push(<Table.Summary.Cell key="schedulesFy" index={idx++} align="right"><Text style={{ fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{fmt(glMatrix.totals.schedulesFy)}</Text></Table.Summary.Cell>);
                                 cells.push(<Table.Summary.Cell key="available" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(glMatrix.totals.available)}</Text></Table.Summary.Cell>);
+                                cells.push(<Table.Summary.Cell key="startDate" index={idx++} />);
+                                cells.push(<Table.Summary.Cell key="endDate" index={idx++} />);
+                                cells.push(<Table.Summary.Cell key="control" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(glMatrix.totals.control)}</Text></Table.Summary.Cell>);
                                 return cells;
                               })()}
                             </Table.Summary.Row>
