@@ -51,6 +51,13 @@ const REDWOOD = {
 const fmt = (v: number | null | undefined) =>
   v == null ? '—' : new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v));
 
+// ── Fiscal-year helpers (April–March) for the Revenue Matrix GL rollforward ────
+const FY_START_MONTH = 3; // April (0-based)
+const parseYMD = (s?: string | null): Date | null => { if (!s) return null; const d = new Date(s); return isNaN(d.getTime()) ? null : d; };
+// The fiscal year is named by its starting calendar year: Apr-2026..Mar-2027 → 2026.
+const fyStartYearOf = (d: Date): number => (d.getMonth() >= FY_START_MONTH ? d.getFullYear() : d.getFullYear() - 1);
+const fyLabel = (startYear: number): string => `FY${String(startYear % 100).padStart(2, '0')}/${String((startYear + 1) % 100).padStart(2, '0')}`;
+
 // ── Revenue-recognition accounting ────────────────────────────────────────────
 // COA structure (9 segments): Company-Seg2-Seg3-Account-Seg5-Seg6-Seg7-Seg8-Seg9
 // e.g. 01-00-00-2313111-0000-000-00-000-000  (natural account is the 4th segment)
@@ -150,6 +157,8 @@ const RevenueRecognition: React.FC = () => {
   const loggedUser = user?.username || user?.name || 'REACTERP';
 
   const [tab, setTab] = useState('contracts');
+  // Revenue Matrix GL — the fiscal year whose rollforward we show (start calendar year; default Apr-2026).
+  const [glFyStartYear, setGlFyStartYear] = useState<number>(2026);
 
   // Contracts
   const [contracts, setContracts] = useState<RevenueContract[]>([]);
@@ -696,6 +705,81 @@ const RevenueRecognition: React.FC = () => {
       ) },
   ], [matrix.months]);
 
+  // ── Revenue Matrix GL — fiscal-year rollforward ─────────────────────────────
+  // Per contract: recognized monthly cells (like the Schedule Matrix) grouped by
+  // fiscal year with a yearly subtotal, plus a deferred-revenue rollforward for the
+  // chosen fiscal year:
+  //   Closing (unrecognized before the FY) + Additions (invoiced in FY)
+  //     − Schedules (recognized in FY) = Available (deferred at FY end).
+  const glMatrix = useMemo(() => {
+    const curStart = new Date(glFyStartYear, FY_START_MONTH, 1);
+    const curEnd = new Date(glFyStartYear + 1, FY_START_MONTH, 1);   // exclusive
+    const months: { name: string; date: string; fy: number }[] = [];
+    const seen = new Set<string>();
+    const byContract = new Map<number, any>();
+    filteredSchedules.forEach(s => {
+      const d = parseYMD(s.periodDate);
+      const fy = d ? fyStartYearOf(d) : glFyStartYear;
+      if (!seen.has(s.periodName)) { seen.add(s.periodName); months.push({ name: s.periodName, date: s.periodDate, fy }); }
+      let row = byContract.get(s.contractId);
+      if (!row) { row = { key: s.contractId, contractId: s.contractId, trxNumber: s.trxNumber, unit: s.unit, tenant: s.tenant, cells: {} as Record<string, RevenueSchedule>, fySub: {} as Record<number, number>, closing: 0, additions: 0, schedulesFy: 0 }; byContract.set(s.contractId, row); }
+      row.cells[s.periodName] = s;
+      const amt = Number(s.amount) || 0;
+      const acct = isAccounted(s);
+      if (acct) row.fySub[fy] = (row.fySub[fy] || 0) + amt;    // recognized per fiscal year (yearly subtotal)
+      if (d) {
+        if (d < curStart) { if (!acct) row.closing += amt; }   // invoiced-but-not-recognized before this FY
+        else if (d < curEnd) { row.additions += amt; if (acct) row.schedulesFy += amt; }
+      }
+    });
+    months.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const fyOrder: number[] = [];
+    months.forEach(m => { if (!fyOrder.includes(m.fy)) fyOrder.push(m.fy); });
+    const rows = Array.from(byContract.values()).map((r: any) => ({ ...r, available: r.closing + r.additions - r.schedulesFy }));
+    const totals = rows.reduce((a: any, r: any) => ({
+      closing: a.closing + r.closing, additions: a.additions + r.additions,
+      schedulesFy: a.schedulesFy + r.schedulesFy, available: a.available + r.available,
+    }), { closing: 0, additions: 0, schedulesFy: 0, available: 0 });
+    return { months, fyOrder, rows, totals };
+  }, [filteredSchedules, glFyStartYear]);
+
+  const glColumns: ColumnsType<any> = useMemo(() => {
+    const cols: ColumnsType<any> = [
+      { title: 'Trx #', dataIndex: 'trxNumber', key: 'trxNumber', width: 90, fixed: 'left' as const, render: (v: any) => <Text strong>{v ?? '—'}</Text> },
+      { title: 'Unit', dataIndex: 'unit', key: 'unit', width: 110, fixed: 'left' as const },
+      { title: 'Tenant', dataIndex: 'tenant', key: 'tenant', width: 150, fixed: 'left' as const, ellipsis: true },
+    ];
+    glMatrix.fyOrder.forEach(fy => {
+      glMatrix.months.filter(m => m.fy === fy).forEach(m => {
+        cols.push({
+          title: m.name, key: m.name, width: 100, align: 'center' as const,
+          render: (_: any, row: any) => {
+            const s: RevenueSchedule | undefined = row.cells[m.name];
+            if (!s) return <Text type="secondary">—</Text>;
+            const acct = isAccounted(s);
+            return <div style={{ fontFamily: 'monospace', fontSize: 12, color: acct ? undefined : REDWOOD.neutral500 }}>{acct ? fmt(s.amount) : fmt(0)}</div>;
+          },
+        });
+      });
+      cols.push({
+        title: <Tooltip title={`Recognized in ${fyLabel(fy)}`}><span>{fyLabel(fy)}</span></Tooltip>, key: `fy-${fy}`, width: 120, align: 'right' as const,
+        onCell: () => ({ style: { background: '#f6faf6' } }),
+        render: (_: any, row: any) => <Text strong style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmt(row.fySub[fy] || 0)}</Text>,
+      });
+    });
+    cols.push(
+      { title: <Tooltip title={`Invoiced but not yet recognized before ${fyLabel(glFyStartYear)} (opening deferred)`}><span>Closing (opening)</span></Tooltip>, dataIndex: 'closing', key: 'closing', width: 130, align: 'right' as const, fixed: 'right' as const,
+        render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
+      { title: <Tooltip title={`Invoiced (scheduled) in ${fyLabel(glFyStartYear)} — additions`}><span>+ Additions</span></Tooltip>, dataIndex: 'additions', key: 'additions', width: 120, align: 'right' as const, fixed: 'right' as const,
+        render: (v: number) => <Text style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(v)}</Text> },
+      { title: <Tooltip title={`Recognized (accounted) in ${fyLabel(glFyStartYear)}`}><span>− Schedules</span></Tooltip>, dataIndex: 'schedulesFy', key: 'schedulesFy', width: 120, align: 'right' as const, fixed: 'right' as const,
+        render: (v: number) => <Text style={{ fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{fmt(v)}</Text> },
+      { title: <Tooltip title="Closing + Additions − Schedules = deferred at FY end"><span>= Available</span></Tooltip>, dataIndex: 'available', key: 'available', width: 130, align: 'right' as const, fixed: 'right' as const,
+        render: (v: number) => <Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(v)}</Text> },
+    );
+    return cols;
+  }, [glMatrix, glFyStartYear]);
+
   // ── Columns ────────────────────────────────────────────────────────────────
   const contractCols: ColumnsType<RevenueContract> = [
     { title: 'Trx #', dataIndex: 'trxNumber', key: 'trxNumber', width: 100, sorter: (a, b) => (a.trxNumber || 0) - (b.trxNumber || 0),
@@ -805,6 +889,36 @@ const RevenueRecognition: React.FC = () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Schedule Matrix');
     saveWb(wb, 'revenue_matrix');
+  };
+
+  const exportMatrixGl = () => {
+    if (glMatrix.rows.length === 0) { message.warning('No schedules to export'); return; }
+    const buildRow = (r: any): Record<string, any> => {
+      const row: Record<string, any> = { 'Trx #': r.trxNumber, 'Unit': r.unit, 'Tenant': r.tenant };
+      glMatrix.fyOrder.forEach(fy => {
+        glMatrix.months.filter(m => m.fy === fy).forEach(m => { const c = r.cells[m.name]; row[m.name] = (c && isAccounted(c)) ? (Number(c.amount) || 0) : 0; });
+        row[fyLabel(fy)] = r.fySub[fy] || 0;
+      });
+      row['Closing (opening)'] = r.closing;
+      row['Additions'] = r.additions;
+      row['Schedules'] = r.schedulesFy;
+      row['Available'] = r.available;
+      return row;
+    };
+    const data = glMatrix.rows.map(buildRow);
+    const grand: Record<string, any> = { 'Trx #': `Grand Total (${glMatrix.rows.length})`, 'Unit': '', 'Tenant': '' };
+    glMatrix.fyOrder.forEach(fy => {
+      glMatrix.months.filter(m => m.fy === fy).forEach(m => { grand[m.name] = glMatrix.rows.reduce((s: number, r: any) => { const c = r.cells[m.name]; return s + (c && isAccounted(c) ? (Number(c.amount) || 0) : 0); }, 0); });
+      grand[fyLabel(fy)] = glMatrix.rows.reduce((s: number, r: any) => s + (r.fySub[fy] || 0), 0);
+    });
+    grand['Closing (opening)'] = glMatrix.totals.closing;
+    grand['Additions'] = glMatrix.totals.additions;
+    grand['Schedules'] = glMatrix.totals.schedulesFy;
+    grand['Available'] = glMatrix.totals.available;
+    data.push(grand);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), `Revenue Matrix ${fyLabel(glFyStartYear)}`);
+    saveWb(wb, `revenue_matrix_gl_${fyLabel(glFyStartYear).replace('/', '-')}`);
   };
 
   const exportSchedules = () => {
@@ -994,6 +1108,70 @@ const RevenueRecognition: React.FC = () => {
                               <Table.Summary.Cell index={7 + matrix.months.length} align="center">
                                 <Text style={{ fontSize: 11 }}>{matrix.totals.accountedPeriods}/{matrix.totals.remainingPeriods}/{matrix.totals.totalPeriods}</Text>
                               </Table.Summary.Cell>
+                            </Table.Summary.Row>
+                          </Table.Summary>
+                        )}
+                      />
+                    </>
+                  ),
+                },
+                {
+                  key: 'matrix-gl',
+                  label: <Space size={4}><TableOutlined />Revenue Matrix GL</Space>,
+                  children: (
+                    <>
+                      <Row gutter={12} style={{ marginBottom: 12 }}>
+                        <Col xs={12} md={5}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>Closing (opening deferred)</Text>} value={glMatrix.totals.closing} precision={2} valueStyle={{ fontSize: 15 }} /></Card></Col>
+                        <Col xs={12} md={5}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>+ Additions ({fyLabel(glFyStartYear)})</Text>} value={glMatrix.totals.additions} precision={2} valueStyle={{ fontSize: 15, color: REDWOOD.success }} /></Card></Col>
+                        <Col xs={12} md={5}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>− Schedules ({fyLabel(glFyStartYear)})</Text>} value={glMatrix.totals.schedulesFy} precision={2} valueStyle={{ fontSize: 15, color: REDWOOD.neutral600 }} /></Card></Col>
+                        <Col xs={12} md={5}><Card size="small"><Statistic title={<Text style={{ fontSize: 11 }}>= Available (deferred)</Text>} value={glMatrix.totals.available} precision={2} valueStyle={{ fontSize: 15, color: REDWOOD.primary }} /></Card></Col>
+                      </Row>
+                      <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
+                        message={<>Rollforward for <b>{fyLabel(glFyStartYear)}</b> (Apr {glFyStartYear} – Mar {glFyStartYear + 1}): <b>Closing</b> (invoiced but not recognized before the year) <b>+ Additions</b> (invoiced in the year) <b>− Schedules</b> (recognized in the year) <b>= Available</b>. Additions are taken from the invoiced schedule lines; tell me if they must come from a separate AR-invoice query.</>} />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
+                        <Space wrap>
+                          <Text style={{ fontSize: 12 }}>Fiscal year</Text>
+                          <Select size="small" style={{ width: 130 }} value={glFyStartYear} onChange={setGlFyStartYear}
+                            options={Array.from(new Set([2026, ...glMatrix.fyOrder])).sort((a, b) => a - b).map(fy => ({ label: fyLabel(fy), value: fy }))} />
+                          <Input allowClear prefix={<SearchOutlined />} placeholder="Filter…"
+                            value={scheduleSearch} onChange={e => setScheduleSearch(e.target.value)} style={{ width: 220 }} />
+                        </Space>
+                        <Space>
+                          <Button icon={<FileExcelOutlined />} style={{ color: REDWOOD.success, borderColor: REDWOOD.success }} onClick={exportMatrixGl}>Excel</Button>
+                          <Button icon={<ReloadOutlined />} onClick={loadSchedules} loading={schedulesLoading}>Refresh</Button>
+                        </Space>
+                      </div>
+                      <Table
+                        rowKey="key"
+                        columns={glColumns}
+                        dataSource={glMatrix.rows}
+                        loading={schedulesLoading}
+                        size="small"
+                        bordered
+                        scroll={{ x: 300 + glMatrix.months.length * 100 + glMatrix.fyOrder.length * 120 + 500 }}
+                        pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} contracts` }}
+                        locale={{ emptyText: 'No schedules — generate them from the Contracts tab' }}
+                        summary={() => glMatrix.rows.length === 0 ? null : (
+                          <Table.Summary fixed>
+                            <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 700 }}>
+                              <Table.Summary.Cell index={0} colSpan={3}><Text strong>Grand Total ({glMatrix.rows.length})</Text></Table.Summary.Cell>
+                              {(() => {
+                                const cells: React.ReactNode[] = [];
+                                let idx = 3;
+                                glMatrix.fyOrder.forEach(fy => {
+                                  glMatrix.months.filter(m => m.fy === fy).forEach(m => {
+                                    const t = glMatrix.rows.reduce((s: number, r: any) => { const c = r.cells[m.name]; return s + (c && isAccounted(c) ? (Number(c.amount) || 0) : 0); }, 0);
+                                    cells.push(<Table.Summary.Cell key={m.name} index={idx++} align="center"><Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(t)}</Text></Table.Summary.Cell>);
+                                  });
+                                  const fyt = glMatrix.rows.reduce((s: number, r: any) => s + (r.fySub[fy] || 0), 0);
+                                  cells.push(<Table.Summary.Cell key={`fy-${fy}`} index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace', fontSize: 11 }}>{fmt(fyt)}</Text></Table.Summary.Cell>);
+                                });
+                                cells.push(<Table.Summary.Cell key="closing" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace' }}>{fmt(glMatrix.totals.closing)}</Text></Table.Summary.Cell>);
+                                cells.push(<Table.Summary.Cell key="additions" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.success }}>{fmt(glMatrix.totals.additions)}</Text></Table.Summary.Cell>);
+                                cells.push(<Table.Summary.Cell key="schedulesFy" index={idx++} align="right"><Text style={{ fontFamily: 'monospace', color: REDWOOD.neutral600 }}>{fmt(glMatrix.totals.schedulesFy)}</Text></Table.Summary.Cell>);
+                                cells.push(<Table.Summary.Cell key="available" index={idx++} align="right"><Text strong style={{ fontFamily: 'monospace', color: REDWOOD.primary }}>{fmt(glMatrix.totals.available)}</Text></Table.Summary.Cell>);
+                                return cells;
+                              })()}
                             </Table.Summary.Row>
                           </Table.Summary>
                         )}
