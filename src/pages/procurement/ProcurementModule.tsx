@@ -394,7 +394,9 @@ const PasswordGate: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
     setError('');
     setFusionLoading(true);
     try {
-      const res = await api.fusionLogin();
+      // Sign in to the CURRENTLY-SELECTED instance so its session cookie is
+      // established for that POD (calls to a POD you haven't signed into hang).
+      const res = await api.fusionLogin(`${getFusionInstance().host}/`);
       if (res?.success) {
         sessionStorage.setItem(SESSION_KEY, 'true');
         if (res.username) {
@@ -509,10 +511,10 @@ const PasswordGate: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
           onClick={handleFusionLogin}
           style={{ height: 44, fontWeight: 600, borderColor: REDWOOD.info, color: REDWOOD.info }}
         >
-          Login to Fusion
+          Login to Fusion — {getFusionInstance().label}
         </Button>
         <Text type="secondary" style={{ fontSize: 11, display: 'block', textAlign: 'center', marginTop: 8 }}>
-          Sign in with your Oracle Cloud account
+          Sign in to <b>{getFusionInstance().label}</b> ({getFusionInstance().host.replace(/^https?:\/\//, '')})
         </Text>
       </Card>
     </div>
@@ -570,8 +572,12 @@ const ProcurementHome: React.FC = () => {
                     if (key === getFusionInstanceKey()) return;
                     const inst = FUSION_INSTANCES.find(i => i.key === key);
                     setFusionInstanceKey(key);
-                    message.success(`Switched to ${inst?.label} — reloading…`);
-                    setTimeout(() => window.location.reload(), 600);
+                    // Each POD needs its own sign-in session — force the Fusion
+                    // login gate to reappear for the newly-selected instance.
+                    sessionStorage.removeItem(SESSION_KEY);
+                    sessionStorage.removeItem('fusion_user');
+                    message.success(`Switched to ${inst?.label} — sign in to this instance…`);
+                    setTimeout(() => window.location.reload(), 700);
                   }}
                   options={FUSION_INSTANCES.map(i => ({ value: i.key, label: <b>{i.label}</b> }))}
                 />
