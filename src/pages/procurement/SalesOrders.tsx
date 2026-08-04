@@ -29,9 +29,7 @@ const { Title, Text } = Typography;
 
 const _isElectron = !!(window as unknown as { electron?: unknown; electronAPI?: unknown }).electron
   || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
-const FUSION_BASE = _isElectron
-  ? `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`
-  : '/fusion-api';
+const FUSION_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
 const AUTH_HEADER = FUSION_POD_AUTH;
 const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 const PAGE_LIMIT = 500;
@@ -2131,9 +2129,9 @@ const COST_FIELDS = ['TotalUnitCost', 'UnitCost', 'ItemCost', 'UnitAverageCost',
 const QTY_FIELDS = ['Quantity', 'OnhandQuantity', 'OnHandQuantity', 'TotalQuantity', 'ItemQuantity', 'CostQuantity'];
 const parseVU = (vu?: string) => { const p = String(vu ?? '').split('-'); return { costOrg: p[0], invOrg: p[1], subinv: p[2], lot: p[3] }; };
 const rowOrgMatches = (row: any, org?: string) => { if (!org) return true; const p = parseVU(row.ValuationUnit); return p.invOrg === org || p.costOrg === org; };
-// Fusion child-resource links come back as absolute URLs; in the browser they must
-// go through the /fusion-api dev proxy, so rewrite the host+version prefix.
-const fusionHref = (href: string) => _isElectron ? href : href.replace(/^https?:\/\/[^/]+\/fscmRestApi\/resources\/[^/]+/, '/fusion-api');
+// Fusion child-resource links come back as absolute URLs to the serving POD;
+// call them directly (no proxy rewrite).
+const fusionHref = (href: string) => href;
 const onhQtyOf = (x: any) => num(pf(x, ['PrimaryQuantity', 'QuantityOnhand', 'OnhandQuantity', 'Quantity']));
 
 // Look up a customer in the ORDS customer master by account number and map the

@@ -15,11 +15,7 @@ import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
 const { Content } = Layout;
 const { Title, Text } = Typography;
 
-const _isElectron = !!(window as unknown as { electron?: unknown; electronAPI?: unknown }).electron
-  || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
-const FUSION_BASE = _isElectron
-  ? `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`
-  : '/fusion-api';
+const FUSION_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
 const AUTH_HEADER = FUSION_POD_AUTH;
 const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 const JSON_HDRS = { ...FUSION_HDRS, 'Content-Type': 'application/json' };
@@ -30,7 +26,7 @@ const STAGED_TXN_URL = `${FUSION_BASE}/inventoryStagedTransactions`;
 // under /fscmService (not /fscmRestApi). In Electron we call the host directly.
 // insertAndProcessInterfaceRows both inserts the interface rows AND processes them.
 const FUSION_HOST = FUSION_BASE.replace(/\/fscmRestApi\/.*$/, '');
-const SOAP_TXN_URL = `${_isElectron ? FUSION_HOST : ''}/fscmService/TransactionManagerServiceV2`;
+const SOAP_TXN_URL = `${FUSION_HOST}/fscmService/TransactionManagerServiceV2`;
 const SOAP_TYP_NS = 'http://xmlns.oracle.com/apps/scm/inventory/materialTransactions/pendingTransactions/transactionManagerServiceV2/types/';
 const SOAP_STAG_NS = 'http://xmlns.oracle.com/apps/scm/inventory/materialTransactions/pendingTransactions/stagedInventoryTransactionServiceV2/';
 const SOAP_ACTION = 'http://xmlns.oracle.com/apps/scm/inventory/materialTransactions/pendingTransactions/transactionManagerServiceV2/insertAndProcessInterfaceRows';

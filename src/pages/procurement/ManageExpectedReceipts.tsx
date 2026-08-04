@@ -24,11 +24,7 @@ const { RangePicker } = DatePicker;
 // In Electron the request goes directly (no CORS). In a browser (localhost dev)
 // we route through the Vite proxy to avoid CORS blocking. NOTE: the preload
 // exposes window.electronAPI (not window.electron), so detect via that.
-const _isElectron = !!(window as unknown as { electron?: unknown; electronAPI?: unknown }).electron
-  || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
-const FUSION_BASE = _isElectron
-  ? `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`
-  : '/fusion-api';
+const FUSION_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
 const AUTH_HEADER = FUSION_POD_AUTH;
 const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 

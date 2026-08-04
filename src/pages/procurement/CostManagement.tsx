@@ -15,18 +15,14 @@ const { Content } = Layout;
 const { Title, Text } = Typography;
 
 // Direct in Electron (no CORS); Vite proxy in the browser. preload exposes electronAPI.
-const _isElectron = !!(window as unknown as { electron?: unknown; electronAPI?: unknown }).electron
-  || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
-const FUSION_BASE = _isElectron
-  ? `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`
-  : '/fusion-api';
+const FUSION_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
 const AUTH_HEADER = FUSION_POD_AUTH;
 const HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 const ERP_URL = `${FUSION_BASE}/erpintegrations`;
 
 // Scheduler REST lives under /ess/rest (NOT /fscmRestApi). Direct host in Electron.
 const FUSION_HOST = FUSION_POD_HOST;
-const SCHEDULER_URL = _isElectron ? `${FUSION_HOST}/ess/rest/scheduler/v1/requests` : '/fusion-ess/requests';
+const SCHEDULER_URL = `${FUSION_HOST}/ess/rest/scheduler/v1/requests`;
 
 const REDWOOD = {
   primary: '#C74634', info: '#0572CE', success: '#1D7B4D', warning: '#D4A800', error: '#D93025',

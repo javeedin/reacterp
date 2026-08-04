@@ -28,11 +28,7 @@ const REDWOOD = {
 // ── API ───────────────────────────────────────────────────────────────────────
 // In Electron the request goes directly (no CORS). In a browser (dev) it routes
 // through the Vite proxy. Mirrors ManageExpectedReceipts.
-const _isElectron = !!(window as unknown as { electron?: unknown; electronAPI?: unknown }).electron
-  || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
-const FUSION_BASE = _isElectron
-  ? `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`
-  : '/fusion-api';
+const FUSION_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
 const AUTH_HEADER = FUSION_POD_AUTH;
 const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 
@@ -77,9 +73,8 @@ const defaultShipmentNumber = () => `ASN${dayjs().format('YYMMDDHHmm')}`;
 
 const lineKey = (l: POLine) => String(l.DocumentLineId ?? `${l.DocumentNumber}-${l.DocumentLineNumber}-${l.DocumentScheduleNumber}`);
 
-// Fusion HATEOAS links are absolute URLs to the real host. In the browser (dev)
-// that bypasses the Vite proxy and trips CORS, so rewrite the resource prefix to
-// FUSION_BASE (a no-op in Electron, → /fusion-api in the browser).
+// Fusion HATEOAS links are absolute URLs. Re-point them at the selected POD's
+// FUSION_BASE so links always target the current instance (direct call).
 const proxied = (href: string) =>
   href.replace(/^https?:\/\/[^/]+\/fscmRestApi\/resources\/11\.13\.18\.05/i, FUSION_BASE);
 
