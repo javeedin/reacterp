@@ -1675,6 +1675,9 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
   const [showDooRef, setShowDooRef] = useState(false);
   const [detail, setDetail] = useState<any | null>(null);
   const [totalsOrder, setTotalsOrder] = useState<any | null>(null);
+  const [pageOffset, setPageOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const [filters, setFilters] = useState<Filters>({
     dateFrom: dayjs().subtract(1, 'month'), dateTo: dayjs().add(1, 'day'),
@@ -1699,24 +1702,30 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
     return `${FUSION_BASE}/salesOrdersForOrderHub?${qs}orderBy=TransactionOn:desc`;
   }, [filters, buildQ]);
 
-  // Fetch a single page of the most-recent matches (no deep paging) so the search
-  // stays fast on large PODs. Narrow the filters to reach older orders.
+  // Fetch one page of 50 at a time (no deep paging) so the search stays fast on
+  // large PODs. "Load next 50" pulls the following page and appends it.
   const SEARCH_LIMIT = 50;
-  const runSearch = useCallback(async () => {
-    setLoading(true); setError(''); setSearched(true);
+  const fetchPage = useCallback(async (off: number, append: boolean) => {
+    if (append) setLoadingMore(true); else { setLoading(true); setError(''); setSearched(true); }
     try {
       const stripped = searchUrl.replace(/[?&]limit=\d+/gi, '').replace(/[?&]offset=\d+/gi, '').replace(/\?&/, '?').replace(/&&/g, '&');
       const sep = stripped.includes('?') ? '&' : '?';
-      const r = await fetchWithTimeout(`${stripped}${sep}limit=${SEARCH_LIMIT}`, { headers: FUSION_HDRS });
+      const r = await fetchWithTimeout(`${stripped}${sep}limit=${SEARCH_LIMIT}&offset=${off}`, { headers: FUSION_HDRS });
       if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
       const d = await r.json();
       const items: any[] = Array.isArray(d) ? d : (d.items ?? []);
-      setRows(items);
-      if (items.length === 0) setError('No sales orders matched.');
-      else if (d.hasMore) setError(`Showing the first ${SEARCH_LIMIT} orders — narrow the date range or filters to see more.`);
-    } catch (e: any) { setError(e.message); setRows([]); }
-    finally { setLoading(false); }
+      setRows(prev => append ? [...prev, ...items] : items);
+      setPageOffset(off);
+      setHasMore(!!d.hasMore && items.length === SEARCH_LIMIT);
+      if (!append && items.length === 0) setError('No sales orders matched.');
+    } catch (e: any) {
+      if (append) message.error(e.message); else { setError(e.message); setRows([]); }
+    } finally {
+      if (append) setLoadingMore(false); else setLoading(false);
+    }
   }, [searchUrl]);
+  const runSearch = useCallback(() => fetchPage(0, false), [fetchPage]);
+  const loadMore = useCallback(() => fetchPage(pageOffset + SEARCH_LIMIT, true), [fetchPage, pageOffset]);
 
   const filtered = useMemo(() => {
     let base = rows;
@@ -1850,8 +1859,19 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
         ) : filtered.length === 0 ? (
           <Empty description="No sales orders" style={{ padding: 60 }} />
         ) : (
-          <Table columns={columns} dataSource={filtered} rowKey={(r, i) => `${r.HeaderId ?? r.OrderKey ?? i}`} size="small"
-            scroll={{ x: 2249 }} pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} orders` }} />
+          <>
+            <Table columns={columns} dataSource={filtered} rowKey={(r, i) => `${r.HeaderId ?? r.OrderKey ?? i}`} size="small"
+              scroll={{ x: 2249 }} pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} orders` }} />
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, padding: '12px 0 4px' }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>{rows.length} loaded</Text>
+              {hasMore ? (
+                <Button size="small" icon={<ReloadOutlined />} loading={loadingMore} onClick={loadMore}
+                  style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Load next {SEARCH_LIMIT}</Button>
+              ) : (
+                <Text type="secondary" style={{ fontSize: 12 }}>— no more —</Text>
+              )}
+            </div>
+          </>
         )}
       </Card>
 
