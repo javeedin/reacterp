@@ -732,7 +732,7 @@ const RevenueRecognition: React.FC = () => {
       const acct = isAccounted(s);
       if (acct) row.fySub[fy] = (row.fySub[fy] || 0) + amt;    // recognized per fiscal year (yearly subtotal)
       if (d) {
-        if (d < curStart) { if (!acct) row.closing += amt; }   // invoiced-but-not-recognized before this FY
+        if (d < curStart) { if (acct) row.closing += amt; }    // recognized up to Mar-YY (opening balance)
         else if (d < curEnd && acct) row.schedulesFy += amt;   // recognized in this FY
       }
     });
@@ -769,7 +769,7 @@ const RevenueRecognition: React.FC = () => {
       { title: 'Trx #', dataIndex: 'trxNumber', key: 'trxNumber', width: 90, fixed: 'left' as const, render: (v: any) => <Text strong>{v ?? '—'}</Text> },
       { title: 'Unit', dataIndex: 'unit', key: 'unit', width: 110, fixed: 'left' as const },
       { title: 'Tenant', dataIndex: 'tenant', key: 'tenant', width: 150, fixed: 'left' as const, ellipsis: true },
-      { title: <Tooltip title={`Opening balance as of Mar-${String(glFyStartYear % 100).padStart(2, '0')} (position carried into ${fyLabel(glFyStartYear)})`}><span>{openingLabel}</span></Tooltip>, dataIndex: 'closing', key: 'closing', width: 130, align: 'right' as const,
+      { title: <Tooltip title={`Revenue recognized up to and including Mar-${String(glFyStartYear % 100).padStart(2, '0')} (opening balance carried into ${fyLabel(glFyStartYear)})`}><span>{openingLabel}</span></Tooltip>, dataIndex: 'closing', key: 'closing', width: 130, align: 'right' as const,
         onCell: () => ({ style: { background: '#f6faf6' } }),
         render: (v: number) => <Text strong style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
     ];
