@@ -781,9 +781,9 @@ const RevenueRecognition: React.FC = () => {
   const glColumns: ColumnsType<any> = useMemo(() => {
     const cols: ColumnsType<any> = [
       { title: 'Trx #', dataIndex: 'trxNumber', key: 'trxNumber', width: 90, fixed: 'left' as const, sorter: (a: any, b: any) => (a.trxNumber || 0) - (b.trxNumber || 0), render: (v: any) => <Text strong>{v ?? '—'}</Text> },
-      { title: 'Unit', dataIndex: 'unit', key: 'unit', width: 110, fixed: 'left' as const, sorter: (a: any, b: any) => String(a.unit || '').localeCompare(String(b.unit || '')) },
+      { title: 'Unit', dataIndex: 'unit', key: 'unit', width: 110, fixed: 'left' as const, sorter: (a: any, b: any) => String(a.unit || '').localeCompare(String(b.unit || '')), defaultSortOrder: 'ascend' as const },
       { title: 'Tenant', dataIndex: 'tenant', key: 'tenant', width: 150, fixed: 'left' as const, ellipsis: true },
-      { title: <Tooltip title="Contract value (RENT_TOTAL) — control amount"><span>Control Amount</span></Tooltip>, dataIndex: 'controlAmount', key: 'controlAmount', width: 130, align: 'right' as const,
+      { title: <Tooltip title="Contract value (RENT_TOTAL)"><span>Total Rent</span></Tooltip>, dataIndex: 'controlAmount', key: 'controlAmount', width: 130, align: 'right' as const,
         render: (v: number) => <Text style={{ fontFamily: 'monospace' }}>{fmt(v)}</Text> },
       { title: 'Start Date', dataIndex: 'startDate', key: 'startDate', width: 110, align: 'center' as const,
         render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
@@ -931,7 +931,7 @@ const RevenueRecognition: React.FC = () => {
   const buildGlExport = () => {
     const fyMonths = glMatrix.months.filter(m => m.fy === glFyStartYear);
     const openLbl = `Opening (Mar-${String(glFyStartYear % 100).padStart(2, '0')})`;
-    const header = ['Trx #', 'Unit', 'Tenant', 'Control Amount', 'Start Date', 'End Date', openLbl, '+ Additions', ...fyMonths.map(m => m.name), '- Schedules', '= Available'];
+    const header = ['Trx #', 'Unit', 'Tenant', 'Total Rent', 'Start Date', 'End Date', openLbl, '+ Additions', ...fyMonths.map(m => m.name), '- Schedules', '= Available'];
     const monthStart = 8;
     const numCols = new Set<number>([3, 6, 7]);
     fyMonths.forEach((_, i) => numCols.add(monthStart + i));
@@ -944,7 +944,9 @@ const RevenueRecognition: React.FC = () => {
       ...fyMonths.map(m => { const c = r.cells[m.name]; return (c && isAccounted(c)) ? (Number(c.amount) || 0) : 0; }),
       r.schedulesFy ?? 0, r.available ?? 0,
     ]);
-    const body = glMatrix.rows.map(rowVals);
+    // Sort by Unit so exports match the default on-screen order.
+    const sortedRows = [...glMatrix.rows].sort((a, b) => String(a.unit || '').localeCompare(String(b.unit || '')));
+    const body = sortedRows.map(rowVals);
     const totals: (string | number)[] = [
       `Grand Total (${glMatrix.rows.length})`, '', '',
       glMatrix.totals.control, '', '',
