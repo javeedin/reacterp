@@ -13,7 +13,7 @@ import {
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
 import { ShipConfirmModal, PickSlipDialog } from './ConfirmPicks';
-import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
+import { FUSION_POD_HOST, FUSION_POD_AUTH, getFusionInstance } from '../../config/fusionInstance';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -635,7 +635,7 @@ const ManageShipmentLines: React.FC = () => {
                 <Tag color="blue">GET</Tag>{decodeURIComponent(searchUrl)}
               </div>
             </div>
-            <Text type="secondary" style={{ fontSize: 11 }}>Dates are unquoted (CreationDate&gt;2026-07-25); text uses SQL LIKE. Auth: Basic [emparun].</Text>
+            <Text type="secondary" style={{ fontSize: 11 }}>Dates are unquoted (CreationDate&gt;2026-07-25); text uses SQL LIKE. Auth: Basic [{getFusionInstance().username}].</Text>
           </div>
         </Modal>
 

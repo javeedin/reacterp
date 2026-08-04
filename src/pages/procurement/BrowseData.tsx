@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
-import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
+import { FUSION_POD_HOST, FUSION_POD_AUTH, getFusionInstance } from '../../config/fusionInstance';
 import {
   DatabaseOutlined, ApiOutlined, PlayCircleOutlined, ReloadOutlined, CheckCircleTwoTone,
   CloseCircleTwoTone, MinusCircleOutlined, LoadingOutlined, SearchOutlined, CopyOutlined,
@@ -450,7 +450,7 @@ const BrowseData: React.FC = () => {
                     value={customPath} onChange={e => setCustomPath(e.target.value)} onPressEnter={runCustom} />
                   <Button type="primary" loading={customRunning} onClick={runCustom} icon={<PlayCircleOutlined />} style={{ background: RW.primary, borderColor: RW.primary }}>Run</Button>
                 </Space.Compact>
-                <div style={{ marginTop: 6 }}><Text type="secondary" style={{ fontSize: 11 }}>Base: <code>{FUSION_BASE}</code> · Auth: Basic [emparun] · adds <code>onlyData=true&amp;limit=100</code> when no limit is given.</Text></div>
+                <div style={{ marginTop: 6 }}><Text type="secondary" style={{ fontSize: 11 }}>Base: <code>{FUSION_BASE}</code> · Auth: Basic [{getFusionInstance().username}] · adds <code>onlyData=true&amp;limit=100</code> when no limit is given.</Text></div>
                 {customResult && (
                   <div style={{ marginTop: 12 }}>
                     <Space wrap style={{ marginBottom: 6 }}>

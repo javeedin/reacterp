@@ -13,7 +13,7 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
-import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
+import { FUSION_POD_HOST, FUSION_POD_AUTH, getFusionInstance } from '../../config/fusionInstance';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -503,7 +503,7 @@ const SearchTab: React.FC<{ orgsLoading: boolean; orgsUrl: string; reloadOrgs: (
             </div>
           ))}
           <Button size="small" icon={<ReloadOutlined />} loading={orgsLoading} onClick={reloadOrgs} style={{ alignSelf: 'flex-start' }}>Reload orgs</Button>
-          <Text type="secondary" style={{ fontSize: 11 }}>Auth: Basic [emparun] · Accept: application/json</Text>
+          <Text type="secondary" style={{ fontSize: 11 }}>Auth: Basic [{getFusionInstance().username}] · Accept: application/json</Text>
         </div>
       </Modal>
     </div>

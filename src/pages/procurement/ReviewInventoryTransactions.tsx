@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
-import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
+import { FUSION_POD_HOST, FUSION_POD_AUTH, getFusionInstance } from '../../config/fusionInstance';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -216,7 +216,7 @@ const ReviewInventoryTransactions: React.FC = () => {
           <div style={{ marginTop: 4, padding: '8px 12px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
             <Tag color="blue">GET</Tag>{decodeURIComponent(searchUrl)}
           </div>
-          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>Organization is required; Item uses SQL LIKE, date is unquoted. Auth: Basic [emparun].</Text>
+          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>Organization is required; Item uses SQL LIKE, date is unquoted. Auth: Basic [{getFusionInstance().username}].</Text>
         </Modal>
 
         {/* All-fields detail */}
