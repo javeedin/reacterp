@@ -16,13 +16,14 @@ import {
 } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
+import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
 
 const { Header, Content, Sider } = Layout;
 const { Title, Text } = Typography;
 const { Option } = Select;
 
-const BASE_URL    = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
-const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
+const BASE_URL    = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
+const AUTH_HEADER = FUSION_POD_AUTH;
 const HDRS        = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 
 const REDWOOD = {
@@ -44,7 +45,7 @@ const coaSegmentCache: Record<string, Record<string, string>> = {};
 // backward-compat alias used by BIP "Get Account Description"
 const coaAccountCache: Record<string, string> = {};
 
-const COA_BASE = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05/valueSets';
+const COA_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05/valueSets`;
 
 const COA_SEGMENTS = [
   { key: 'coa-company',          label: 'Company',          valueSet: 'Company_VS'         },
@@ -984,7 +985,7 @@ const COASegmentsPage: React.FC<{ activeSegKey: string }> = ({ activeSegKey }) =
 
 // ── Oracle BIP Reports helpers ────────────────────────────────────────────────
 
-const BIP_HOST      = 'https://iacney-test.fa.ocs.oraclecloud.com';
+const BIP_HOST      = FUSION_POD_HOST;
 const BIP_BASE_PATH = '/Custom/UAT_disanostic_SCRIPTS/';
 
 const buildBipSoapEnvelope = (reportPath: string, username: string, password: string) =>
@@ -1055,7 +1056,7 @@ interface DrillState {
 const isIdColumn = (col: string) =>
   /(_ID|_NUMBER|_KEY|_BATCH|_HDR|_HEADER|_LINE|_SEQ|BATCH_ID|JE_BATCH|JE_HEADER|HEADER_ID|LINE_ID)$/i.test(col);
 
-const APEX_DEFAULT_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/ords/';
+const APEX_DEFAULT_URL = `${FUSION_POD_HOST}/ords/`;
 
 const OracleBIPReports: React.FC = () => {
   const [tabs, setTabs]           = useState<BipTabState[]>([]);

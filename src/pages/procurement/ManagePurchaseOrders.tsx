@@ -19,6 +19,7 @@ import {
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import CreatePurchaseOrder from './CreatePurchaseOrder';
 import POLifeCycleModal from './POLifeCycle';
+import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -34,8 +35,8 @@ const REDWOOD = {
 };
 
 // ── Oracle Fusion API config ─────────────────────────────────────────────────
-const BASE_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
-const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
+const BASE_URL = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
+const AUTH_HEADER = FUSION_POD_AUTH;
 const PAGE_SIZE = 25;
 const CHILD_LIMIT = 500;
 

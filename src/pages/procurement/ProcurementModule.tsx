@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Layout, Breadcrumb, Typography, Card, Row, Col, Input, Button, Form, Alert, Divider, message, Tag } from 'antd';
+import { Layout, Breadcrumb, Typography, Card, Row, Col, Input, Button, Form, Alert, Divider, message, Tag, Select, Tooltip } from 'antd';
+import { FUSION_INSTANCES, getFusionInstanceKey, setFusionInstanceKey, getFusionInstance } from '../../config/fusionInstance';
 import {
   HomeOutlined, ShoppingCartOutlined, TeamOutlined, AppstoreOutlined,
   DatabaseOutlined, CheckCircleOutlined, LockOutlined, BugOutlined,
@@ -554,6 +555,37 @@ const ProcurementHome: React.FC = () => {
                 )}
               </div>
               <Text type="secondary">Interface to query and perform transactions in Oracle Fusion</Text>
+            </div>
+
+            {/* Instance / POD selector — switches the Fusion base URL for every module below */}
+            <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+              <Text style={{ display: 'block', fontSize: 11, color: REDWOOD.neutral600, marginBottom: 4 }}>
+                <CloudOutlined /> Fusion Instance (POD)
+              </Text>
+              <Tooltip title={getFusionInstance().host}>
+                <Select
+                  value={getFusionInstanceKey()}
+                  style={{ minWidth: 220 }}
+                  onChange={(key) => {
+                    if (key === getFusionInstanceKey()) return;
+                    const inst = FUSION_INSTANCES.find(i => i.key === key);
+                    setFusionInstanceKey(key);
+                    message.success(`Switched to ${inst?.label} — reloading…`);
+                    setTimeout(() => window.location.reload(), 600);
+                  }}
+                  options={FUSION_INSTANCES.map(i => ({
+                    value: i.key,
+                    label: (
+                      <span>
+                        <b>{i.label}</b>
+                        <span style={{ color: REDWOOD.neutral600, fontSize: 11, marginLeft: 8 }}>
+                          {i.host.replace(/^https?:\/\//, '')}
+                        </span>
+                      </span>
+                    ),
+                  }))}
+                />
+              </Tooltip>
             </div>
           </div>
 

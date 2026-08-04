@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
+import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -22,11 +23,11 @@ const { Title, Text } = Typography;
 const _isElectron = !!(window as unknown as { electron?: unknown; electronAPI?: unknown }).electron
   || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
 const FUSION_BASE = _isElectron
-  ? 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05'
+  ? `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`
   : '/fusion-api';
 // itemCosts is exposed on the "latest" resource version (same as Manage Item Cost).
-const LATEST_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/latest';
-const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
+const LATEST_URL = `${FUSION_POD_HOST}/fscmRestApi/resources/latest`;
+const AUTH_HEADER = FUSION_POD_AUTH;
 const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 const CHILD_LIMIT = 500;
 

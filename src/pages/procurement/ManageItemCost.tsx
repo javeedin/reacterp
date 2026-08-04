@@ -15,6 +15,7 @@ import {
   Tooltip as RTooltip, Cell, LabelList, PieChart, Pie, Legend,
 } from 'recharts';
 import { Link } from 'react-router-dom';
+import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -29,8 +30,8 @@ const REDWOOD = {
 };
 
 // ── API ───────────────────────────────────────────────────────────────────────
-const LATEST_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/latest';
-const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
+const LATEST_URL = `${FUSION_POD_HOST}/fscmRestApi/resources/latest`;
+const AUTH_HEADER = FUSION_POD_AUTH;
 const HEADERS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 const PAGE_LIMIT = 500;
 

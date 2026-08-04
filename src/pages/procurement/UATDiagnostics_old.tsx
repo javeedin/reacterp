@@ -13,13 +13,14 @@ import {
   ExclamationCircleOutlined, MinusCircleOutlined,
 } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
+import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
 
 const { Header, Content, Sider } = Layout;
 const { Title, Text } = Typography;
 const { Option } = Select;
 
-const BASE_URL    = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
-const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
+const BASE_URL    = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
+const AUTH_HEADER = FUSION_POD_AUTH;
 const HDRS        = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 
 const REDWOOD = {

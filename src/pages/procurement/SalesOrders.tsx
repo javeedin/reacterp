@@ -22,6 +22,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -29,9 +30,9 @@ const { Title, Text } = Typography;
 const _isElectron = !!(window as unknown as { electron?: unknown; electronAPI?: unknown }).electron
   || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
 const FUSION_BASE = _isElectron
-  ? 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05'
+  ? `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`
   : '/fusion-api';
-const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
+const AUTH_HEADER = FUSION_POD_AUTH;
 const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 const PAGE_LIMIT = 500;
 
@@ -2106,7 +2107,7 @@ const TotalLine: React.FC<{ label: string; value: React.ReactNode; strong?: bool
 
 // itemCosts lives on the "latest" resource version; org is inside ValuationUnit
 // "COSTORG-INVORG-SUBINV-LOT" (not directly filterable), so match client-side.
-const LATEST_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/latest';
+const LATEST_URL = `${FUSION_POD_HOST}/fscmRestApi/resources/latest`;
 const COST_FIELDS = ['TotalUnitCost', 'UnitCost', 'ItemCost', 'UnitAverageCost', 'AverageUnitCost'];
 const QTY_FIELDS = ['Quantity', 'OnhandQuantity', 'OnHandQuantity', 'TotalQuantity', 'ItemQuantity', 'CostQuantity'];
 const parseVU = (vu?: string) => { const p = String(vu ?? '').split('-'); return { costOrg: p[0], invOrg: p[1], subinv: p[2], lot: p[3] }; };

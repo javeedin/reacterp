@@ -5,6 +5,7 @@ import {
   Button, Tooltip, Segmented, message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
 import {
   HistoryOutlined, FolderOpenOutlined, FileTextOutlined,
   ReloadOutlined, ApiOutlined, InfoCircleOutlined, DollarOutlined,
@@ -30,8 +31,8 @@ const REDWOOD = {
 const CHART_COLORS = ['#C74634', '#0572CE', '#1D7B4D', '#B07700', '#7245A6', '#00918A', '#E85D4A', '#D93025'];
 
 // ── Fusion config ────────────────────────────────────────────────────────────
-const BASE_URL = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
-const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
+const BASE_URL = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
+const AUTH_HEADER = FUSION_POD_AUTH;
 const CHILD_LIMIT = 500;
 // Fusion's canonical resource capitalises the C (LifeCycle); some versions use
 // a lowercase c — try the canonical form first, fall back on 404.

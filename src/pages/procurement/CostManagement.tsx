@@ -9,6 +9,7 @@ import {
   ThunderboltOutlined, SearchOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
+import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -17,14 +18,14 @@ const { Title, Text } = Typography;
 const _isElectron = !!(window as unknown as { electron?: unknown; electronAPI?: unknown }).electron
   || !!(window as unknown as { electronAPI?: unknown }).electronAPI;
 const FUSION_BASE = _isElectron
-  ? 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05'
+  ? `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`
   : '/fusion-api';
-const AUTH_HEADER = 'Basic ' + btoa('emparun:Fusion@1234');
+const AUTH_HEADER = FUSION_POD_AUTH;
 const HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
 const ERP_URL = `${FUSION_BASE}/erpintegrations`;
 
 // Scheduler REST lives under /ess/rest (NOT /fscmRestApi). Direct host in Electron.
-const FUSION_HOST = 'https://iacney-test.fa.ocs.oraclecloud.com';
+const FUSION_HOST = FUSION_POD_HOST;
 const SCHEDULER_URL = _isElectron ? `${FUSION_HOST}/ess/rest/scheduler/v1/requests` : '/fusion-ess/requests';
 
 const REDWOOD = {

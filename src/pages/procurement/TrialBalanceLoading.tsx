@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
+import { FUSION_POD_HOST } from '../../config/fusionInstance';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -23,7 +24,7 @@ const REDWOOD = {
   neutral600: '#6B6B6B', neutral900: '#1A1A1A',
 };
 
-const COA_BASE = 'https://iacney-test.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05/valueSets';
+const COA_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05/valueSets`;
 const HDRS = {
   'Content-Type': 'application/json',
   Accept: 'application/json',
