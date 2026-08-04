@@ -12,7 +12,7 @@ import {
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
-import { FUSION_POD_HOST } from '../../config/fusionInstance';
+import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -28,7 +28,7 @@ const COA_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05/valueSets
 const HDRS = {
   'Content-Type': 'application/json',
   Accept: 'application/json',
-  Authorization: `Basic ${btoa('emparun:Fusion@1234')}`,
+  Authorization: FUSION_POD_AUTH,
 };
 
 const COA_SEGMENTS = [
