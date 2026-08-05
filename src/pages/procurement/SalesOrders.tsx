@@ -4663,14 +4663,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   };
 
   // Re-open the "Select a lot" popup for a line that already has an item.
+  // Always opens (even with no lots) so the dialog + API inspector are reachable.
   const reopenLotPick = async (l: NewLine) => {
     if (!l.itemNumber) { message.warning('Pick an item first'); return; }
     upd(l.key, { ohLoading: true });
     let costRows: any[] = [];
     try { costRows = await fetchItemCostRows(l.itemNumber, hdr.warehouse); } catch { /* none */ }
     upd(l.key, { ohLoading: false });
-    const lots = Array.from(new Set(costRows.map(c => parseVU(c.ValuationUnit).lot).filter(Boolean)));
-    if (!lots.length) { message.info(`No lots found for ${l.itemNumber}`); return; }
     openLotPick(l.key, l.itemNumber, costRows);
   };
 
@@ -6193,8 +6192,18 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       </Modal>
 
       <Modal open={!!lotPick} onCancel={() => setLotPick(null)} maskClosable={false} width={620} footer={<Button onClick={() => setLotPick(null)}>Cancel</Button>}
-        title={<Space><TagsOutlined style={{ color: REDWOOD.info }} /> Select a lot{lotPick ? <Tag color="blue">{lotPick.item}</Tag> : null}</Space>}>
-        <Text type="secondary" style={{ fontSize: 12 }}>This item has multiple lots — pick one to bring its cost and on-hand.</Text>
+        title={<Space><TagsOutlined style={{ color: REDWOOD.info }} /> Select a lot{lotPick ? <Tag color="blue">{lotPick.item}</Tag> : null}
+          <Tooltip title="Inspect the itemCosts web service URL used to load lots">
+            <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }}
+              onClick={() => setLotApi({ open: true, url: lotPick ? `${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemNumber=${lotPick.item}`)}&onlyData=true&limit=500` : '' })} />
+          </Tooltip>
+        </Space>}>
+        {(() => {
+          const lotCount = lotPick ? new Set(lotPick.rows.map(r => parseVU(r.ValuationUnit).lot).filter(Boolean)).size : 0;
+          return lotCount > 0
+            ? <Text type="secondary" style={{ fontSize: 12 }}>This item has multiple lots — pick one to bring its cost and on-hand.</Text>
+            : <Text type="secondary" style={{ fontSize: 12, color: REDWOOD.warning }}>No lots returned for this item on <b>{getFusionInstance().label}</b>. Use the <ApiOutlined /> icon above to inspect and Run the itemCosts query and see what the POD returns.</Text>;
+        })()}
         <Table size="small" style={{ marginTop: 10 }} pagination={false} rowKey={(_, i) => `lp-${i}`}
           dataSource={lotPick ? Array.from(new Set(lotPick.rows.map(r => parseVU(r.ValuationUnit).lot).filter(Boolean))).map(lot => {
             const row = lotPick.rows.find(r => parseVU(r.ValuationUnit).lot === lot);
