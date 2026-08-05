@@ -2268,14 +2268,20 @@ const fetchOrderCustomerRefs = async (order: any, providedLines?: any[]): Promis
 };
 
 // Shared Fusion lookups (used by the picker modal and inline new-line search).
-async function fetchItemCostRows(item: string, org?: string) {
-  const r = await fetch(`${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemNumber=${item}`)}&onlyData=true&limit=500`, { headers: FUSION_HDRS });
+// Small page size + offset so itemCosts stays fast on large PODs (was limit=500,
+// which crawled). The lot dialog offers a "next 25" to page further.
+const LOT_PAGE = 25;
+export const itemCostsUrlFor = (item: string, offset = 0) =>
+  `${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemNumber=${item}`)}&onlyData=true&limit=${LOT_PAGE}&offset=${offset}`;
+async function fetchItemCostRows(item: string, org?: string, offset = 0): Promise<{ rows: any[]; hasMore: boolean }> {
+  const r = await fetch(itemCostsUrlFor(item, offset), { headers: FUSION_HDRS });
   const d = await r.json();
-  return ((d.items ?? []) as any[]).filter(x => rowOrgMatches(x, org));
+  const rows = ((d.items ?? []) as any[]).filter(x => rowOrgMatches(x, org));
+  return { rows, hasMore: !!d.hasMore };
 }
 async function fetchOnhand(item: string, invOrg: string, subinv?: string, lot?: string): Promise<{ qty: number; lots: string[] }> {
   let q = `OrganizationCode=${invOrg};ItemNumber=${item}`; if (subinv) q += `;SubinventoryCode=${subinv}`;
-  const r = await fetch(`${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&limit=500`, { headers: FUSION_HDRS });
+  const r = await fetch(`${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&limit=${LOT_PAGE}`, { headers: FUSION_HDRS });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
   const lotRows: any[] = [];
@@ -2306,7 +2312,7 @@ async function fetchReserveOptions(item: string, invOrg: string, subinv?: string
   };
   let q = `OrganizationCode=${invOrg};ItemNumber=${item}`; if (subinv) q += `;SubinventoryCode=${subinv}`;
   try {
-    const r = await fetch(`${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&limit=500`, { headers: FUSION_HDRS });
+    const r = await fetch(`${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&limit=${LOT_PAGE}`, { headers: FUSION_HDRS });
     if (r.ok) {
       const d = await r.json();
       for (const b of (d.items ?? [])) {
@@ -4123,10 +4129,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [discAmt, setDiscAmt] = useState(initialDraft?.discAmt ?? 0);
   const [expAmt, setExpAmt] = useState(initialDraft?.expAmt ?? 0);
   const [lineSearch, setLineSearch] = useState<Record<string, { loading?: boolean; tooShort?: boolean; opts: any[] }>>({});
-  const [lotPick, setLotPick] = useState<{ key: string; item: string; rows: any[]; onh: Record<string, { loading?: boolean; qty?: number }>; qtyLoading?: boolean } | null>(null);
+  const [lotPick, setLotPick] = useState<{ key: string; item: string; rows: any[]; onh: Record<string, { loading?: boolean; qty?: number }>; qtyLoading?: boolean; hasMore?: boolean; offset?: number; loadingMore?: boolean } | null>(null);
   // Open the lot picker and fetch on-hand quantity per lot (shown in a Qty column).
-  const openLotPick = (key: string, item: string, rows: any[]) => {
-    setLotPick({ key, item, rows, onh: {}, qtyLoading: true });
+  const openLotPick = (key: string, item: string, rows: any[], hasMore = false) => {
+    setLotPick({ key, item, rows, onh: {}, qtyLoading: true, hasMore, offset: 0 });
     (async () => {
       try {
         const opt = await fetchReserveOptions(item, hdr.warehouse ?? '', undefined);
@@ -4655,11 +4661,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     const item = itemRow ?? (lineSearch[key]?.opts ?? []).find(o => o.ItemNumber === itemNumber) ?? { ItemNumber: itemNumber };
     upd(key, { itemNumber, description: item.ItemDescription, uom: pf(item, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']), ohLoading: true });
     setLineSearch(p => ({ ...p, [key]: { opts: [] } }));
-    let costRows: any[] = [];
-    try { costRows = await fetchItemCostRows(itemNumber, hdr.warehouse); } catch { /* none */ }
-    const lots = Array.from(new Set(costRows.map(c => parseVU(c.ValuationUnit).lot).filter(Boolean))) as string[];
-    if (lots.length > 1) { upd(key, { ohLoading: false }); openLotPick(key, itemNumber, costRows); }
-    else { await applyItemToLine(key, item, costRows, lots[0]); }
+    let res: { rows: any[]; hasMore: boolean } = { rows: [], hasMore: false };
+    try { res = await fetchItemCostRows(itemNumber, hdr.warehouse); } catch { /* none */ }
+    const lots = Array.from(new Set(res.rows.map(c => parseVU(c.ValuationUnit).lot).filter(Boolean))) as string[];
+    if (lots.length > 1 || (res.hasMore && lots.length >= 1)) { upd(key, { ohLoading: false }); openLotPick(key, itemNumber, res.rows, res.hasMore); }
+    else { await applyItemToLine(key, item, res.rows, lots[0]); }
   };
 
   // Re-open the "Select a lot" popup for a line that already has an item.
@@ -4667,10 +4673,20 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const reopenLotPick = async (l: NewLine) => {
     if (!l.itemNumber) { message.warning('Pick an item first'); return; }
     upd(l.key, { ohLoading: true });
-    let costRows: any[] = [];
-    try { costRows = await fetchItemCostRows(l.itemNumber, hdr.warehouse); } catch { /* none */ }
+    let res: { rows: any[]; hasMore: boolean } = { rows: [], hasMore: false };
+    try { res = await fetchItemCostRows(l.itemNumber, hdr.warehouse); } catch { /* none */ }
     upd(l.key, { ohLoading: false });
-    openLotPick(l.key, l.itemNumber, costRows);
+    openLotPick(l.key, l.itemNumber, res.rows, res.hasMore);
+  };
+  const loadMoreLots = async () => {
+    if (!lotPick) return;
+    const nextOffset = (lotPick.offset ?? 0) + LOT_PAGE;
+    const item = lotPick.item;
+    setLotPick(p => p ? { ...p, loadingMore: true } : p);
+    try {
+      const res = await fetchItemCostRows(item, hdr.warehouse, nextOffset);
+      setLotPick(p => (p && p.item === item) ? { ...p, rows: [...p.rows, ...res.rows], hasMore: res.hasMore, offset: nextOffset, loadingMore: false } : p);
+    } catch { setLotPick(p => p ? { ...p, loadingMore: false } : p); }
   };
 
   // An existing line can be updated unless it's already Awaiting Billing / Closed
@@ -4684,7 +4700,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     setUpdLots((l.lots ?? []).map(lot => ({ lot, qty: 0 })));
     // Capture the exact on-hand URL used to load the lots (for the API inspector).
     const lotUrl = (hdr.warehouse && l.itemNumber)
-      ? `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(`OrganizationCode=${hdr.warehouse};ItemNumber=${l.itemNumber}${hdr.subinventory ? `;SubinventoryCode=${hdr.subinventory}` : ''}`)}&limit=500`
+      ? `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(`OrganizationCode=${hdr.warehouse};ItemNumber=${l.itemNumber}${hdr.subinventory ? `;SubinventoryCode=${hdr.subinventory}` : ''}`)}&limit=${LOT_PAGE}`
       : '';
     setLotApi({ open: false, url: lotUrl });
     // Fetch available on-hand lots for the item so the user can pick one.
@@ -6191,11 +6207,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         })()}
       </Modal>
 
-      <Modal open={!!lotPick} onCancel={() => setLotPick(null)} maskClosable={false} width={620} footer={<Button onClick={() => setLotPick(null)}>Cancel</Button>}
+      <Modal open={!!lotPick} onCancel={() => setLotPick(null)} maskClosable={false} width={620}
+        footer={<Space>
+          {lotPick?.hasMore && <Button icon={<ReloadOutlined />} loading={lotPick?.loadingMore} onClick={loadMoreLots}
+            style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Load next {LOT_PAGE}</Button>}
+          <Button onClick={() => setLotPick(null)}>Cancel</Button>
+        </Space>}
         title={<Space><TagsOutlined style={{ color: REDWOOD.info }} /> Select a lot{lotPick ? <Tag color="blue">{lotPick.item}</Tag> : null}
           <Tooltip title="Inspect the itemCosts web service URL used to load lots">
             <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }}
-              onClick={() => setLotApi({ open: true, url: lotPick ? `${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemNumber=${lotPick.item}`)}&onlyData=true&limit=500` : '' })} />
+              onClick={() => setLotApi({ open: true, url: lotPick ? itemCostsUrlFor(lotPick.item, lotPick.offset ?? 0) : '' })} />
           </Tooltip>
         </Space>}>
         {(() => {
