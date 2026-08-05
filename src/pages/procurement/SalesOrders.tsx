@@ -3888,6 +3888,20 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [updTaxPct, setUpdTaxPct] = useState<number | undefined>();
   const [updLot, setUpdLot] = useState<string | undefined>();
   const [updLots, setUpdLots] = useState<{ lot?: string; subinventory?: string; qty: number }[]>([]);
+  // On-hand / lot API inspector for the update-line dialog.
+  const [lotApi, setLotApi] = useState<{ open: boolean; url: string; running?: boolean; status?: string; body?: string; ok?: boolean }>({ open: false, url: '' });
+  const runLotApi = async () => {
+    if (!lotApi.url) return;
+    setLotApi(s => ({ ...s, running: true, status: undefined, body: undefined }));
+    const started = Date.now();
+    try {
+      const r = await fetchWithTimeout(lotApi.url, { headers: FUSION_HDRS });
+      const text = await r.text();
+      setLotApi(s => ({ ...s, running: false, ok: r.ok, status: `HTTP ${r.status} ${r.statusText} · ${text.length} bytes · ${Date.now() - started}ms`, body: text.slice(0, 4000) }));
+    } catch (e: any) {
+      setLotApi(s => ({ ...s, running: false, ok: false, status: `Failed after ${Date.now() - started}ms`, body: e?.message || String(e) }));
+    }
+  };
   // Line-Total drill → charges/chargeComponents fetched live from Fusion.
   const [chargeDrill, setChargeDrill] = useState<{ line: NewLine; loading: boolean; url: string; charges: any[]; error?: string } | null>(null);
   const [chargesOpen, setChargesOpen] = useState(false);
@@ -4669,6 +4683,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     setUpdTarget(l); setUpdQty(num(l.qty)); setUpdPrice(num(l.unitPrice));
     setUpdTaxCode(l.taxCode); setUpdTaxPct(l.taxPct); setUpdLot(l.lot);
     setUpdLots((l.lots ?? []).map(lot => ({ lot, qty: 0 })));
+    // Capture the exact on-hand URL used to load the lots (for the API inspector).
+    const lotUrl = (hdr.warehouse && l.itemNumber)
+      ? `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(`OrganizationCode=${hdr.warehouse};ItemNumber=${l.itemNumber}${hdr.subinventory ? `;SubinventoryCode=${hdr.subinventory}` : ''}`)}&limit=500`
+      : '';
+    setLotApi({ open: false, url: lotUrl });
     // Fetch available on-hand lots for the item so the user can pick one.
     if (hdr.warehouse && l.itemNumber) {
       fetchReserveOptions(l.itemNumber, hdr.warehouse, hdr.subinventory)
@@ -5922,7 +5941,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                   onChange={val => { const opt = taxOptions.find(o => o.value === val); setUpdTaxCode(val); setUpdTaxPct(opt ? opt.pct : undefined); }} />
               </Col>
               <Col span={12}>
-                <Text type="secondary" style={{ fontSize: 11 }}>Lot</Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Lot</Text>
+                  <Tooltip title="Inspect the on-hand / lot web service URL">
+                    <Button size="small" type="text" icon={<ApiOutlined />} disabled={!lotApi.url}
+                      style={{ color: REDWOOD.info, height: 16, padding: 0 }}
+                      onClick={() => setLotApi(s => ({ ...s, open: true }))} />
+                  </Tooltip>
+                  {lotOpts.length === 0 && <Text type="secondary" style={{ fontSize: 10, color: REDWOOD.warning }}>no lots on hand</Text>}
+                </div>
                 <Select size="middle" showSearch allowClear style={{ width: '100%' }} popupMatchSelectWidth={false}
                   value={updLot || undefined} placeholder={lotOpts.length ? 'Select lot' : 'no lots on hand'}
                   options={lotOpts} onChange={v => setUpdLot(v || undefined)} />
@@ -5954,6 +5981,40 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           </div>
           );
         })()}
+      </Modal>
+
+      {/* On-hand / lot API inspector — shows the exact inventoryOnhandBalances URL */}
+      <Modal title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> Lot / On-hand API</Space>}
+        open={lotApi.open} onCancel={() => setLotApi(s => ({ ...s, open: false }))} maskClosable={false} width={860}
+        footer={<Button onClick={() => setLotApi(s => ({ ...s, open: false }))}>Close</Button>}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>On-hand lots (inventoryOnhandBalances)</Text>
+              <Button size="small" type="primary" icon={<ThunderboltOutlined />} style={{ marginLeft: 'auto', background: REDWOOD.success, borderColor: REDWOOD.success }}
+                loading={lotApi.running} onClick={runLotApi}>Run</Button>
+              <Button size="small" type="text" icon={<CopyOutlined />}
+                onClick={() => { navigator.clipboard.writeText(lotApi.url); message.success('Copied'); }}>Copy</Button>
+            </div>
+            <div style={{ marginTop: 4, padding: '8px 12px', borderRadius: 6, background: REDWOOD.neutral100, border: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
+              <Tag color="blue">GET</Tag>{lotApi.url ? decodeURIComponent(lotApi.url) : '(no warehouse/item — open from a line with an item and header warehouse)'}
+            </div>
+          </div>
+          {(lotApi.status || lotApi.running) && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <Text style={{ fontSize: 11, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>Response</Text>
+                {lotApi.status && <Tag color={lotApi.ok ? 'green' : 'red'}>{lotApi.status}</Tag>}
+              </div>
+              <div style={{ padding: '8px 12px', borderRadius: 6, background: '#1e1e1e', color: '#d4d4d4', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 260, overflow: 'auto' }}>
+                {lotApi.running ? 'Running…' : (lotApi.body || '(empty response)')}
+              </div>
+            </div>
+          )}
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            Instance: <b>{getFusionInstance().label}</b> ({getFusionInstance().host.replace(/^https?:\/\//, '')}) · Auth: Basic [{getFusionInstance().username}] · Warehouse (OrganizationCode) &amp; Item drive the query; empty results = no on-hand for that org/subinventory.
+          </Text>
+        </div>
       </Modal>
 
       {/* Line-Total drill → the line's charges + price components, straight from Fusion */}
