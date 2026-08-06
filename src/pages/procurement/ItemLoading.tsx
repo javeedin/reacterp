@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Button, Tag, Typography, Space, Tooltip, Spin,
-  Row, Col, message, Modal, Empty, Select, Input, Tabs, Upload, Checkbox, Steps, Alert, Progress, InputNumber,
+  Row, Col, message, Modal, Empty, Select, Input, Tabs, Upload, Checkbox, Steps, Alert, Progress, InputNumber, Drawer, Divider,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -14,7 +14,7 @@ import * as XLSX from 'xlsx';
 import { FUSION_POD_HOST, FUSION_POD_AUTH } from '../../config/fusionInstance';
 
 const { Content } = Layout;
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
 
 const FUSION_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
 const AUTH_HEADER = FUSION_POD_AUTH;
@@ -260,7 +260,7 @@ const yesNoIcon = (on: boolean) => on
   : <CloseCircleTwoTone twoToneColor={REDWOOD.error} style={{ fontSize: 16 }} />;
 
 const ALL_ORGS = '__ALL__';
-const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
+const SearchTab: React.FC<{ orgs: OrgOpt[]; onRowsChange?: (rows: any[]) => void }> = ({ orgs, onRowsChange }) => {
   const [org, setOrg] = useState<string>(ALL_ORGS);
   const [itemsText, setItemsText] = useState('');
   const [description, setDescription] = useState('');
@@ -269,6 +269,11 @@ const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
   const [err, setErr] = useState('');
   const [lastUrl, setLastUrl] = useState('');
   const [editItem, setEditItem] = useState<any | null>(null);
+
+  const updateRows = (newRows: any[]) => {
+    setRows(newRows);
+    onRowsChange?.(newRows);
+  };
 
   const run = useCallback(async () => {
     const orgClause = org && org !== ALL_ORGS ? `OrganizationCode=${org};` : '';
@@ -279,32 +284,32 @@ const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
     try {
       if (nums.length) {
         // itemsV2 has no `in (...)` — query each item number (a few in parallel),
-        // returning it across all orgs (or the one chosen org).
+        // returning it across all orgs (or the one chosen org). Fetch without onlyData=true to get links for DFF/EFF.
         const out: any[] = []; let idx = 0;
         const worker = async () => {
           while (idx < nums.length) {
             const n = nums[idx++];
-            const url = `${ITEMS_URL}?q=${orgClause}ItemNumber=${encodeURIComponent(n)}&limit=500&onlyData=true`;
+            const url = `${ITEMS_URL}?q=${orgClause}ItemNumber=${encodeURIComponent(n)}&limit=500`;
             setLastUrl(url);
             try { const r = await fetch(url, { headers: FUSION_HDRS }); if (r.ok) { const d = await r.json(); (d.items ?? []).forEach((it: any) => out.push(it)); } } catch { /* skip */ }
           }
         };
         await Promise.all(Array.from({ length: Math.min(6, nums.length) }, worker));
         out.sort((a, b) => String(a.ItemNumber).localeCompare(String(b.ItemNumber)) || String(a.OrganizationCode).localeCompare(String(b.OrganizationCode)));
-        setRows(out);
+        updateRows(out);
       } else if (description.trim()) {
         if (org === ALL_ORGS) { message.warning('Pick an organization for a description search, or paste item numbers'); setLoading(false); return; }
-        const url = `${ITEMS_URL}?q=${orgClause}ItemDescription LIKE ${description.trim()}%&limit=500&onlyData=true`;
+        const url = `${ITEMS_URL}?q=${orgClause}ItemDescription LIKE ${description.trim()}%&limit=500`;
         setLastUrl(url);
         const r = await fetch(url, { headers: FUSION_HDRS });
         const d = r.ok ? await r.json() : { items: [] };
-        setRows(d.items ?? []);
+        updateRows(d.items ?? []);
       } else {
         message.warning('Paste one or more item numbers to search'); setLoading(false); return;
       }
-    } catch (e: any) { setErr(e?.message ?? String(e)); setRows([]); }
+    } catch (e: any) { setErr(e?.message ?? String(e)); updateRows([]); }
     finally { setLoading(false); }
-  }, [org, itemsText, description]);
+  }, [org, itemsText, description, onRowsChange]);
 
   const cols: ColumnsType<any> = [
     { title: 'Item Number', dataIndex: 'ItemNumber', width: 160, render: v => <Text strong>{String(v ?? '')}</Text> },
@@ -349,6 +354,613 @@ const SearchTab: React.FC<{ orgs: OrgOpt[] }> = ({ orgs }) => {
         locale={{ emptyText: 'No items — run a search' }} />
       <EditItemModal item={editItem} onClose={() => setEditItem(null)} onSaved={run} />
     </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DFF Tab — view and update Data Flex Fields for items
+// ─────────────────────────────────────────────────────────────────────────────
+const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
+  const [dffData, setDffData] = useState<Record<string, any>>({});
+  const [dffLoading, setDffLoading] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<any | null>(null);
+  const [dffFields, setDffFields] = useState<any[]>([]);
+  const [dffApiDrawerOpen, setDffApiDrawerOpen] = useState(false);
+  const [dffUrl, setDffUrl] = useState('');
+  const [dffResponse, setDffResponse] = useState('');
+
+  const fetchDFF = async (item: any) => {
+    setDffLoading(true);
+    try {
+      const dffLink = (item.links ?? []).find((l: any) => l.name === 'ItemDFF')?.href;
+      if (!dffLink) {
+        message.warning('No DFF link found for this item');
+        setDffLoading(false);
+        return;
+      }
+      console.log('Fetching DFF from:', dffLink);
+      setDffUrl(dffLink);
+      const r = await fetch(dffLink, { headers: FUSION_HDRS });
+      if (r.ok) {
+        const d = await r.json();
+        console.log('DFF Response:', d);
+        setDffResponse(JSON.stringify(d, null, 2));
+        // Handle different response structures
+        const fields = d.items ?? Object.entries(d).map(([k, v]) => ({ FieldName: k, Value: v })) ?? [];
+        setDffFields(Array.isArray(fields) ? fields : []);
+        setSelectedItem(item);
+      } else {
+        message.error(`Failed to fetch DFF data: HTTP ${r.status}`);
+        setDffResponse(`HTTP ${r.status}: ${r.statusText}`);
+      }
+    } catch (e: any) {
+      message.error(`Error: ${e?.message ?? e}`);
+      setDffResponse(`Error: ${e?.message ?? e}`);
+    } finally {
+      setDffLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      {rows.length === 0 ? (
+        <Empty description="Run a search in the Search tab first" />
+      ) : (
+        <>
+          <div style={{ marginBottom: 12 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {rows.length} item(s) available. Click "View DFF" to see Data Flex Fields for an item.
+            </Text>
+          </div>
+          <Table size="small" rowKey={(r) => r.ItemNumber + ':' + r.OrganizationCode}
+            columns={[
+              { title: 'Item Number', dataIndex: 'ItemNumber', width: 150, render: v => <Text strong>{String(v ?? '')}</Text> },
+              { title: 'Description', dataIndex: 'ItemDescription', width: 300, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v == null ? '—' : String(v)}</Text> },
+              { title: 'Org', dataIndex: 'OrganizationCode', width: 80, render: v => <Tag>{String(v ?? '')}</Tag> },
+              { title: '', key: 'view', width: 100, fixed: 'right', render: (_: any, r: any) => (
+                  <Button size="small" onClick={() => fetchDFF(r)}
+                    style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>View DFF</Button>
+                ) },
+            ]}
+            dataSource={rows}
+            pagination={{ pageSize: 20, showSizeChanger: true }} scroll={{ x: 600 }} />
+        </>
+      )}
+
+      <Modal
+        open={!!selectedItem}
+        onCancel={() => setSelectedItem(null)}
+        width={700}
+        title={<Space><ProfileOutlined style={{ color: REDWOOD.info }} />DFF — {selectedItem?.ItemNumber} <Tag>{selectedItem?.OrganizationCode}</Tag><Button icon={<ApiOutlined />} size="small" onClick={() => setDffApiDrawerOpen(true)} title="View API details" /></Space>}
+        footer={<Button onClick={() => setSelectedItem(null)}>Close</Button>}>
+        {dffLoading ? <Spin /> : dffFields.length === 0 ? (
+          <Empty description="No DFF fields found for this item" />
+        ) : (
+          <div>
+            <Text type="secondary" style={{ fontSize: 12 }}>Data Flex Fields for this item:</Text>
+            <Table size="small" style={{ marginTop: 12 }} columns={[
+              { title: 'Field Name', dataIndex: 'FieldName', width: 200, render: v => <Text strong>{v}</Text> },
+              { title: 'Value', dataIndex: 'Value', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+            ]} dataSource={dffFields} pagination={false} />
+          </div>
+        )}
+      </Modal>
+
+      <Drawer
+        title="API Inspector - DFF"
+        placement="right"
+        onClose={() => setDffApiDrawerOpen(false)}
+        open={dffApiDrawerOpen}
+        width={600}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div>
+            <Paragraph>
+              <Text strong>DFF Endpoint URL:</Text>
+            </Paragraph>
+            <div style={{ background: '#f5f5f5', padding: '8px', borderRadius: '4px', wordBreak: 'break-all', fontFamily: 'monospace', fontSize: '11px', maxHeight: 200, overflow: 'auto' }}>
+              GET {dffUrl || 'Loading...'}
+            </div>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Paragraph>
+              <Text strong>Response Data:</Text>
+            </Paragraph>
+            <pre style={{
+              background: '#f5f5f5',
+              padding: '8px',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontFamily: 'monospace',
+              maxHeight: 400,
+              overflow: 'auto',
+              lineHeight: '1.4',
+            }}>
+              {dffResponse || 'No data yet'}
+            </pre>
+          </div>
+        </div>
+      </Drawer>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EFF Tab — view and update Entity Flex Fields for items
+// ─────────────────────────────────────────────────────────────────────────────
+const EFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
+  const [effLoading, setEffLoading] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<any | null>(null);
+  const [effFields, setEffFields] = useState<any[]>([]);
+  const [selectedFields, setSelectedFields] = useState<Set<string>>(new Set());
+  const [effEdits, setEffEdits] = useState<Record<string, any>>({});
+  const [effApiDrawerOpen, setEffApiDrawerOpen] = useState(false);
+  const [effUrl, setEffUrl] = useState('');
+  const [effResponse, setEffResponse] = useState('');
+  const [effUpdateUrl, setEffUpdateUrl] = useState('');
+  const [effUpdatePayload, setEffUpdatePayload] = useState('');
+  const [effUpdating, setEffUpdating] = useState(false);
+
+  const fetchEFF = async (item: any) => {
+    setEffLoading(true);
+    setSelectedFields(new Set());
+    setEffEdits({});
+    try {
+      const effLink = (item.links ?? []).find((l: any) => l.name === 'ItemEffCategory')?.href;
+      if (!effLink) {
+        message.warning('No EFF link found for this item');
+        setEffLoading(false);
+        return;
+      }
+      console.log('Fetching EFF from:', effLink);
+      setEffUrl(effLink);
+      const r = await fetch(effLink, { headers: FUSION_HDRS });
+      if (r.ok) {
+        const d = await r.json();
+        console.log('EFF Response:', d);
+        setEffResponse(JSON.stringify(d, null, 2));
+        const fields = d.items ?? [];
+        setEffFields(Array.isArray(fields) ? fields : []);
+        setSelectedItem(item);
+      } else {
+        message.error(`Failed to fetch EFF data: HTTP ${r.status}`);
+        setEffResponse(`HTTP ${r.status}: ${r.statusText}`);
+      }
+    } catch (e: any) {
+      message.error(`Error: ${e?.message ?? e}`);
+      setEffResponse(`Error: ${e?.message ?? e}`);
+    } finally {
+      setEffLoading(false);
+    }
+  };
+
+  const handleUpdateClick = () => {
+    if (selectedFields.size === 0) {
+      message.warning('Select at least one field to update');
+      return;
+    }
+    const updateUrl = effUrl.replace('/child/ItemEffCategory', '') || '';
+    setEffUpdateUrl(updateUrl);
+    const payload: Record<string, any> = {};
+    selectedFields.forEach(fieldName => {
+      payload[fieldName] = effEdits[fieldName] ?? effFields.find((f: any) => f.name === fieldName)?.value ?? '';
+    });
+    setEffUpdatePayload(JSON.stringify(payload, null, 2));
+    setEffApiDrawerOpen(true);
+  };
+
+  const confirmUpdate = async () => {
+    if (!effUpdateUrl) return;
+    setEffUpdating(true);
+    try {
+      const payload: Record<string, any> = {};
+      selectedFields.forEach(fieldName => {
+        payload[fieldName] = effEdits[fieldName] ?? effFields.find((f: any) => f.name === fieldName)?.value ?? '';
+      });
+      const r = await fetch(effUpdateUrl, { method: 'PATCH', headers: RESITEM_HDRS, body: JSON.stringify(payload) });
+      if (r.ok) {
+        message.success('EFF updated successfully');
+        setEffApiDrawerOpen(false);
+        setSelectedItem(null);
+      } else {
+        message.error(`Update failed: HTTP ${r.status}`);
+      }
+    } catch (e: any) {
+      message.error(`Error: ${e?.message ?? e}`);
+    } finally {
+      setEffUpdating(false);
+    }
+  };
+
+  return (
+    <div>
+      {rows.length === 0 ? (
+        <Empty description="Run a search in the Search tab first" />
+      ) : (
+        <>
+          <div style={{ marginBottom: 12 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {rows.length} item(s) available. Click "View EFF" to see and update Entity Flex Fields.
+            </Text>
+          </div>
+          <Table size="small" rowKey={(r) => r.ItemNumber + ':' + r.OrganizationCode}
+            columns={[
+              { title: 'Item Number', dataIndex: 'ItemNumber', width: 150, render: v => <Text strong>{String(v ?? '')}</Text> },
+              { title: 'Description', dataIndex: 'ItemDescription', width: 300, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v == null ? '—' : String(v)}</Text> },
+              { title: 'Org', dataIndex: 'OrganizationCode', width: 80, render: v => <Tag>{String(v ?? '')}</Tag> },
+              { title: '', key: 'view', width: 100, fixed: 'right', render: (_: any, r: any) => (
+                  <Button size="small" onClick={() => fetchEFF(r)}
+                    style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>View EFF</Button>
+                ) },
+            ]}
+            dataSource={rows}
+            pagination={{ pageSize: 20, showSizeChanger: true }} scroll={{ x: 600 }} />
+        </>
+      )}
+
+      <Modal
+        open={!!selectedItem}
+        onCancel={() => setSelectedItem(null)}
+        width={900}
+        title={<Space><ProfileOutlined style={{ color: REDWOOD.info }} />EFF — {selectedItem?.ItemNumber} <Tag>{selectedItem?.OrganizationCode}</Tag><Button icon={<ApiOutlined />} size="small" onClick={() => setEffApiDrawerOpen(true)} title="View API details" /></Space>}
+        footer={<Space>
+          <Button onClick={() => setSelectedItem(null)}>Close</Button>
+          <Button type="primary" disabled={selectedFields.size === 0} onClick={handleUpdateClick} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
+            Update {selectedFields.size} Field(s)
+          </Button>
+        </Space>}>
+        {effLoading ? <Spin /> : effFields.length === 0 ? (
+          <Empty description="No EFF fields found for this item" />
+        ) : (
+          <div>
+            <Text type="secondary" style={{ fontSize: 12 }}>Select columns to update:</Text>
+            <Table size="small" style={{ marginTop: 12 }} columns={[
+              {
+                title: 'Select',
+                width: 60,
+                render: (_: any, r: any) => (
+                  <Checkbox
+                    checked={selectedFields.has(r.name)}
+                    onChange={e => {
+                      const newSel = new Set(selectedFields);
+                      if (e.target.checked) newSel.add(r.name);
+                      else newSel.delete(r.name);
+                      setSelectedFields(newSel);
+                    }}
+                  />
+                ),
+              },
+              { title: 'Column Name', dataIndex: 'name', width: 180, render: v => <Text strong>{v}</Text> },
+              { title: 'Current Value', dataIndex: 'value', width: 200, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+              {
+                title: 'New Value',
+                width: 200,
+                render: (_: any, r: any) => selectedFields.has(r.name) ? (
+                  <Input size="small" value={effEdits[r.name] ?? r.value ?? ''} onChange={e => setEffEdits(p => ({ ...p, [r.name]: e.target.value }))} />
+                ) : null,
+              },
+            ]} dataSource={effFields} pagination={false} />
+          </div>
+        )}
+      </Modal>
+
+      <Drawer
+        title="API Inspector - EFF Update"
+        placement="right"
+        onClose={() => setEffApiDrawerOpen(false)}
+        open={effApiDrawerOpen}
+        width={600}
+        footer={<Button type="primary" loading={effUpdating} onClick={confirmUpdate} style={{ background: REDWOOD.success, borderColor: REDWOOD.success, width: '100%' }}>Confirm Update</Button>}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div>
+            <Paragraph>
+              <Text strong>Update URL (PATCH):</Text>
+            </Paragraph>
+            <div style={{ background: '#f5f5f5', padding: '8px', borderRadius: '4px', wordBreak: 'break-all', fontFamily: 'monospace', fontSize: '11px', maxHeight: 150, overflow: 'auto' }}>
+              {effUpdateUrl || 'Loading...'}
+            </div>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Paragraph>
+              <Text strong>Update Payload:</Text>
+            </Paragraph>
+            <pre style={{
+              background: '#f5f5f5',
+              padding: '8px',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontFamily: 'monospace',
+              maxHeight: 300,
+              overflow: 'auto',
+              lineHeight: '1.4',
+            }}>
+              {effUpdatePayload || 'No data'}
+            </pre>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Paragraph>
+              <Text strong>Fetch Response:</Text>
+            </Paragraph>
+            <pre style={{
+              background: '#f5f5f5',
+              padding: '8px',
+              borderRadius: '4px',
+              fontSize: '10px',
+              fontFamily: 'monospace',
+              maxHeight: 200,
+              overflow: 'auto',
+              lineHeight: '1.2',
+            }}>
+              {effResponse.slice(0, 1000)}
+            </pre>
+          </div>
+        </div>
+      </Drawer>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Additional Info tab — view and update additional fields from searched items
+// ─────────────────────────────────────────────────────────────────────────────
+const AdditionalInfoTab: React.FC<{ rows: any[] }> = ({ rows }) => {
+  const [sel, setSel] = useState<React.Key[]>([]);
+  const [updateItem, setUpdateItem] = useState<any | null>(null);
+  const [updateEdits, setUpdateEdits] = useState<Record<string, any>>({});
+  const [apiDrawerOpen, setApiDrawerOpen] = useState(false);
+  const [updatePayload, setUpdatePayload] = useState('');
+  const [updateUrl, setUpdateUrl] = useState('');
+  const [updating, setUpdating] = useState(false);
+
+  const selectedRows = useMemo(() => rows.filter(r => sel.includes(r.ItemNumber + ':' + r.OrganizationCode)), [rows, sel]);
+
+  const openUpdateDialog = (item: any) => {
+    setUpdateItem(item);
+    setUpdateEdits({});
+    setApiDrawerOpen(false);
+  };
+
+  const handleUpdateConfirm = async () => {
+    if (!updateItem) return;
+    const body = Object.fromEntries(
+      Object.entries(updateEdits)
+        .filter(([k]) => String(updateItem?.[k]) !== String(updateEdits[k]))
+        .map(([k, v]) => [k, typeof updateItem?.[k] === 'number' && v !== '' && v != null && !isNaN(Number(v)) ? Number(v) : v]),
+    );
+    if (Object.keys(body).length === 0) { message.warning('No changes to save'); return; }
+
+    // Build the self link URL
+    const selfLink = (updateItem?.links ?? []).find((x: any) => x.rel === 'self')?.href;
+    if (!selfLink) { message.error('No item self link to update'); return; }
+
+    setUpdatePayload(JSON.stringify(body, null, 2));
+    setUpdateUrl(selfLink);
+    setApiDrawerOpen(true);
+  };
+
+  const confirmUpdate = async () => {
+    if (!updateItem || !updateUrl) return;
+    const body = Object.fromEntries(
+      Object.entries(updateEdits)
+        .filter(([k]) => String(updateItem?.[k]) !== String(updateEdits[k]))
+        .map(([k, v]) => [k, typeof updateItem?.[k] === 'number' && v !== '' && v != null && !isNaN(Number(v)) ? Number(v) : v]),
+    );
+
+    setUpdating(true);
+    try {
+      const r = await fetch(updateUrl, { method: 'PATCH', headers: RESITEM_HDRS, body: JSON.stringify(body) });
+      const txt = await r.text();
+      if (!r.ok) {
+        message.error(`Update failed: HTTP ${r.status}`);
+      } else {
+        message.success('Item updated successfully');
+        setUpdateItem(null);
+        setUpdateEdits({});
+        setApiDrawerOpen(false);
+      }
+    } catch (e: any) {
+      message.error(`Error: ${e?.message ?? e}`);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const cols: ColumnsType<any> = [
+    { title: 'Item Number', dataIndex: 'ItemNumber', width: 140, render: v => <Text strong>{String(v ?? '')}</Text> },
+    { title: 'Description', dataIndex: 'ItemDescription', width: 200, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v == null ? '—' : String(v)}</Text> },
+    { title: 'Org', dataIndex: 'OrganizationCode', width: 70, render: v => <Tag>{String(v ?? '')}</Tag> },
+    { title: 'UOM', dataIndex: 'PrimaryUOMValue', width: 70, render: (v, r) => v ?? r.PrimaryUnitOfMeasure ?? '—' },
+    { title: 'Item Class', dataIndex: 'ItemClass', width: 100, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Lot Ctrl', key: 'lot', width: 70, render: (_: any, r: any) => <Text style={{ fontSize: 11 }}>{pfv(r, ['LotControlValue']) ?? '—'}</Text> },
+    { title: 'Serial Ctrl', key: 'serial', width: 70, render: (_: any, r: any) => <Text style={{ fontSize: 11 }}>{pfv(r, ['SerialGenerationValue']) ?? '—'}</Text> },
+    { title: 'Status', dataIndex: 'ItemStatusValue', width: 80, render: v => v ? <Tag color="blue" style={{ fontSize: 10 }}>{v}</Tag> : '—' },
+    { title: 'Inventory Item', key: 'inv', width: 80, render: (_: any, r: any) => pfv(r, ['InventoryItemFlag']) === true || pfv(r, ['InventoryItemFlag']) === 'true' ? <Text style={{ fontSize: 11, color: REDWOOD.success }}>Yes</Text> : <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>No</Text> },
+    { title: 'Purchasable', key: 'purch', width: 80, render: (_: any, r: any) => pfv(r, ['PurchasableFlag']) === true || pfv(r, ['PurchasableFlag']) === 'true' ? <Text style={{ fontSize: 11, color: REDWOOD.success }}>Yes</Text> : <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>No</Text> },
+    { title: 'Shippable', key: 'ship', width: 75, render: (_: any, r: any) => pfv(r, ['ShippableItemFlag']) === true || pfv(r, ['ShippableItemFlag']) === 'true' ? <Text style={{ fontSize: 11, color: REDWOOD.success }}>Yes</Text> : <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>No</Text> },
+    { title: '', key: 'update', width: 80, fixed: 'right', render: (_: any, r: any) => (
+        <Button size="small" icon={<EditOutlined />} onClick={() => openUpdateDialog(r)}
+          style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Update</Button>
+      ) },
+  ];
+
+  return (
+    <>
+      <div>
+        {rows.length === 0 ? (
+          <Empty description="Run a search in the Search tab first" />
+        ) : (
+          <>
+            <div style={{ marginBottom: 12 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {rows.length} item(s) available • {sel.length} selected
+              </Text>
+            </div>
+            <Table size="small" rowKey={(r) => r.ItemNumber + ':' + r.OrganizationCode} columns={cols} dataSource={rows}
+              rowSelection={{ selectedRowKeys: sel, onChange: setSel }}
+              pagination={{ pageSize: 20, showSizeChanger: true }} scroll={{ x: 1000 }}
+              locale={{ emptyText: 'No items' }} />
+          </>
+        )}
+      </div>
+
+      <Modal
+        open={!!updateItem}
+        onCancel={() => { if (!updating) setUpdateItem(null); }}
+        width={700}
+        title={<Space><ProfileOutlined style={{ color: REDWOOD.info }} />Update Additional Info — {updateItem?.ItemNumber} <Tag>{updateItem?.OrganizationCode}</Tag></Space>}
+        footer={<Space>
+          <Button onClick={() => setUpdateItem(null)} disabled={updating}>Close</Button>
+          <Button type="primary" loading={updating} onClick={handleUpdateConfirm}
+            style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
+            Review & Confirm
+          </Button>
+        </Space>}>
+        {updateItem && (
+          <div>
+            <Text type="secondary" style={{ fontSize: 12 }}>Edit the fields below and click "Review & Confirm" to see the API payload.</Text>
+            <Card size="small" title="Basic Information" style={{ marginTop: 10, borderRadius: 8 }} styles={{ body: { paddingBottom: 2 } }}>
+              <Row gutter={12}>
+                <Col xs={24} md={12}>
+                  <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Item Class</div>
+                  <Input size="small" value={updateEdits['ItemClass'] ?? updateItem['ItemClass'] ?? ''}
+                    onChange={e => setUpdateEdits(p => ({ ...p, ItemClass: e.target.value }))} />
+                </Col>
+                <Col xs={24} md={12}>
+                  <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Primary UOM</div>
+                  <Input size="small" value={updateEdits['PrimaryUOMValue'] ?? updateItem['PrimaryUOMValue'] ?? updateItem['PrimaryUnitOfMeasure'] ?? ''}
+                    onChange={e => setUpdateEdits(p => ({ ...p, PrimaryUOMValue: e.target.value }))} disabled />
+                </Col>
+              </Row>
+            </Card>
+            <Card size="small" title="Lot & Serial Control" style={{ marginTop: 10, borderRadius: 8 }} styles={{ body: { paddingBottom: 2 } }}>
+              <Row gutter={12}>
+                <Col xs={24} md={12}>
+                  <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Lot Control Value</div>
+                  <Input size="small" value={updateEdits['LotControlValue'] ?? updateItem['LotControlValue'] ?? ''}
+                    onChange={e => setUpdateEdits(p => ({ ...p, LotControlValue: e.target.value }))} />
+                </Col>
+                <Col xs={24} md={12}>
+                  <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Serial Generation Value</div>
+                  <Input size="small" value={updateEdits['SerialGenerationValue'] ?? updateItem['SerialGenerationValue'] ?? ''}
+                    onChange={e => setUpdateEdits(p => ({ ...p, SerialGenerationValue: e.target.value }))} />
+                </Col>
+              </Row>
+            </Card>
+            <Card size="small" title="Item Status & Type" style={{ marginTop: 10, borderRadius: 8 }} styles={{ body: { paddingBottom: 2 } }}>
+              <Row gutter={12}>
+                <Col xs={24} md={12}>
+                  <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Item Status Value</div>
+                  <Input size="small" value={updateEdits['ItemStatusValue'] ?? updateItem['ItemStatusValue'] ?? ''}
+                    onChange={e => setUpdateEdits(p => ({ ...p, ItemStatusValue: e.target.value }))} />
+                </Col>
+                <Col xs={24} md={12}>
+                  <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Lifecycle Phase Value</div>
+                  <Input size="small" value={updateEdits['LifecyclePhaseValue'] ?? updateItem['LifecyclePhaseValue'] ?? ''}
+                    onChange={e => setUpdateEdits(p => ({ ...p, LifecyclePhaseValue: e.target.value }))} />
+                </Col>
+              </Row>
+            </Card>
+            <Card size="small" title="Inventory & Ordering Flags" style={{ marginTop: 10, borderRadius: 8 }} styles={{ body: { paddingBottom: 2 } }}>
+              <Row gutter={12}>
+                <Col xs={24} md={12}>
+                  <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Inventory Item Flag</div>
+                  <Select size="small" style={{ width: '100%' }}
+                    value={String(updateEdits['InventoryItemFlag'] ?? updateItem['InventoryItemFlag'] ?? '')}
+                    onChange={v => setUpdateEdits(p => ({ ...p, InventoryItemFlag: v === 'true' }))}
+                    options={[{ value: '', label: '— Not set —' }, { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]} />
+                </Col>
+                <Col xs={24} md={12}>
+                  <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Stock Enabled Flag</div>
+                  <Select size="small" style={{ width: '100%' }}
+                    value={String(updateEdits['StockEnabledFlag'] ?? updateItem['StockEnabledFlag'] ?? '')}
+                    onChange={v => setUpdateEdits(p => ({ ...p, StockEnabledFlag: v === 'true' }))}
+                    options={[{ value: '', label: '— Not set —' }, { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]} />
+                </Col>
+                <Col xs={24} md={12}>
+                  <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Purchasable Flag</div>
+                  <Select size="small" style={{ width: '100%' }}
+                    value={String(updateEdits['PurchasableFlag'] ?? updateItem['PurchasableFlag'] ?? '')}
+                    onChange={v => setUpdateEdits(p => ({ ...p, PurchasableFlag: v === 'true' }))}
+                    options={[{ value: '', label: '— Not set —' }, { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]} />
+                </Col>
+                <Col xs={24} md={12}>
+                  <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginBottom: 2 }}>Shippable Item Flag</div>
+                  <Select size="small" style={{ width: '100%' }}
+                    value={String(updateEdits['ShippableItemFlag'] ?? updateItem['ShippableItemFlag'] ?? '')}
+                    onChange={v => setUpdateEdits(p => ({ ...p, ShippableItemFlag: v === 'true' }))}
+                    options={[{ value: '', label: '— Not set —' }, { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]} />
+                </Col>
+              </Row>
+            </Card>
+          </div>
+        )}
+      </Modal>
+
+      <Drawer
+        title="API Inspector - Update Item"
+        placement="right"
+        onClose={() => setApiDrawerOpen(false)}
+        open={apiDrawerOpen}
+        width={600}
+        footer={<Button type="primary" loading={updating} onClick={confirmUpdate} style={{ background: REDWOOD.success, borderColor: REDWOOD.success, width: '100%' }}>Confirm Update</Button>}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div>
+            <Paragraph>
+              <Text strong>Update URL:</Text>
+            </Paragraph>
+            <div style={{ background: '#f5f5f5', padding: '8px', borderRadius: '4px', wordBreak: 'break-all', fontFamily: 'monospace', fontSize: '11px' }}>
+              PATCH {updateUrl}
+            </div>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Paragraph>
+              <Text strong>Request Payload:</Text>
+            </Paragraph>
+            <pre style={{
+              background: '#f5f5f5',
+              padding: '12px',
+              borderRadius: '4px',
+              maxHeight: '400px',
+              overflow: 'auto',
+              fontSize: '11px',
+              fontFamily: 'monospace',
+              lineHeight: '1.4',
+            }}>
+              {updatePayload}
+            </pre>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Paragraph>
+              <Text strong>Headers:</Text>
+            </Paragraph>
+            <pre style={{
+              background: '#f5f5f5',
+              padding: '8px',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontFamily: 'monospace',
+            }}>
+{`Content-Type: application/vnd.oracle.adf.resourceitem+json
+Authorization: Basic [credentials]`}
+            </pre>
+          </div>
+        </div>
+      </Drawer>
+    </>
   );
 };
 
@@ -623,6 +1235,7 @@ const ItemLoading: React.FC = () => {
   const [orgs, setOrgs] = useState<OrgOpt[]>([]);
   const [orgsLoading, setOrgsLoading] = useState(true);
   const [tab, setTab] = useState('load');
+  const [searchRows, setSearchRows] = useState<any[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -658,7 +1271,10 @@ const ItemLoading: React.FC = () => {
         <Card style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
           <TabErrorBoundary>
             <Tabs activeKey={tab} onChange={setTab} items={[
-              { key: 'search', label: <span><SearchOutlined /> Search</span>, children: <SearchTab orgs={orgs} /> },
+              { key: 'search', label: <span><SearchOutlined /> Search</span>, children: <SearchTab orgs={orgs} onRowsChange={setSearchRows} /> },
+              { key: 'additional', label: <span><InfoCircleOutlined /> Additional Info</span>, children: <AdditionalInfoTab rows={searchRows} /> },
+              { key: 'dff', label: <span><InfoCircleOutlined /> Additional Info - DFF</span>, children: <DFFTab rows={searchRows} /> },
+              { key: 'eff', label: <span><InfoCircleOutlined /> Additional Info - EFF</span>, children: <EFFTab rows={searchRows} /> },
               { key: 'load', label: <span><UploadOutlined /> Load</span>, children: <LoadTab orgs={orgs} /> },
             ]} />
           </TabErrorBoundary>
