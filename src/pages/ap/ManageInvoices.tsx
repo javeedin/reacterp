@@ -1913,23 +1913,19 @@ const ManageInvoices: React.FC = () => {
       for (const invoice of displayedInvoices) {
         try {
           const result = await getAccounting('AP_INVOICES', invoice.invoiceId);
-          if (result.items && Array.isArray(result.items)) {
+          if (result.found && result.lines && Array.isArray(result.lines)) {
             let totalDebits = 0;
             let totalCredits = 0;
-            result.items.forEach((line: any) => {
-              const amount = Number(line.amount || line.lineAmount || 0);
-              if (line.accountingLineType === 'DEBIT' || (line.debitAmount && Number(line.debitAmount) > 0)) {
-                totalDebits += amount;
-              } else if (line.accountingLineType === 'CREDIT' || (line.creditAmount && Number(line.creditAmount) > 0)) {
-                totalCredits += amount;
-              }
+            result.lines.forEach((line: any) => {
+              totalDebits += Number(line.enteredDr || line.accountedDr || 0);
+              totalCredits += Number(line.enteredCr || line.accountedCr || 0);
             });
             data.push({
               invoiceNumber: invoice.invoiceNumber,
               invoiceId: invoice.invoiceId,
               debits: totalDebits,
               credits: totalCredits,
-              lines: result.items,
+              lines: result.lines,
             });
           }
         } catch (e) {
@@ -4293,7 +4289,7 @@ const ManageInvoices: React.FC = () => {
             <Spin />
             <div style={{ marginTop: 12, color: REDWOOD.neutral600 }}>Loading accounting details...</div>
           </div>
-        ) : !accountingSingleData || !accountingSingleData.items || accountingSingleData.items.length === 0 ? (
+        ) : !accountingSingleData || !accountingSingleData.lines || accountingSingleData.lines.length === 0 ? (
           <Alert type="info" message="No accounting lines found for this invoice" showIcon />
         ) : (
           <>
@@ -4322,7 +4318,7 @@ const ManageInvoices: React.FC = () => {
                 <Col span={6}>
                   <Statistic
                     title="Line Count"
-                    value={accountingSingleData.items?.length || 0}
+                    value={accountingSingleData.lines?.length || 0}
                   />
                 </Col>
               </Row>
@@ -4353,28 +4349,28 @@ const ManageInvoices: React.FC = () => {
                 },
                 {
                   title: 'Debit',
-                  dataIndex: 'debitAmount',
-                  key: 'debitAmount',
+                  dataIndex: 'enteredDr',
+                  key: 'enteredDr',
                   width: 120,
                   align: 'right',
                   render: (value: number) => value ? <Text style={{ color: REDWOOD.success }}>{formatCurrency(value)}</Text> : '—',
                 },
                 {
                   title: 'Credit',
-                  dataIndex: 'creditAmount',
-                  key: 'creditAmount',
+                  dataIndex: 'enteredCr',
+                  key: 'enteredCr',
                   width: 120,
                   align: 'right',
                   render: (value: number) => value ? <Text style={{ color: REDWOOD.error }}>{formatCurrency(value)}</Text> : '—',
                 },
               ]}
-              dataSource={accountingSingleData.items}
+              dataSource={accountingSingleData.lines}
               rowKey={(_, i) => i}
               pagination={{ pageSize: 20 }}
               size="small"
               summary={() => {
-                const totalDebits = (accountingSingleData.items || []).reduce((sum: number, item: any) => sum + (Number(item.debitAmount) || 0), 0);
-                const totalCredits = (accountingSingleData.items || []).reduce((sum: number, item: any) => sum + (Number(item.creditAmount) || 0), 0);
+                const totalDebits = (accountingSingleData.lines || []).reduce((sum: number, item: any) => sum + (Number(item.enteredDr) || 0), 0);
+                const totalCredits = (accountingSingleData.lines || []).reduce((sum: number, item: any) => sum + (Number(item.enteredCr) || 0), 0);
                 return (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
