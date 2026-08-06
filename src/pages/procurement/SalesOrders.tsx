@@ -6335,16 +6335,30 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           </Tooltip>
         </Space>}>
         {(() => {
-          const lotCount = lotPick ? new Set(lotPick.rows.map(r => parseVU(r.ValuationUnit).lot).filter(Boolean)).size : 0;
-          return lotCount > 0
+          const lots = lotPick ? new Set(lotPick.rows.map(r => parseVU(r.ValuationUnit).lot).filter(Boolean)) : new Set();
+          const hasLots = lots.size > 0;
+          const hasOnhand = lotPick?.rows.length ?? 0 > 0;
+          return hasLots
             ? <Text type="secondary" style={{ fontSize: 12 }}>This item has multiple lots — pick one to bring its cost and on-hand.</Text>
-            : <Text type="secondary" style={{ fontSize: 12, color: REDWOOD.warning }}>No lots returned for this item on <b>{getFusionInstance().label}</b>. Use the <ApiOutlined /> icon above to inspect and Run the itemCosts query and see what the POD returns.</Text>;
+            : hasOnhand
+            ? <Text type="secondary" style={{ fontSize: 12, color: REDWOOD.info }}>This item is tracked by valuation unit (no lots). On-hand quantity is shown below.</Text>
+            : <Text type="secondary" style={{ fontSize: 12, color: REDWOOD.warning }}>No data returned for this item on <b>{getFusionInstance().label}</b>. Use the <ApiOutlined /> icon above to inspect and Run the itemCosts query and see what the POD returns.</Text>;
         })()}
         <Table size="small" style={{ marginTop: 10 }} pagination={false} rowKey={(_, i) => `lp-${i}`}
-          dataSource={lotPick ? Array.from(new Set(lotPick.rows.map(r => parseVU(r.ValuationUnit).lot).filter(Boolean))).map(lot => {
-            const row = lotPick.rows.find(r => parseVU(r.ValuationUnit).lot === lot);
-            return { lot, cost: row ? num(pf(row, COST_FIELDS)) : undefined, subinv: parseVU(row?.ValuationUnit).subinv, invOrg: parseVU(row?.ValuationUnit).invOrg };
-          }) : []}
+          dataSource={lotPick ? (() => {
+            const lots = new Set(lotPick.rows.map(r => parseVU(r.ValuationUnit).lot).filter(Boolean));
+            if (lots.size > 0) {
+              return Array.from(lots).map(lot => {
+                const row = lotPick.rows.find(r => parseVU(r.ValuationUnit).lot === lot);
+                return { lot, cost: row ? num(pf(row, COST_FIELDS)) : undefined, subinv: parseVU(row?.ValuationUnit).subinv, invOrg: parseVU(row?.ValuationUnit).invOrg };
+              });
+            } else {
+              return lotPick.rows.map((row, idx) => {
+                const vu = parseVU(row.ValuationUnit);
+                return { lot: `${vu.invOrg}/${vu.subinv || '—'}`, cost: num(pf(row, COST_FIELDS)), subinv: vu.subinv, invOrg: vu.invOrg, _idx: idx, _row: row };
+              });
+            }
+          })() : []}
           columns={[
             { title: 'Lot', dataIndex: 'lot', render: v => <Tag color="geekblue">{v}</Tag> },
             { title: 'Inv Org', dataIndex: 'invOrg', render: v => v || '—' },
@@ -6356,7 +6370,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               } },
             { title: 'Cost', dataIndex: 'cost', align: 'right', render: v => v == null ? '—' : fmtAmount(num(v), ccy) },
             { title: '', align: 'right', render: (_, r: any) => <Button size="small" type="primary" style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-                onClick={() => { const lp = lotPick!; setLotPick(null); applyItemToLine(lp.key, { ItemNumber: lp.item }, lp.rows, r.lot); }}>Select</Button> },
+                onClick={() => { const lp = lotPick!; setLotPick(null); const lot = r._row ? parseVU(r._row.ValuationUnit).lot || null : r.lot; applyItemToLine(lp.key, { ItemNumber: lp.item }, lp.rows, lot); }}>Select</Button> },
           ]}
           summary={(rows) => {
             const total = rows.reduce((s: number, r: any) => s + (lotPick?.onh?.[r.lot]?.qty ?? 0), 0);
