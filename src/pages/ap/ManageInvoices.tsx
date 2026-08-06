@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import dayjs from 'dayjs';
 import {
   Layout,
@@ -501,6 +501,12 @@ const ManageInvoices: React.FC = () => {
   const [accountingSingleInvoice, setAccountingSingleInvoice] = useState<InvoiceRecord | null>(null);
   const [accountingSingleData, setAccountingSingleData] = useState<any>(null);
   const [accountingSingleLoading, setAccountingSingleLoading] = useState(false);
+
+  // Re-Create Accounting preview modal state
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [previewPayload, setPreviewPayload] = useState<any>(null);
+  const [previewConfirming, setPreviewConfirming] = useState(false);
+  const [previewCreationSteps, setPreviewCreationSteps] = useState<string[]>([]);
 
   const openMpaModal = async (record: InvoiceRecord) => {
     setMpaModalRecord(record);
@@ -1974,6 +1980,154 @@ const ManageInvoices: React.FC = () => {
     }
   };
 
+  // Handle Re-Create Accounting Preview
+  const handleRecreateAccountingPreview = async (record: InvoiceRecord) => {
+    setPreviewModalOpen(true);
+    setPreviewPayload(null);
+    setPreviewCreationSteps(['Fetching invoice data...']);
+
+    try {
+      const { validateAccountCode } = await import('../../components/AccountSelector');
+
+      // Fetch invoice lines
+      setPreviewCreationSteps(prev => [...prev, 'Fetching invoice lines...']);
+      const linesRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines?P_INVOICE_ID=${record.invoiceId}`);
+      const linesData = await linesRes.json();
+      const rawLines = linesData.items || (Array.isArray(linesData) ? linesData : []);
+
+      // Fetch tax codes for the business unit
+      setPreviewCreationSteps(prev => [...prev, 'Fetching tax configuration...']);
+      const taxRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/tax/taxes/bybu?business_unit=${record.businessUnit}`);
+      const taxData = await taxRes.json();
+      const taxCodes: any[] = taxData.items || [];
+      const taxAccountMap: Record<string, string> = {};
+      const taxRateMap: Record<string, number> = {};
+
+      // Map both taxCode and taxName to account for naming variations
+      taxCodes.forEach((t: any) => {
+        const code = t.taxCode || '';
+        const name = t.taxName || '';
+        const account = t.taxAccount || '';
+        taxAccountMap[code] = account;
+        taxAccountMap[name] = account;
+        taxRateMap[code] = Number(t.taxRate) || 0;
+        taxRateMap[name] = Number(t.taxRate) || 0;
+      });
+
+      // Log tax codes for debugging
+      console.log('Tax codes loaded:', taxCodes.map((t: any) => ({ taxCode: t.taxCode, taxName: t.taxName, taxAccount: t.taxAccount })));
+
+      // Build accounting lines
+      setPreviewCreationSteps(prev => [...prev, 'Building accounting entries...']);
+      const accountingLines: any[] = [];
+      let lineNum = 1;
+      const allAccounts = new Set<string>();
+
+      // Add line and tax entries
+      rawLines.forEach((line: any) => {
+        const amount = Number(line.line_amount) || 0;
+        if (amount === 0) return;
+
+        const distribution = line.distribution_combination || '';
+        const taxClassification = line.tax_classification || '';
+        const taxAmount = Number(line.tax_control_amount) || 0;
+
+        // Log first line details for debugging
+        if (lineNum === 1) {
+          console.log('First line details:', {
+            line_amount: line.line_amount,
+            tax_control_amount: line.tax_control_amount,
+            tax_classification: line.tax_classification,
+            distribution_combination: line.distribution_combination,
+            all_fields: line,
+          });
+        }
+
+        // DR for line amount
+        accountingLines.push({
+          lineNumber: lineNum++,
+          lineType: 'DR',
+          accountCombination: distribution,
+          amount: amount,
+          description: line.description || `Line ${line.line_number}`,
+        });
+        allAccounts.add(distribution);
+
+        // DR for tax if present
+        if (taxAmount > 0) {
+          let taxAccount = taxAccountMap[taxClassification] || '';
+
+          // Fallback: if not found in map, use a common tax account
+          if (!taxAccount && taxClassification && taxClassification.toUpperCase().includes('VAT')) {
+            taxAccount = '01-00-00-1223104-0000-000-00-000-000'; // Default VAT tax account
+          }
+
+          if (taxAccount) {
+            accountingLines.push({
+              lineNumber: lineNum++,
+              lineType: 'DR',
+              accountCombination: taxAccount,
+              amount: taxAmount,
+              description: `Input VAT – ${taxClassification}`,
+            });
+            allAccounts.add(taxAccount);
+            console.log('Tax line created:', { taxClassification, taxAccount, taxAmount });
+          }
+        }
+      });
+
+      // CR for liability
+      const totalLiability = rawLines.reduce((sum: number, l: any) => sum + (Number(l.line_amount) || 0) + (Number(l.tax_control_amount) || 0), 0);
+      if (totalLiability > 0) {
+        const liabilityAccount = record.liabilityDistribution || '';
+        accountingLines.push({
+          lineNumber: lineNum++,
+          lineType: 'CR',
+          accountCombination: liabilityAccount,
+          amount: totalLiability,
+          description: 'AP Liability',
+        });
+        allAccounts.add(liabilityAccount);
+      }
+
+      // Fetch account descriptions
+      setPreviewCreationSteps(prev => [...prev, 'Fetching account descriptions...']);
+      const accountDescs: Record<string, any> = {};
+      for (const acct of Array.from(allAccounts)) {
+        try {
+          const desc = await validateAccountCode(acct);
+          if (desc?.segmentDetails) {
+            accountDescs[acct] = desc.segmentDetails;
+          }
+        } catch {
+          // Silent fail for account descriptions
+        }
+      }
+
+      // Calculate totals
+      const invoiceTotal = rawLines.reduce((sum: number, l: any) => sum + (Number(l.line_amount) || 0), 0);
+      const taxTotal = rawLines.reduce((sum: number, l: any) => sum + (Number(l.tax_control_amount) || 0), 0);
+      const grandTotal = invoiceTotal + taxTotal;
+
+      setPreviewPayload({
+        invoiceId: record.invoiceId,
+        invoiceNumber: record.invoiceNumber,
+        accountingLines,
+        accountDescs,
+        invoiceTotal,
+        taxTotal,
+        grandTotal,
+        isBalanced: Math.abs(accountingLines.filter((l: any) => l.lineType === 'DR').reduce((sum: number, l: any) => sum + l.amount, 0) - accountingLines.filter((l: any) => l.lineType === 'CR').reduce((sum: number, l: any) => sum + l.amount, 0)) < 0.01,
+      });
+
+      setPreviewCreationSteps(prev => [...prev, 'Ready to create accounting']);
+    } catch (error) {
+      console.error('Error building accounting preview:', error);
+      message.error('Failed to build accounting preview');
+      setPreviewModalOpen(false);
+    }
+  };
+
   // Approval menu items
   const approvalMenuItems: MenuProps['items'] = [
     { key: 'approve', label: 'Approve', icon: <CheckCircleOutlined /> },
@@ -2300,6 +2454,24 @@ const ManageInvoices: React.FC = () => {
       key: 'createdBy',
       width: 130,
       ellipsis: true,
+    },
+    {
+      title: 'Action',
+      key: 'action',
+      width: 100,
+      fixed: 'right' as const,
+      render: (_: any, record: InvoiceRecord) => (
+        <Tooltip title="Re-Create Accounting Preview">
+          <Button
+            size="small"
+            type="default"
+            onClick={() => handleRecreateAccountingPreview(record)}
+            style={{ color: REDWOOD.info }}
+          >
+            Re-Create
+          </Button>
+        </Tooltip>
+      ),
     },
   ];
 
@@ -4535,6 +4707,252 @@ const ManageInvoices: React.FC = () => {
             </ul>
           </div>
         </Space>
+      </Modal>
+
+      {/* Re-Create Accounting Preview Modal */}
+      <Modal
+        title={
+          <Space>
+            <CalculatorOutlined style={{ color: REDWOOD.info }} />
+            <span>Re-Create Accounting Preview</span>
+            {previewPayload && previewPayload.invoiceNumber && (
+              <Tag color="blue">{previewPayload.invoiceNumber}</Tag>
+            )}
+          </Space>
+        }
+        open={previewModalOpen}
+        onCancel={() => setPreviewModalOpen(false)}
+        width={1200}
+        styles={{ body: { maxHeight: '80vh', overflowY: 'auto' } }}
+        footer={[
+          <Button key="close" onClick={() => setPreviewModalOpen(false)}>
+            Close
+          </Button>,
+          <Button
+            key="create"
+            type="primary"
+            loading={previewConfirming}
+            onClick={() => {
+              message.info('Create accounting feature coming soon');
+            }}
+          >
+            Create Accounting
+          </Button>,
+        ]}
+        destroyOnClose
+      >
+        {!previewPayload ? (
+          <div style={{ textAlign: 'center', padding: '40px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: REDWOOD.neutral600 }}>
+              {previewCreationSteps.length > 0 ? previewCreationSteps[previewCreationSteps.length - 1] : 'Loading...'}
+            </div>
+          </div>
+        ) : (
+          <Space direction="vertical" style={{ width: '100%' }} size="large">
+            {/* API Endpoint */}
+            <Card size="small" style={{ background: '#f5f5f5', border: `1px solid ${REDWOOD.neutral300}` }}>
+              <Space>
+                <ApiOutlined style={{ color: REDWOOD.info, fontSize: 16 }} />
+                <code style={{ fontSize: 12 }}>GET /ap/createinvoiceslines?P_INVOICE_ID={previewPayload.invoiceId}</code>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CopyOutlined />}
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines?P_INVOICE_ID=${previewPayload.invoiceId}`);
+                    message.success('API URL copied to clipboard');
+                  }}
+                />
+              </Space>
+            </Card>
+
+            {/* Summary Cards */}
+            <Row gutter={16}>
+              <Col span={8}>
+                <Card size="small">
+                  <Statistic
+                    title="Invoice Amount"
+                    value={previewPayload.invoiceTotal}
+                    precision={2}
+                    suffix={<span style={{ fontSize: 12 }}>{previewPayload.invoiceNumber?.split('-')[0] || 'AED'}</span>}
+                    valueStyle={{ color: REDWOOD.info }}
+                  />
+                </Card>
+              </Col>
+              <Col span={8}>
+                <Card size="small">
+                  <Statistic
+                    title="Tax Amount"
+                    value={previewPayload.taxTotal}
+                    precision={2}
+                    suffix={<span style={{ fontSize: 12 }}>{previewPayload.invoiceNumber?.split('-')[0] || 'AED'}</span>}
+                    valueStyle={{ color: REDWOOD.warning }}
+                  />
+                </Card>
+              </Col>
+              <Col span={8}>
+                <Card size="small">
+                  <Statistic
+                    title="Total"
+                    value={previewPayload.grandTotal}
+                    precision={2}
+                    suffix={<span style={{ fontSize: 12 }}>{previewPayload.invoiceNumber?.split('-')[0] || 'AED'}</span>}
+                    valueStyle={{ color: REDWOOD.success, fontWeight: 600 }}
+                  />
+                </Card>
+              </Col>
+            </Row>
+
+            {/* Accounting Lines Table */}
+            <Card size="small" title="Accounting Entries to be Created">
+              <Table
+                dataSource={previewPayload.accountingLines.map((line: any, idx: number) => ({
+                  ...line,
+                  key: idx,
+                  debit: line.lineType === 'DR' ? line.amount : 0,
+                  credit: line.lineType === 'CR' ? line.amount : 0,
+                }))}
+                columns={[
+                  {
+                    title: 'Line #',
+                    dataIndex: 'lineNumber',
+                    key: 'lineNumber',
+                    width: 60,
+                    align: 'center',
+                  },
+                  {
+                    title: 'Type',
+                    dataIndex: 'lineType',
+                    key: 'lineType',
+                    width: 70,
+                    render: (type: string) => (
+                      <Tag color={type === 'DR' ? 'red' : 'green'} style={{ fontSize: 11 }}>
+                        {type}
+                      </Tag>
+                    ),
+                  },
+                  {
+                    title: 'Account Combination',
+                    dataIndex: 'accountCombination',
+                    key: 'accountCombination',
+                    render: (acct: string, record: any) => {
+                      const desc = previewPayload.accountDescs[acct];
+                      const segments = acct.split('-');
+                      const fourthSegment = segments[3] || '';
+                      return (
+                        <Tooltip title={acct}>
+                          <div style={{ fontSize: 12 }}>
+                            <div style={{ fontWeight: 600, color: REDWOOD.info }}>{acct}</div>
+                            {desc && (
+                              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 4 }}>
+                                {desc.map((seg: any, idx: number) => (
+                                  <div key={idx} style={{
+                                    padding: '2px 4px',
+                                    background: idx === 3 ? '#fff3cd' : 'transparent',
+                                    borderRadius: 2,
+                                  }}>
+                                    <span style={{ fontWeight: 600 }}>{seg.name || `Seg ${idx + 1}`}</span>
+                                    {': '}
+                                    <span>{seg.value || '—'}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </Tooltip>
+                      );
+                    },
+                  },
+                  {
+                    title: 'Description',
+                    dataIndex: 'description',
+                    key: 'description',
+                    width: 150,
+                  },
+                  {
+                    title: 'Debit',
+                    dataIndex: 'debit',
+                    key: 'debit',
+                    width: 100,
+                    align: 'right',
+                    render: (value: number) => value > 0 ? `${value.toFixed(2)}` : '—',
+                  },
+                  {
+                    title: 'Credit',
+                    dataIndex: 'credit',
+                    key: 'credit',
+                    width: 100,
+                    align: 'right',
+                    render: (value: number) => value > 0 ? `${value.toFixed(2)}` : '—',
+                  },
+                ]}
+                size="small"
+                pagination={false}
+                summary={() => {
+                  const totalDr = previewPayload.accountingLines
+                    .filter((l: any) => l.lineType === 'DR')
+                    .reduce((sum: number, l: any) => sum + l.amount, 0);
+                  const totalCr = previewPayload.accountingLines
+                    .filter((l: any) => l.lineType === 'CR')
+                    .reduce((sum: number, l: any) => sum + l.amount, 0);
+
+                  return (
+                    <Table.Summary.Row style={{ fontWeight: 600, background: '#f5f5f5' }}>
+                      <Table.Summary.Cell colSpan={4} align="right">
+                        <strong>TOTAL</strong>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell align="right">
+                        <strong>{totalDr.toFixed(2)}</strong>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell align="right">
+                        <strong>{totalCr.toFixed(2)}</strong>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  );
+                }}
+              />
+            </Card>
+
+            {/* Balance Check */}
+            <Card
+              size="small"
+              style={{
+                background: previewPayload.isBalanced ? '#f6ffed' : '#fff1f0',
+                border: `1px solid ${previewPayload.isBalanced ? '#b7eb8f' : '#ffa39e'}`,
+              }}
+            >
+              <Space>
+                {previewPayload.isBalanced ? (
+                  <>
+                    <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 18 }} />
+                    <span style={{ color: REDWOOD.success, fontWeight: 600 }}>Balanced ✓</span>
+                    <span style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
+                      Debits = Credits: {previewPayload.accountingLines
+                        .filter((l: any) => l.lineType === 'DR')
+                        .reduce((sum: number, l: any) => sum + l.amount, 0)
+                        .toFixed(2)}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <CloseCircleOutlined style={{ color: REDWOOD.error, fontSize: 18 }} />
+                    <span style={{ color: REDWOOD.error, fontWeight: 600 }}>Not Balanced</span>
+                    <span style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
+                      DR: {previewPayload.accountingLines
+                        .filter((l: any) => l.lineType === 'DR')
+                        .reduce((sum: number, l: any) => sum + l.amount, 0)
+                        .toFixed(2)}, CR: {previewPayload.accountingLines
+                        .filter((l: any) => l.lineType === 'CR')
+                        .reduce((sum: number, l: any) => sum + l.amount, 0)
+                        .toFixed(2)}
+                    </span>
+                  </>
+                )}
+              </Space>
+            </Card>
+          </Space>
+        )}
       </Modal>
 
       </Content>
