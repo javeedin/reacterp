@@ -11,6 +11,7 @@ interface CustomerSearchBipModalProps {
   onClose: () => void;
   onSelect: (customer: CustomerSearchResult) => void;
   businessUnitId?: string;
+  businessUnitName?: string;
   soapBaseUrl?: string;
   username?: string;
   password?: string;
@@ -21,6 +22,7 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
   onClose,
   onSelect,
   businessUnitId = '',
+  businessUnitName = '',
   soapBaseUrl = ORACLE_SOAP_CONFIG.prod.baseUrl,
   username = ORACLE_SOAP_CONFIG.prod.username,
   password = ORACLE_SOAP_CONFIG.prod.password,
@@ -91,7 +93,7 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
       <Modal
         title={<div style={{ fontSize: '18px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: 10 }}>
           <SearchOutlined style={{ color: '#1890ff' }} />
-          Find Customer
+          Find Customer {businessUnitName && <span style={{ fontSize: '14px', fontWeight: '500', color: '#666' }}>({businessUnitName})</span>}
         </div>}
         open={open}
         onCancel={onClose}
@@ -174,7 +176,7 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
                       <div style={{ fontSize: '16px', fontWeight: '700', marginBottom: '6px', color: '#262626' }}>
                         {customer.accountName}
                       </div>
-                      <div style={{ display: 'flex', gap: '20px', fontSize: '12px', color: '#666' }}>
+                      <div style={{ display: 'flex', gap: '20px', fontSize: '12px', color: '#666', marginBottom: '6px' }}>
                         <span><Text strong>Acct:</Text> {customer.accountNumber}</span>
                         <span><Text strong>Party:</Text> {customer.partyNumber}</span>
                         {customer.city && <span><Text strong>City:</Text> {customer.city}</span>}
@@ -187,6 +189,11 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
                           </span>
                         )}
                       </div>
+                      {customer.buName && (
+                        <div style={{ fontSize: '11px', color: '#999', fontStyle: 'italic' }}>
+                          BU: {customer.buName}
+                        </div>
+                      )}
                     </div>
                   </Col>
                   <Col>

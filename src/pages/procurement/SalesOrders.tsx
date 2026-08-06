@@ -3285,7 +3285,8 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
       open={custSearchModalOpen}
       onClose={() => setCustSearchModalOpen(false)}
       onSelect={onCustomerBipSelect}
-      businessUnitId={form.getFieldValue('businessUnit') ? bUnits.find(b => b.businessUnitName === form.getFieldValue('businessUnit'))?.businessUnitId?.toString() : undefined}
+      businessUnitId={buRow?.businessUnitId?.toString()}
+      businessUnitName={buName}
       soapBaseUrl={`${instance.host}/xmlpserver/services/v2/ReportService`}
       username={instance.username}
       password={instance.password}
