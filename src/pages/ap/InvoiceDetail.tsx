@@ -220,6 +220,11 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
   const [glBatchName, setGlBatchName] = useState('');
   const [glHeaderId, setGlHeaderId] = useState('');
 
+  // Accounting preview modal
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [previewPayload, setPreviewPayload] = useState<any>(null);
+  const [previewConfirming, setPreviewConfirming] = useState(false);
+
   // Fetch true balance from API — net-balance for regular invoices, available_balance for prepayments
   useEffect(() => {
     const isPrep = invoice.invoiceType === 'Prepayment';
@@ -466,13 +471,28 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
         })),
       });
 
-      const result = await createAccounting(payload);
+      setPreviewPayload(payload);
+      setPreviewModalOpen(true);
+    } catch (err: any) {
+      message.error(`Failed to build accounting preview: ${err.message}`);
+    } finally {
+      setSlaActionLoading(false);
+    }
+  };
+
+  const handleConfirmAccountingPreview = async () => {
+    if (!previewPayload) return;
+    setPreviewConfirming(true);
+    try {
+      const result = await createAccounting(previewPayload);
       message.success(`Accounting created in DRAFT (Header ID: ${result.headerId}, ${result.lineCount} lines)`);
+      setPreviewModalOpen(false);
+      setPreviewPayload(null);
       await fetchSlaStatus();   // refresh badge
     } catch (err: any) {
       message.error(`Create accounting failed: ${err.message}`);
     } finally {
-      setSlaActionLoading(false);
+      setPreviewConfirming(false);
     }
   };
 
@@ -1528,6 +1548,166 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
             ⚠ Once posted, the accounting entry will be locked and cannot be modified.
           </div>
         </Space>
+      </Modal>
+
+      {/* Accounting Preview Modal */}
+      <Modal
+        title={`Preview Accounting — ${invoice.invoiceNumber}`}
+        open={previewModalOpen}
+        onCancel={() => {
+          setPreviewModalOpen(false);
+          setPreviewPayload(null);
+        }}
+        onOk={handleConfirmAccountingPreview}
+        confirmLoading={previewConfirming}
+        okText="Create Accounting"
+        okButtonProps={{ type: 'primary', danger: false }}
+        cancelText="Cancel"
+        width={1000}
+        destroyOnClose
+      >
+        {previewPayload && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Preview Info */}
+            <div style={{
+              background: '#f0f7ff',
+              border: `1px solid ${REDWOOD.info}`,
+              borderRadius: 6,
+              padding: '10px 12px',
+              fontSize: 12,
+            }}>
+              <div style={{ color: REDWOOD.info, fontWeight: 600, marginBottom: 6 }}>
+                Preview of Debit and Credit entries to be created:
+              </div>
+              <div style={{ color: REDWOOD.neutral600, fontSize: 11 }}>
+                Invoice: {invoice.invoiceNumber} | Amount: {invoice.invoiceAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })} {invoice.invoiceCurrency}
+              </div>
+            </div>
+
+            {/* Accounting Lines Table */}
+            <Table
+              columns={[
+                {
+                  title: 'Line #',
+                  dataIndex: 'lineNumber',
+                  key: 'lineNumber',
+                  width: 70,
+                  align: 'center' as const,
+                },
+                {
+                  title: 'Type',
+                  dataIndex: 'lineType',
+                  key: 'lineType',
+                  width: 70,
+                  align: 'center' as const,
+                  render: (value: string) => (
+                    <Tag color={value === 'DR' ? 'blue' : 'cyan'} style={{ fontSize: 11 }}>
+                      {value}
+                    </Tag>
+                  ),
+                },
+                {
+                  title: 'Description',
+                  dataIndex: 'description',
+                  key: 'description',
+                  flex: 1,
+                  ellipsis: true,
+                  render: (value: string) => (
+                    <span style={{ fontSize: 12 }}>{value}</span>
+                  ),
+                },
+                {
+                  title: 'Account',
+                  dataIndex: 'accountCombination',
+                  key: 'accountCombination',
+                  width: 140,
+                  render: (value: string) => (
+                    <span style={{ fontSize: 11, color: REDWOOD.info, fontFamily: 'monospace' }}>{value}</span>
+                  ),
+                },
+                {
+                  title: 'Debit',
+                  dataIndex: 'enteredDr',
+                  key: 'enteredDr',
+                  width: 120,
+                  align: 'right' as const,
+                  render: (value: number) => (
+                    <span style={{ fontSize: 12, fontWeight: value > 0 ? 600 : 'normal' }}>
+                      {value > 0 ? value.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}
+                    </span>
+                  ),
+                },
+                {
+                  title: 'Credit',
+                  dataIndex: 'enteredCr',
+                  key: 'enteredCr',
+                  width: 120,
+                  align: 'right' as const,
+                  render: (value: number) => (
+                    <span style={{ fontSize: 12, fontWeight: value > 0 ? 600 : 'normal' }}>
+                      {value > 0 ? value.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}
+                    </span>
+                  ),
+                },
+              ]}
+              dataSource={previewPayload.lines.map((line: any, idx: number) => ({
+                ...line,
+                key: idx,
+              }))}
+              pagination={false}
+              size="small"
+              bordered
+              summary={(rows) => {
+                const totalDr = rows.reduce((sum, r: any) => sum + (r.enteredDr || 0), 0);
+                const totalCr = rows.reduce((sum, r: any) => sum + (r.enteredCr || 0), 0);
+                return (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 600 }}>
+                      <Table.Summary.Cell index={0} colSpan={4} align="right">
+                        <Text strong>Total</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={1} align="right">
+                        <Text strong style={{ color: totalDr > 0 ? REDWOOD.primary : 'inherit' }}>
+                          {totalDr.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={2} align="right">
+                        <Text strong style={{ color: totalCr > 0 ? REDWOOD.success : 'inherit' }}>
+                          {totalCr.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </Text>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                );
+              }}
+            />
+
+            {/* Balance Check */}
+            {previewPayload.lines && (() => {
+              const totalDr = previewPayload.lines.reduce((sum: number, l: any) => sum + (l.enteredDr || 0), 0);
+              const totalCr = previewPayload.lines.reduce((sum: number, l: any) => sum + (l.enteredCr || 0), 0);
+              const balanced = Math.abs(totalDr - totalCr) < 0.01;
+              return (
+                <div style={{
+                  background: balanced ? '#f6ffed' : '#fff1f0',
+                  border: `1px solid ${balanced ? '#b7eb8f' : '#ffccc7'}`,
+                  borderRadius: 6,
+                  padding: '10px 12px',
+                  fontSize: 12,
+                }}>
+                  <div style={{ color: balanced ? REDWOOD.success : REDWOOD.error, fontWeight: 600 }}>
+                    {balanced ? '✓ Balanced' : '✗ Not Balanced'}
+                  </div>
+                  <div style={{ color: REDWOOD.neutral600, fontSize: 11, marginTop: 4 }}>
+                    Total Debits: {totalDr.toLocaleString('en-US', { minimumFractionDigits: 2 })} {invoice.invoiceCurrency}
+                    {' | '}
+                    Total Credits: {totalCr.toLocaleString('en-US', { minimumFractionDigits: 2 })} {invoice.invoiceCurrency}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </Modal>
 
       {/* API Debug Modal */}
