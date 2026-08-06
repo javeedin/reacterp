@@ -650,6 +650,7 @@ const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
 // EFF Tab — view and update Entity Flex Fields for items
 // ─────────────────────────────────────────────────────────────────────────────
 const EFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
+  const [allEFFData, setAllEFFData] = useState<Record<string, any[]>>({});
   const [effLoading, setEffLoading] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
   const [effFields, setEffFields] = useState<any[]>([]);
@@ -662,15 +663,48 @@ const EFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
   const [effUpdatePayload, setEffUpdatePayload] = useState('');
   const [effUpdating, setEffUpdating] = useState(false);
 
-  const fetchEFF = async (item: any) => {
+  useEffect(() => {
+    if (rows.length === 0) return;
     setEffLoading(true);
+    (async () => {
+      const results: Record<string, any[]> = {};
+      for (const item of rows) {
+        try {
+          const effLink = (item.links ?? []).find((l: any) => l.name === 'ItemEffCategory')?.href;
+          if (effLink) {
+            const r = await fetch(effLink, { headers: FUSION_HDRS });
+            if (r.ok) {
+              const d = await r.json();
+              const items = d.items ?? [];
+              if (Array.isArray(items) && items.length > 0) {
+                const firstItem = items[0];
+                const fields = Object.entries(firstItem)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([name, value]) => ({
+                    name,
+                    value: value !== null && value !== undefined ? String(value) : ''
+                  }));
+                const key = `${item.ItemNumber}:${item.OrganizationCode}`;
+                results[key] = fields;
+              }
+            }
+          }
+        } catch (e) {
+          console.error(`Error fetching EFF for ${item.ItemNumber}:`, e);
+        }
+      }
+      setAllEFFData(results);
+      setEffLoading(false);
+    })();
+  }, [rows]);
+
+  const fetchEFFForEdit = async (item: any) => {
     setSelectedFields(new Set());
     setEffEdits({});
     try {
       const effLink = (item.links ?? []).find((l: any) => l.name === 'ItemEffCategory')?.href;
       if (!effLink) {
         message.warning('No EFF link found for this item');
-        setEffLoading(false);
         return;
       }
       console.log('Fetching EFF from:', effLink);
@@ -701,8 +735,6 @@ const EFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
     } catch (e: any) {
       message.error(`Error: ${e?.message ?? e}`);
       setEffResponse(`Error: ${e?.message ?? e}`);
-    } finally {
-      setEffLoading(false);
     }
   };
 
@@ -752,18 +784,43 @@ const EFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
         <>
           <div style={{ marginBottom: 12 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              {rows.length} item(s) available. Click "View EFF" to see and update Entity Flex Fields.
+              {effLoading ? 'Loading EFF data...' : `${rows.length} item(s) with EFF data. Expand rows to see fields.`}
             </Text>
           </div>
           <Table size="small" rowKey={(r) => r.ItemNumber + ':' + r.OrganizationCode}
+            loading={effLoading}
+            expandable={{
+              expandedRowRender: (r: any) => {
+                const key = `${r.ItemNumber}:${r.OrganizationCode}`;
+                const fields = allEFFData[key] || [];
+                return fields.length === 0 ? (
+                  <Empty description="No EFF data for this item" style={{ margin: 0 }} />
+                ) : (
+                  <div style={{ padding: '12px' }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>EFF Fields ({fields.length}):</Text>
+                    <Table size="small" style={{ marginTop: 12 }} columns={[
+                      { title: 'Column Name', dataIndex: 'name', width: 250, render: v => <Text strong>{v}</Text> },
+                      { title: 'Value', dataIndex: 'value', render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                    ]} dataSource={fields} pagination={false} />
+                    <Button size="small" style={{ marginTop: 12, color: REDWOOD.success, borderColor: REDWOOD.success }} onClick={() => fetchEFFForEdit(r)}>Edit EFF</Button>
+                  </div>
+                );
+              }
+            }}
             columns={[
               { title: 'Item Number', dataIndex: 'ItemNumber', width: 150, render: v => <Text strong>{String(v ?? '')}</Text> },
-              { title: 'Description', dataIndex: 'ItemDescription', width: 300, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v == null ? '—' : String(v)}</Text> },
+              { title: 'Description', dataIndex: 'ItemDescription', width: 400, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v == null ? '—' : String(v)}</Text> },
               { title: 'Org', dataIndex: 'OrganizationCode', width: 80, render: v => <Tag>{String(v ?? '')}</Tag> },
-              { title: '', key: 'view', width: 100, fixed: 'right', render: (_: any, r: any) => (
-                  <Button size="small" onClick={() => fetchEFF(r)}
-                    style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>View EFF</Button>
-                ) },
+              {
+                title: 'Fields',
+                key: 'fields',
+                width: 80,
+                render: (_: any, r: any) => {
+                  const key = `${r.ItemNumber}:${r.OrganizationCode}`;
+                  const count = allEFFData[key]?.length || 0;
+                  return <Tag color="blue">{count}</Tag>;
+                }
+              }
             ]}
             dataSource={rows}
             pagination={{ pageSize: 20, showSizeChanger: true }} scroll={{ x: 600 }} />
