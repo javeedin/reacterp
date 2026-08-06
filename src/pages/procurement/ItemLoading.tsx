@@ -388,10 +388,12 @@ const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
         const items = d.items ?? [];
         if (Array.isArray(items) && items.length > 0) {
           const firstItem = items[0];
-          const fields = Object.entries(firstItem).map(([name, value]) => ({
-            name,
-            value
-          }));
+          const fields = Object.entries(firstItem)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([name, value]) => ({
+              name,
+              value: value !== null && value !== undefined ? String(value) : ''
+            }));
           setDffFields(fields);
         } else {
           setDffFields([]);
@@ -438,35 +440,63 @@ const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
       <Modal
         open={!!selectedItem}
         onCancel={() => setSelectedItem(null)}
-        width={700}
-        title={<Space><ProfileOutlined style={{ color: REDWOOD.info }} />DFF — {selectedItem?.ItemNumber} <Tag>{selectedItem?.OrganizationCode}</Tag><Button icon={<ApiOutlined />} size="small" onClick={() => setDffApiDrawerOpen(true)} title="View API details" /></Space>}
-        footer={<Button onClick={() => setSelectedItem(null)}>Close</Button>}>
+        width={1000}
+        title={<Space><ProfileOutlined style={{ color: REDWOOD.info }} />DFF — {selectedItem?.ItemNumber} <Tag>{selectedItem?.OrganizationCode}</Tag><Text type="secondary">({dffFields.length} fields)</Text><Button icon={<ApiOutlined />} size="small" onClick={() => setDffApiDrawerOpen(true)} title="View API details" /></Space>}
+        footer={<Space>
+          <Button onClick={() => setSelectedItem(null)}>Close</Button>
+          <Button type="primary" disabled={selectedFields.size === 0} onClick={handleUpdateClick} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
+            Update {selectedFields.size} Field(s)
+          </Button>
+        </Space>}>
         {dffLoading ? <Spin /> : dffFields.length === 0 ? (
           <Empty description="No DFF fields found for this item" />
         ) : (
           <div>
-            <Text type="secondary" style={{ fontSize: 12 }}>Data Flex Fields for this item:</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>Select columns to update ({dffFields.length} total fields):</Text>
             <Table size="small" style={{ marginTop: 12 }} columns={[
-              { title: 'Field Name', dataIndex: 'FieldName', width: 200, render: v => <Text strong>{v}</Text> },
-              { title: 'Value', dataIndex: 'Value', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-            ]} dataSource={dffFields} pagination={false} />
+              {
+                title: 'Select',
+                width: 60,
+                render: (_: any, r: any) => (
+                  <Checkbox
+                    checked={selectedFields.has(r.name)}
+                    onChange={e => {
+                      const newSel = new Set(selectedFields);
+                      if (e.target.checked) newSel.add(r.name);
+                      else newSel.delete(r.name);
+                      setSelectedFields(newSel);
+                    }}
+                  />
+                ),
+              },
+              { title: 'Column Name', dataIndex: 'name', width: 200, render: v => <Text strong>{v}</Text> },
+              { title: 'Current Value', dataIndex: 'value', width: 250, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+              {
+                title: 'New Value',
+                width: 250,
+                render: (_: any, r: any) => selectedFields.has(r.name) ? (
+                  <Input size="small" value={dffEdits[r.name] ?? r.value ?? ''} onChange={e => setDffEdits(p => ({ ...p, [r.name]: e.target.value }))} />
+                ) : null,
+              },
+            ]} dataSource={dffFields} pagination={{ pageSize: 10, showSizeChanger: true }} scroll={{ x: 800 }} />
           </div>
         )}
       </Modal>
 
       <Drawer
-        title="API Inspector - DFF"
+        title="API Inspector - DFF Update"
         placement="right"
         onClose={() => setDffApiDrawerOpen(false)}
         open={dffApiDrawerOpen}
-        width={600}>
+        width={600}
+        footer={<Button type="primary" loading={dffUpdating} onClick={confirmUpdate} style={{ background: REDWOOD.success, borderColor: REDWOOD.success, width: '100%' }}>Confirm Update</Button>}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div>
             <Paragraph>
-              <Text strong>DFF Endpoint URL:</Text>
+              <Text strong>Update URL (PATCH):</Text>
             </Paragraph>
-            <div style={{ background: '#f5f5f5', padding: '8px', borderRadius: '4px', wordBreak: 'break-all', fontFamily: 'monospace', fontSize: '11px', maxHeight: 200, overflow: 'auto' }}>
-              GET {dffUrl || 'Loading...'}
+            <div style={{ background: '#f5f5f5', padding: '8px', borderRadius: '4px', wordBreak: 'break-all', fontFamily: 'monospace', fontSize: '11px', maxHeight: 150, overflow: 'auto' }}>
+              {dffUpdateUrl || 'Loading...'}
             </div>
           </div>
 
@@ -474,7 +504,7 @@ const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
 
           <div>
             <Paragraph>
-              <Text strong>Response Data:</Text>
+              <Text strong>Update Payload:</Text>
             </Paragraph>
             <pre style={{
               background: '#f5f5f5',
@@ -482,11 +512,31 @@ const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
               borderRadius: '4px',
               fontSize: '11px',
               fontFamily: 'monospace',
-              maxHeight: 400,
+              maxHeight: 300,
               overflow: 'auto',
               lineHeight: '1.4',
             }}>
-              {dffResponse || 'No data yet'}
+              {dffUpdatePayload || 'No data'}
+            </pre>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Paragraph>
+              <Text strong>Fetch Response (First 1000 chars):</Text>
+            </Paragraph>
+            <pre style={{
+              background: '#f5f5f5',
+              padding: '8px',
+              borderRadius: '4px',
+              fontSize: '10px',
+              fontFamily: 'monospace',
+              maxHeight: 200,
+              overflow: 'auto',
+              lineHeight: '1.2',
+            }}>
+              {dffResponse.slice(0, 1000)}
             </pre>
           </div>
         </div>
@@ -532,10 +582,12 @@ const EFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
         const items = d.items ?? [];
         if (Array.isArray(items) && items.length > 0) {
           const firstItem = items[0];
-          const fields = Object.entries(firstItem).map(([name, value]) => ({
-            name,
-            value
-          }));
+          const fields = Object.entries(firstItem)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([name, value]) => ({
+              name,
+              value: value !== null && value !== undefined ? String(value) : ''
+            }));
           setEffFields(fields);
         } else {
           setEffFields([]);
