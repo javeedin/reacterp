@@ -361,6 +361,7 @@ const SearchTab: React.FC<{ orgs: OrgOpt[]; onRowsChange?: (rows: any[]) => void
 // DFF Tab — view and update Data Flex Fields for items
 // ─────────────────────────────────────────────────────────────────────────────
 const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
+  const [allDFFData, setAllDFFData] = useState<Record<string, any[]>>({});
   const [dffLoading, setDffLoading] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
   const [dffFields, setDffFields] = useState<any[]>([]);
@@ -373,15 +374,48 @@ const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
   const [dffUpdatePayload, setDffUpdatePayload] = useState('');
   const [dffUpdating, setDffUpdating] = useState(false);
 
-  const fetchDFF = async (item: any) => {
+  useEffect(() => {
+    if (rows.length === 0) return;
     setDffLoading(true);
+    (async () => {
+      const results: Record<string, any[]> = {};
+      for (const item of rows) {
+        try {
+          const dffLink = (item.links ?? []).find((l: any) => l.name === 'ItemDFF')?.href;
+          if (dffLink) {
+            const r = await fetch(dffLink, { headers: FUSION_HDRS });
+            if (r.ok) {
+              const d = await r.json();
+              const items = d.items ?? [];
+              if (Array.isArray(items) && items.length > 0) {
+                const firstItem = items[0];
+                const fields = Object.entries(firstItem)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([name, value]) => ({
+                    name,
+                    value: value !== null && value !== undefined ? String(value) : ''
+                  }));
+                const key = `${item.ItemNumber}:${item.OrganizationCode}`;
+                results[key] = fields;
+              }
+            }
+          }
+        } catch (e) {
+          console.error(`Error fetching DFF for ${item.ItemNumber}:`, e);
+        }
+      }
+      setAllDFFData(results);
+      setDffLoading(false);
+    })();
+  }, [rows]);
+
+  const fetchDFFForEdit = async (item: any) => {
     setSelectedFields(new Set());
     setDffEdits({});
     try {
       const dffLink = (item.links ?? []).find((l: any) => l.name === 'ItemDFF')?.href;
       if (!dffLink) {
         message.warning('No DFF link found for this item');
-        setDffLoading(false);
         return;
       }
       console.log('Fetching DFF from:', dffLink);
@@ -412,8 +446,6 @@ const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
     } catch (e: any) {
       message.error(`Error: ${e?.message ?? e}`);
       setDffResponse(`Error: ${e?.message ?? e}`);
-    } finally {
-      setDffLoading(false);
     }
   };
 
@@ -463,18 +495,43 @@ const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
         <>
           <div style={{ marginBottom: 12 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              {rows.length} item(s) available. Click "View DFF" to see Data Flex Fields for an item.
+              {dffLoading ? 'Loading DFF data...' : `${rows.length} item(s) with DFF data. Expand rows to see fields.`}
             </Text>
           </div>
           <Table size="small" rowKey={(r) => r.ItemNumber + ':' + r.OrganizationCode}
+            loading={dffLoading}
+            expandable={{
+              expandedRowRender: (r: any) => {
+                const key = `${r.ItemNumber}:${r.OrganizationCode}`;
+                const fields = allDFFData[key] || [];
+                return fields.length === 0 ? (
+                  <Empty description="No DFF data for this item" style={{ margin: 0 }} />
+                ) : (
+                  <div style={{ padding: '12px' }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>DFF Fields ({fields.length}):</Text>
+                    <Table size="small" style={{ marginTop: 12 }} columns={[
+                      { title: 'Column Name', dataIndex: 'name', width: 250, render: v => <Text strong>{v}</Text> },
+                      { title: 'Value', dataIndex: 'value', render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
+                    ]} dataSource={fields} pagination={false} />
+                    <Button size="small" style={{ marginTop: 12, color: REDWOOD.success, borderColor: REDWOOD.success }} onClick={() => fetchDFFForEdit(r)}>Edit DFF</Button>
+                  </div>
+                );
+              }
+            }}
             columns={[
               { title: 'Item Number', dataIndex: 'ItemNumber', width: 150, render: v => <Text strong>{String(v ?? '')}</Text> },
-              { title: 'Description', dataIndex: 'ItemDescription', width: 300, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v == null ? '—' : String(v)}</Text> },
+              { title: 'Description', dataIndex: 'ItemDescription', width: 400, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v == null ? '—' : String(v)}</Text> },
               { title: 'Org', dataIndex: 'OrganizationCode', width: 80, render: v => <Tag>{String(v ?? '')}</Tag> },
-              { title: '', key: 'view', width: 100, fixed: 'right', render: (_: any, r: any) => (
-                  <Button size="small" onClick={() => fetchDFF(r)}
-                    style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>View DFF</Button>
-                ) },
+              {
+                title: 'Fields',
+                key: 'fields',
+                width: 80,
+                render: (_: any, r: any) => {
+                  const key = `${r.ItemNumber}:${r.OrganizationCode}`;
+                  const count = allDFFData[key]?.length || 0;
+                  return <Tag color="blue">{count}</Tag>;
+                }
+              }
             ]}
             dataSource={rows}
             pagination={{ pageSize: 20, showSizeChanger: true }} scroll={{ x: 600 }} />
