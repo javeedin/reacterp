@@ -2575,8 +2575,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
         firstLine.startDate = formattedDate;
         firstLine.endDate = getEndOfMonth(formattedDate);
       }
-      // Default accrual account from liability distribution (set later when BU is selected)
-      firstLine.accrualAccount = form.getFieldValue('liabilityDistribution') || '';
+      // accrualAccount should be left empty and set separately for expense/accrual accounts, NOT liability
+      // DO NOT set it to liabilityDistribution as that causes double-posting to the same account
       setLines([firstLine]);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -5956,14 +5956,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onClose, onSave, initialD
                   const newLiability = `${selectedBU.company}-00-00-2313101-0000-000-00-000-000`;
                   form.setFieldValue('liabilityDistribution', newLiability);
                   setHeaderValues((prev) => ({ ...prev, liabilityDistribution: newLiability }));
-                  setLines((prev) => prev.map((line) => ({ ...line, accrualAccount: newLiability })));
+                  // Do NOT copy liability to accrualAccount - they are different accounting purposes
                 }
               }
-              // Copy liability distribution to all lines' accrual account
-              if ('liabilityDistribution' in changedValues) {
-                const accrual = changedValues.liabilityDistribution || '';
-                setLines((prev) => prev.map((line) => ({ ...line, accrualAccount: accrual })));
-              }
+              // DO NOT copy liability distribution to accrual account
+              // They should be separate: liability is for AP Liability, accrual is for expense/accrual accounts
+              // Copying causes duplicate posting to same account (DR liability + CR liability)
             }}
           >
             <Tabs
