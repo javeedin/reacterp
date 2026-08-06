@@ -494,8 +494,9 @@ const ManageInvoices: React.FC = () => {
 
   // Accounting features state
   const [accountingAllModalOpen, setAccountingAllModalOpen] = useState(false);
-  const [accountingAllData, setAccountingAllData] = useState<Array<{invoiceNumber: string; invoiceId: number; debits: number; credits: number; lines: any[]}>>([]);
+  const [accountingAllData, setAccountingAllData] = useState<Array<{invoiceNumber: string; invoiceId: number; debits: number; credits: number; debitAccount: string; creditAccount: string; lines: any[]}>>([]);
   const [accountingAllLoading, setAccountingAllLoading] = useState(false);
+  const [accountingApiDebugOpen, setAccountingApiDebugOpen] = useState(false);
   const [accountingSingleModalOpen, setAccountingSingleModalOpen] = useState(false);
   const [accountingSingleInvoice, setAccountingSingleInvoice] = useState<InvoiceRecord | null>(null);
   const [accountingSingleData, setAccountingSingleData] = useState<any>(null);
@@ -1916,15 +1917,30 @@ const ManageInvoices: React.FC = () => {
           if (result.found && result.lines && Array.isArray(result.lines)) {
             let totalDebits = 0;
             let totalCredits = 0;
+            let debitAccount = '';
+            let creditAccount = '';
+
             result.lines.forEach((line: any) => {
               totalDebits += Number(line.enteredDr || line.accountedDr || 0);
               totalCredits += Number(line.enteredCr || line.accountedCr || 0);
+
+              // Extract debit account (first DR line)
+              if ((line.enteredDr || line.accountedDr) && !debitAccount) {
+                debitAccount = line.accountCombination || '';
+              }
+              // Extract credit account (first CR line)
+              if ((line.enteredCr || line.accountedCr) && !creditAccount) {
+                creditAccount = line.accountCombination || '';
+              }
             });
+
             data.push({
               invoiceNumber: invoice.invoiceNumber,
               invoiceId: invoice.invoiceId,
               debits: totalDebits,
               credits: totalCredits,
+              debitAccount,
+              creditAccount,
               lines: result.lines,
             });
           }
@@ -4183,12 +4199,21 @@ const ManageInvoices: React.FC = () => {
           <Space>
             <AccountBookOutlined style={{ color: REDWOOD.success }} />
             <span>Accounting for All Invoices</span>
+            <Tooltip title="View API Endpoint">
+              <Button
+                type="text"
+                size="small"
+                icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
+                onClick={() => setAccountingApiDebugOpen(true)}
+                style={{ padding: '0 4px', marginLeft: 'auto' }}
+              />
+            </Tooltip>
           </Space>
         }
         open={accountingAllModalOpen}
         onCancel={() => setAccountingAllModalOpen(false)}
         footer={<Button onClick={() => setAccountingAllModalOpen(false)}>Close</Button>}
-        width={1000}
+        width={1200}
         styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
         destroyOnClose
       >
@@ -4206,7 +4231,7 @@ const ManageInvoices: React.FC = () => {
                 title: 'Invoice Number',
                 dataIndex: 'invoiceNumber',
                 key: 'invoiceNumber',
-                width: 150,
+                width: 130,
                 render: (text: string, record: any) => (
                   <a onClick={() => {
                     const inv = invoices.find(i => i.invoiceId === record.invoiceId);
@@ -4217,25 +4242,49 @@ const ManageInvoices: React.FC = () => {
                 ),
               },
               {
+                title: 'Debit Account',
+                dataIndex: 'debitAccount',
+                key: 'debitAccount',
+                width: 180,
+                ellipsis: true,
+                render: (value: string) => (
+                  <Tooltip title={value}>
+                    <span style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.success }}>{value || '—'}</span>
+                  </Tooltip>
+                ),
+              },
+              {
                 title: 'Total Debits',
                 dataIndex: 'debits',
                 key: 'debits',
-                width: 150,
+                width: 130,
                 align: 'right',
                 render: (value: number) => <Text strong style={{ color: REDWOOD.success }}>{formatCurrency(value)}</Text>,
+              },
+              {
+                title: 'Credit Account',
+                dataIndex: 'creditAccount',
+                key: 'creditAccount',
+                width: 180,
+                ellipsis: true,
+                render: (value: string) => (
+                  <Tooltip title={value}>
+                    <span style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.error }}>{value || '—'}</span>
+                  </Tooltip>
+                ),
               },
               {
                 title: 'Total Credits',
                 dataIndex: 'credits',
                 key: 'credits',
-                width: 150,
+                width: 130,
                 align: 'right',
                 render: (value: number) => <Text strong style={{ color: REDWOOD.error }}>{formatCurrency(value)}</Text>,
               },
               {
                 title: 'Net',
                 key: 'net',
-                width: 150,
+                width: 130,
                 align: 'right',
                 render: (_: any, record: any) => {
                   const net = record.debits - record.credits;
@@ -4245,7 +4294,7 @@ const ManageInvoices: React.FC = () => {
               {
                 title: 'Action',
                 key: 'action',
-                width: 100,
+                width: 120,
                 render: (_: any, record: any) => (
                   <Button
                     type="link"
@@ -4265,6 +4314,7 @@ const ManageInvoices: React.FC = () => {
             rowKey="invoiceId"
             pagination={{ pageSize: 20 }}
             size="small"
+            scroll={{ x: 1100 }}
           />
         )}
       </Modal>
@@ -4390,6 +4440,101 @@ const ManageInvoices: React.FC = () => {
             />
           </>
         )}
+      </Modal>
+
+      {/* Accounting API Debug Modal */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> Accounting API Endpoint</Space>}
+        open={accountingApiDebugOpen}
+        onCancel={() => setAccountingApiDebugOpen(false)}
+        footer={<Button onClick={() => setAccountingApiDebugOpen(false)}>Close</Button>}
+        width={800}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size={16}>
+          <div>
+            <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 6, fontWeight: 600 }}>
+              Endpoint for fetching accounting data (called for each invoice):
+            </div>
+            <div style={{
+              background: REDWOOD.neutral100,
+              border: `1px solid ${REDWOOD.neutral200}`,
+              borderRadius: 6,
+              padding: '12px',
+              fontFamily: 'monospace',
+              fontSize: 11,
+              wordBreak: 'break-all',
+              color: REDWOOD.neutral900,
+              maxHeight: 200,
+              overflowY: 'auto',
+            }}>
+              GET {`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.slaAccounting}?sourceTable=AP_INVOICES&sourceId=[INVOICE_ID]`}
+            </div>
+            <Button
+              size="small"
+              icon={<CopyOutlined />}
+              style={{ marginTop: 8 }}
+              onClick={() => {
+                const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.slaAccounting}?sourceTable=AP_INVOICES&sourceId=[INVOICE_ID]`;
+                navigator.clipboard.writeText(url);
+                message.success('URL copied to clipboard!');
+              }}
+            >
+              Copy URL
+            </Button>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 6, fontWeight: 600 }}>
+              Response Structure:
+            </div>
+            <pre style={{
+              background: REDWOOD.neutral100,
+              border: `1px solid ${REDWOOD.neutral200}`,
+              borderRadius: 6,
+              padding: '12px',
+              fontSize: 10,
+              maxHeight: 300,
+              overflowY: 'auto',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              margin: 0,
+            }}>
+{`{
+  "found": boolean,
+  "headerId": number,
+  "accountingStatus": "DRAFT|FINAL|POSTED|ERROR",
+  "lines": [
+    {
+      "lineId": number,
+      "lineNumber": number,
+      "lineType": "DR|CR",
+      "accountCombination": "GL account",
+      "enteredDr": number,
+      "enteredCr": number,
+      "description": "Line description"
+    }
+  ]
+}`}
+            </pre>
+          </div>
+
+          <div style={{
+            background: '#f0f7ff',
+            border: `1px solid ${REDWOOD.info}`,
+            borderRadius: 6,
+            padding: '10px 12px',
+            fontSize: 12,
+          }}>
+            <div style={{ fontWeight: 600, color: REDWOOD.info, marginBottom: 6 }}>ℹ️ How the data is extracted:</div>
+            <ul style={{ margin: '0 0 0 20px', paddingLeft: 0 }}>
+              <li>For each invoice in the table, this endpoint is called</li>
+              <li><strong>Debit Account:</strong> The accountCombination from the first line with enteredDr &gt; 0</li>
+              <li><strong>Credit Account:</strong> The accountCombination from the first line with enteredCr &gt; 0</li>
+              <li><strong>Total Debits:</strong> Sum of all enteredDr values</li>
+              <li><strong>Total Credits:</strong> Sum of all enteredCr values</li>
+            </ul>
+          </div>
+        </Space>
       </Modal>
 
       </Content>
