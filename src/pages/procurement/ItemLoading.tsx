@@ -385,9 +385,17 @@ const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
         const d = await r.json();
         console.log('DFF Response:', d);
         setDffResponse(JSON.stringify(d, null, 2));
-        // Handle different response structures
-        const fields = d.items ?? Object.entries(d).map(([k, v]) => ({ FieldName: k, Value: v })) ?? [];
-        setDffFields(Array.isArray(fields) ? fields : []);
+        const items = d.items ?? [];
+        if (Array.isArray(items) && items.length > 0) {
+          const firstItem = items[0];
+          const fields = Object.entries(firstItem).map(([name, value]) => ({
+            name,
+            value
+          }));
+          setDffFields(fields);
+        } else {
+          setDffFields([]);
+        }
         setSelectedItem(item);
       } else {
         message.error(`Failed to fetch DFF data: HTTP ${r.status}`);
@@ -521,8 +529,17 @@ const EFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
         const d = await r.json();
         console.log('EFF Response:', d);
         setEffResponse(JSON.stringify(d, null, 2));
-        const fields = d.items ?? [];
-        setEffFields(Array.isArray(fields) ? fields : []);
+        const items = d.items ?? [];
+        if (Array.isArray(items) && items.length > 0) {
+          const firstItem = items[0];
+          const fields = Object.entries(firstItem).map(([name, value]) => ({
+            name,
+            value
+          }));
+          setEffFields(fields);
+        } else {
+          setEffFields([]);
+        }
         setSelectedItem(item);
       } else {
         message.error(`Failed to fetch EFF data: HTTP ${r.status}`);
