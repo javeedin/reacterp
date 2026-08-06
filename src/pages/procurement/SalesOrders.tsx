@@ -23,6 +23,9 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { FUSION_POD_HOST, FUSION_POD_AUTH, getFusionInstance } from '../../config/fusionInstance';
+import CustomerSearchBipModal from '../../components/CustomerSearchBipModal';
+import { convertBipCustomerToFill, type CustomerSearchResult } from '../../services/customerSearchBip.service';
+import { ORACLE_SOAP_CONFIG } from '../../config/api.config';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -3154,6 +3157,8 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
   const salesRepOpts = useOrdsOptions(SALESREPS_URL, SALESREP_KEYS);
   const custOptions = useMemo(() => custOptionList(customers), [customers]);
   const [subs, setSubs] = useState<string[]>([]);
+  const [custSearchModalOpen, setCustSearchModalOpen] = useState(false);
+  const instance = getFusionInstance();
 
   useEffect(() => {
     if (!open) return;
@@ -3165,6 +3170,11 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
   const onCustomer = (name: string, opt: any) => {
     const row = opt?._c ?? customers.find(c => custName(c) === name);
     if (row) form.setFieldsValue(customerFill(row));
+  };
+
+  const onCustomerBipSelect = (customer: CustomerSearchResult) => {
+    const fill = convertBipCustomerToFill(customer);
+    form.setFieldsValue(fill);
   };
 
   const buName = Form.useWatch('businessUnit', form);
@@ -3228,7 +3238,12 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
 
         <Section icon={<ProfileOutlined />} title="Customer" color={REDWOOD.info}>
           <Col xs={24} md={12}><Form.Item label="Customer Name" name="customerName" rules={req('Customer')} style={{ marginBottom: 12 }}>
-            <Select showSearch placeholder="Search customer" onChange={onCustomer} optionFilterProp="label" options={custOptions} notFoundContent={customers.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
+            <Space>
+              <Button type="default" icon={<SearchOutlined />} onClick={() => setCustSearchModalOpen(true)}>
+                Search Customer (BIP)
+              </Button>
+            </Space>
+          </Form.Item></Col>
           <Col xs={8} md={4}><Form.Item label="Account Number" name="accountNumber" style={{ marginBottom: 12 }}><Input placeholder="—" readOnly /></Form.Item></Col>
           <Col xs={8} md={4}><Form.Item label="Bill To Site" name="billToSite" style={{ marginBottom: 12 }}><Input placeholder="—" readOnly /></Form.Item></Col>
           <Col xs={8} md={4}><Form.Item label="Ship To Site" name="shipToSite" style={{ marginBottom: 12 }}><Input placeholder="—" readOnly /></Form.Item></Col>
@@ -3249,6 +3264,16 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
         </Section>
       </Form>
     </Modal>
+
+    <CustomerSearchBipModal
+      open={custSearchModalOpen}
+      onClose={() => setCustSearchModalOpen(false)}
+      onSelect={onCustomerBipSelect}
+      businessUnitId={form.getFieldValue('businessUnit') ? bUnits.find(b => b.businessUnitName === form.getFieldValue('businessUnit'))?.businessUnitId?.toString() : undefined}
+      soapBaseUrl={ORACLE_SOAP_CONFIG.prod.baseUrl}
+      username={ORACLE_SOAP_CONFIG.prod.username}
+      password={ORACLE_SOAP_CONFIG.prod.password}
+    />
   );
 };
 
