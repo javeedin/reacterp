@@ -13,7 +13,7 @@ import {
   CheckCircleOutlined, EyeOutlined, EditOutlined,
   SafetyCertificateOutlined, StopOutlined, SendOutlined, RollbackOutlined,
   FilePdfOutlined, FileExcelOutlined, SnippetsOutlined, ImportOutlined, TableOutlined, DownOutlined,
-  ThunderboltOutlined, CarOutlined, InboxOutlined, WarningFilled,
+  ThunderboltOutlined, CarOutlined, InboxOutlined, WarningFilled, AppstoreOutlined,
   PaperClipOutlined, FileTextOutlined, LinkOutlined, FileOutlined, FileImageOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
@@ -3122,6 +3122,77 @@ const PriceListPanel: React.FC<{ org?: string; ccy?: string; onAdd: (items: any[
   );
 };
 
+// OnhandPanel — fetch all items with on-hand quantities in selected org/subinventory.
+const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd: (items: any[]) => void }> = ({ org, subinv, ccy, onAdd }) => {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [sel, setSel] = useState<React.Key[]>([]);
+  const [qtys, setQtys] = useState<Record<string, number>>({});
+  const [rows, setRows] = useState<ImpRow[] | null>(null);
+
+  const loadOnhand = useCallback(async () => {
+    if (!org) { message.warning('Select an organization first'); return; }
+    setLoading(true);
+    try {
+      const balances: any[] = [];
+      let offset = 0;
+      for (let i = 0; i < 20; i++) {
+        const q = `OrganizationCode=${org}${subinv ? `;SubinventoryCode=${subinv}` : ''}`;
+        const r = await fetch(`${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&onlyData=true&limit=100&offset=${offset}`, { headers: FUSION_HDRS });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        balances.push(...(d.items ?? []));
+        if (!d.hasMore) break;
+        offset += 100;
+      }
+      // Deduplicate by item number and sum quantities
+      const itemMap: Record<string, { item: string; qty: number; subinv?: string }> = {};
+      balances.forEach((b: any) => {
+        const item = pf(b, ['ItemNumber', 'Item']);
+        const qty = num(pf(b, ['PrimaryQuantity', 'QuantityOnhand', 'OnhandQuantity', 'Quantity']));
+        const sub = pf(b, ['SubinventoryCode']);
+        const key = `${item}:${sub || ''}`;
+        if (!itemMap[key]) itemMap[key] = { item: item || '', qty: 0, subinv: sub };
+        itemMap[key].qty += qty;
+      });
+      setItems(Object.values(itemMap));
+      setSel([]);
+      setQtys({});
+    } catch (e: any) { message.error(`Failed to load on-hand: ${e.message}`); }
+    finally { setLoading(false); }
+  }, [org, subinv]);
+
+  useEffect(() => {
+    if (open) loadOnhand();
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setQty = (item: string, v: number) => { setQtys(q => ({ ...q, [item]: v })); if (v > 0) setSel(s => s.includes(item) ? s : [...s, item]); };
+  const cols: ColumnsType<any> = [
+    { title: 'Item', width: 140, render: (_, r) => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{r.item}</Text> },
+    { title: 'Subinventory', width: 140, render: (_, r) => <Text style={{ fontSize: 12 }}>{r.subinv || '—'}</Text> },
+    { title: 'On-hand Qty', width: 120, align: 'right', render: (_, r) => <Text style={{ fontVariantNumeric: 'tabular-nums' }}>{r.qty}</Text> },
+    { title: 'Order Qty', width: 100, render: (_, r) => { const it = r.item; return <InputNumber size="small" min={0} value={qtys[it] ?? 0} onChange={v => setQty(it, Number(v) || 0)} style={{ width: 84 }} />; } },
+  ];
+
+  if (rows) return <StagedPreview rows={rows} org={org} ccy={ccy} onAdd={onAdd} onReset={() => setRows(null)} />;
+  return (
+    <div>
+      <Space wrap style={{ marginBottom: 10 }}>
+        <Button type="primary" icon={<ReloadOutlined />} loading={loading} onClick={loadOnhand} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Refresh</Button>
+        {items.length > 0 && <Tag color="blue">{items.length} items</Tag>}
+      </Space>
+      <Table size="small" columns={cols} dataSource={items} rowKey={r => r.item} loading={loading}
+        rowSelection={{ selectedRowKeys: sel, onChange: setSel }} pagination={items.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ y: 330 }}
+        locale={{ emptyText: org ? 'No on-hand items' : 'Select an organization first' }} />
+      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center' }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>{sel.length} selected · {items.length} item(s)</Text>
+        <Button type="primary" disabled={!sel.length} icon={<ImportOutlined />} style={{ marginLeft: 'auto', background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+          onClick={() => setRows(items.filter(r => sel.includes(r.item)).map(r => ({ key: impKey(), itemNumber: r.item, description: '', qty: qtys[r.item] || 1, price: 0, valid: true })))}>Stage {sel.length || ''} for preview</Button>
+      </div>
+    </div>
+  );
+};
+
 // Add Multiple Lines — tabbed importer (item cost · price list · PDF · Excel/CSV · paste).
 const ItemSearchModal: React.FC<{ open: boolean; org?: string; subinv?: string; ccy?: string; taxOptions?: { value: string; label: string; pct: number }[]; onClose: () => void; onAdd: (items: any[]) => void }> = ({ open, org, subinv, ccy, taxOptions = [], onClose, onAdd }) => {
   const [fileSrc, setFileSrc] = useState<'pdf' | 'excel'>('pdf');
@@ -3130,6 +3201,7 @@ const ItemSearchModal: React.FC<{ open: boolean; org?: string; subinv?: string; 
       title={<Space><ImportOutlined style={{ color: REDWOOD.primary }} /> Add Multiple Lines{org ? <Tag>{org}</Tag> : null}</Space>}
       footer={<Button onClick={onClose}>Close</Button>}>
       <Tabs size="small" defaultActiveKey="cost" items={[
+        { key: 'onhand', label: <span><AppstoreOutlined /> On-hand</span>, children: <OnhandPanel open={open} org={org} subinv={subinv} ccy={ccy} onAdd={onAdd} /> },
         { key: 'cost', label: <span><DollarOutlined /> From Item Cost</span>, children: <ItemCostSearch org={org} subinv={subinv} taxOptions={taxOptions} onAdd={onAdd} /> },
         { key: 'price', label: <span><TableOutlined /> From Price List</span>, children: <PriceListPanel org={org} ccy={ccy} onAdd={onAdd} /> },
         { key: 'file', label: <span><FilePdfOutlined /> From PDF / Excel / CSV</span>, children: (
