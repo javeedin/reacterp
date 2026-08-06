@@ -361,16 +361,22 @@ const SearchTab: React.FC<{ orgs: OrgOpt[]; onRowsChange?: (rows: any[]) => void
 // DFF Tab — view and update Data Flex Fields for items
 // ─────────────────────────────────────────────────────────────────────────────
 const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
-  const [dffData, setDffData] = useState<Record<string, any>>({});
   const [dffLoading, setDffLoading] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
   const [dffFields, setDffFields] = useState<any[]>([]);
+  const [selectedFields, setSelectedFields] = useState<Set<string>>(new Set());
+  const [dffEdits, setDffEdits] = useState<Record<string, any>>({});
   const [dffApiDrawerOpen, setDffApiDrawerOpen] = useState(false);
   const [dffUrl, setDffUrl] = useState('');
   const [dffResponse, setDffResponse] = useState('');
+  const [dffUpdateUrl, setDffUpdateUrl] = useState('');
+  const [dffUpdatePayload, setDffUpdatePayload] = useState('');
+  const [dffUpdating, setDffUpdating] = useState(false);
 
   const fetchDFF = async (item: any) => {
     setDffLoading(true);
+    setSelectedFields(new Set());
+    setDffEdits({});
     try {
       const dffLink = (item.links ?? []).find((l: any) => l.name === 'ItemDFF')?.href;
       if (!dffLink) {
@@ -408,6 +414,44 @@ const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
       setDffResponse(`Error: ${e?.message ?? e}`);
     } finally {
       setDffLoading(false);
+    }
+  };
+
+  const handleUpdateClick = () => {
+    if (selectedFields.size === 0) {
+      message.warning('Select at least one field to update');
+      return;
+    }
+    const updateUrl = dffUrl.replace('/child/ItemDFF', '') || '';
+    setDffUpdateUrl(updateUrl);
+    const payload: Record<string, any> = {};
+    selectedFields.forEach(fieldName => {
+      payload[fieldName] = dffEdits[fieldName] ?? dffFields.find((f: any) => f.name === fieldName)?.value ?? '';
+    });
+    setDffUpdatePayload(JSON.stringify(payload, null, 2));
+    setDffApiDrawerOpen(true);
+  };
+
+  const confirmUpdate = async () => {
+    if (!dffUpdateUrl) return;
+    setDffUpdating(true);
+    try {
+      const payload: Record<string, any> = {};
+      selectedFields.forEach(fieldName => {
+        payload[fieldName] = dffEdits[fieldName] ?? dffFields.find((f: any) => f.name === fieldName)?.value ?? '';
+      });
+      const r = await fetch(dffUpdateUrl, { method: 'PATCH', headers: RESITEM_HDRS, body: JSON.stringify(payload) });
+      if (r.ok) {
+        message.success('DFF updated successfully');
+        setDffApiDrawerOpen(false);
+        setSelectedItem(null);
+      } else {
+        message.error(`Update failed: HTTP ${r.status}`);
+      }
+    } catch (e: any) {
+      message.error(`Error: ${e?.message ?? e}`);
+    } finally {
+      setDffUpdating(false);
     }
   };
 
