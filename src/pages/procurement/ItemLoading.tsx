@@ -261,7 +261,7 @@ const yesNoIcon = (on: boolean) => on
 
 const ALL_ORGS = '__ALL__';
 const SearchTab: React.FC<{ orgs: OrgOpt[]; onRowsChange?: (rows: any[]) => void }> = ({ orgs, onRowsChange }) => {
-  const [org, setOrg] = useState<string>(ALL_ORGS);
+  const [selectedOrgs, setSelectedOrgs] = useState<string[]>([]);
   const [itemsText, setItemsText] = useState('');
   const [description, setDescription] = useState('');
   const [rows, setRows] = useState<any[]>([]);
@@ -276,7 +276,12 @@ const SearchTab: React.FC<{ orgs: OrgOpt[]; onRowsChange?: (rows: any[]) => void
   };
 
   const run = useCallback(async () => {
-    const orgClause = org && org !== ALL_ORGS ? `OrganizationCode=${org};` : '';
+    if (!selectedOrgs || selectedOrgs.length === 0) {
+      message.warning('Select at least one organization');
+      return;
+    }
+    const orgClauses = selectedOrgs.map(o => `OrganizationCode=${o}`).join(';');
+    const orgClause = orgClauses ? `${orgClauses};` : '';
     // Parse the pasted item numbers (one per line, or tab/comma separated).
     let nums = Array.from(new Set(itemsText.split(/\r?\n|,|\t|\s{2,}/).map(s => s.trim()).filter(Boolean)));
     if (nums.length > 500) { message.warning(`Too many items (${nums.length}) — searching the first 500`); nums = nums.slice(0, 500); }
@@ -298,7 +303,7 @@ const SearchTab: React.FC<{ orgs: OrgOpt[]; onRowsChange?: (rows: any[]) => void
         out.sort((a, b) => String(a.ItemNumber).localeCompare(String(b.ItemNumber)) || String(a.OrganizationCode).localeCompare(String(b.OrganizationCode)));
         updateRows(out);
       } else if (description.trim()) {
-        if (org === ALL_ORGS) { message.warning('Pick an organization for a description search, or paste item numbers'); setLoading(false); return; }
+        if (selectedOrgs.length === 0) { message.warning('Select at least one organization to search by description'); setLoading(false); return; }
         const url = `${ITEMS_URL}?q=${orgClause}ItemDescription LIKE ${description.trim()}%&limit=500`;
         setLastUrl(url);
         const r = await fetch(url, { headers: FUSION_HDRS });
@@ -309,7 +314,7 @@ const SearchTab: React.FC<{ orgs: OrgOpt[]; onRowsChange?: (rows: any[]) => void
       }
     } catch (e: any) { setErr(e?.message ?? String(e)); updateRows([]); }
     finally { setLoading(false); }
-  }, [org, itemsText, description, onRowsChange]);
+  }, [selectedOrgs, itemsText, description, onRowsChange]);
 
   const cols: ColumnsType<any> = [
     { title: 'Item Number', dataIndex: 'ItemNumber', width: 160, render: v => <Text strong>{String(v ?? '')}</Text> },
@@ -331,9 +336,9 @@ const SearchTab: React.FC<{ orgs: OrgOpt[]; onRowsChange?: (rows: any[]) => void
   return (
     <div>
       <Row gutter={12} style={{ marginBottom: 12 }}>
-        <Col xs={24} md={7}><div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Organization</div>
-          <Select showSearch style={{ width: '100%' }} value={org} onChange={setOrg} optionFilterProp="label"
-            options={[{ value: ALL_ORGS, label: '— All organizations —' }, ...orgs.map(o => ({ value: o.code, label: `${o.code}${o.name ? ' — ' + o.name : ''}` }))]} />
+        <Col xs={24} md={7}><div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Organization *</div>
+          <Select showSearch mode="multiple" style={{ width: '100%' }} value={selectedOrgs} onChange={setSelectedOrgs} optionFilterProp="label" placeholder="Select one or more organizations"
+            options={orgs.map(o => ({ value: o.code, label: `${o.code}${o.name ? ' — ' + o.name : ''}` }))} />
           <div style={{ fontSize: 12, color: REDWOOD.neutral600, margin: '10px 0 4px' }}>Description (prefix, single org)</div>
           <Input value={description} onChange={e => setDescription(e.target.value)} onPressEnter={run} allowClear placeholder="Only used when no item numbers are pasted" /></Col>
         <Col xs={24} md={11}><div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>Item Numbers — paste one per line</div>
@@ -341,7 +346,7 @@ const SearchTab: React.FC<{ orgs: OrgOpt[]; onRowsChange?: (rows: any[]) => void
             placeholder={'460-BDXV\nDLPB14255-01\n450-BFFP'} /></Col>
         <Col xs={24} md={6} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', gap: 8 }}>
           <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 4 }}>&nbsp;</div>
-          <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={run} block
+          <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={run} disabled={selectedOrgs.length === 0} block
             style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
           {lastUrl && <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{lastUrl}</span>}>
             <Button icon={<ApiOutlined />} style={{ color: REDWOOD.info }} block>Last API call</Button></Tooltip>}
