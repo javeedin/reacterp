@@ -487,6 +487,29 @@ const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
     }
   };
 
+  const allColumnNames = useMemo(() => {
+    const names = new Set<string>();
+    Object.values(allDFFData).forEach(fields => {
+      fields.forEach(f => names.add(f.name));
+    });
+    return Array.from(names).sort();
+  }, [allDFFData]);
+
+  const dynamicColumns = useMemo(() => {
+    return allColumnNames.map(colName => ({
+      title: colName,
+      dataIndex: colName,
+      key: colName,
+      width: 150,
+      render: (_: any, r: any) => {
+        const key = `${r.ItemNumber}:${r.OrganizationCode}`;
+        const fields = allDFFData[key] || [];
+        const field = fields.find(f => f.name === colName);
+        return <Text style={{ fontSize: 11 }}>{field?.value || '—'}</Text>;
+      }
+    }));
+  }, [allColumnNames, allDFFData]);
+
   return (
     <div>
       {rows.length === 0 ? (
@@ -495,46 +518,28 @@ const DFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
         <>
           <div style={{ marginBottom: 12 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              {dffLoading ? 'Loading DFF data...' : `${rows.length} item(s) with DFF data. Expand rows to see fields.`}
+              {dffLoading ? 'Loading DFF data...' : `${rows.length} item(s) with ${allColumnNames.length} DFF columns.`}
             </Text>
           </div>
           <Table size="small" rowKey={(r) => r.ItemNumber + ':' + r.OrganizationCode}
             loading={dffLoading}
-            expandable={{
-              expandedRowRender: (r: any) => {
-                const key = `${r.ItemNumber}:${r.OrganizationCode}`;
-                const fields = allDFFData[key] || [];
-                return fields.length === 0 ? (
-                  <Empty description="No DFF data for this item" style={{ margin: 0 }} />
-                ) : (
-                  <div style={{ padding: '12px' }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>DFF Fields ({fields.length}):</Text>
-                    <Table size="small" style={{ marginTop: 12 }} columns={[
-                      { title: 'Column Name', dataIndex: 'name', width: 250, render: v => <Text strong>{v}</Text> },
-                      { title: 'Value', dataIndex: 'value', render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-                    ]} dataSource={fields} pagination={false} />
-                    <Button size="small" style={{ marginTop: 12, color: REDWOOD.success, borderColor: REDWOOD.success }} onClick={() => fetchDFFForEdit(r)}>Edit DFF</Button>
-                  </div>
-                );
-              }
-            }}
             columns={[
-              { title: 'Item Number', dataIndex: 'ItemNumber', width: 150, render: v => <Text strong>{String(v ?? '')}</Text> },
-              { title: 'Description', dataIndex: 'ItemDescription', width: 400, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v == null ? '—' : String(v)}</Text> },
-              { title: 'Org', dataIndex: 'OrganizationCode', width: 80, render: v => <Tag>{String(v ?? '')}</Tag> },
+              { title: 'Item Number', dataIndex: 'ItemNumber', width: 150, fixed: 'left', render: v => <Text strong>{String(v ?? '')}</Text> },
+              { title: 'Description', dataIndex: 'ItemDescription', width: 350, fixed: 'left', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v == null ? '—' : String(v)}</Text> },
+              { title: 'Org', dataIndex: 'OrganizationCode', width: 80, fixed: 'left', render: v => <Tag>{String(v ?? '')}</Tag> },
+              ...dynamicColumns,
               {
-                title: 'Fields',
-                key: 'fields',
-                width: 80,
-                render: (_: any, r: any) => {
-                  const key = `${r.ItemNumber}:${r.OrganizationCode}`;
-                  const count = allDFFData[key]?.length || 0;
-                  return <Tag color="blue">{count}</Tag>;
-                }
+                title: 'Actions',
+                key: 'actions',
+                width: 100,
+                fixed: 'right',
+                render: (_: any, r: any) => (
+                  <Button size="small" onClick={() => fetchDFFForEdit(r)} style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}>Edit</Button>
+                )
               }
             ]}
             dataSource={rows}
-            pagination={{ pageSize: 20, showSizeChanger: true }} scroll={{ x: 600 }} />
+            pagination={{ pageSize: 20, showSizeChanger: true }} scroll={{ x: 1200 }} />
         </>
       )}
 
@@ -776,6 +781,29 @@ const EFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
     }
   };
 
+  const allEFFColumnNames = useMemo(() => {
+    const names = new Set<string>();
+    Object.values(allEFFData).forEach(fields => {
+      fields.forEach(f => names.add(f.name));
+    });
+    return Array.from(names).sort();
+  }, [allEFFData]);
+
+  const dynamicEFFColumns = useMemo(() => {
+    return allEFFColumnNames.map(colName => ({
+      title: colName,
+      dataIndex: colName,
+      key: colName,
+      width: 150,
+      render: (_: any, r: any) => {
+        const key = `${r.ItemNumber}:${r.OrganizationCode}`;
+        const fields = allEFFData[key] || [];
+        const field = fields.find(f => f.name === colName);
+        return <Text style={{ fontSize: 11 }}>{field?.value || '—'}</Text>;
+      }
+    }));
+  }, [allEFFColumnNames, allEFFData]);
+
   return (
     <div>
       {rows.length === 0 ? (
@@ -784,46 +812,28 @@ const EFFTab: React.FC<{ rows: any[] }> = ({ rows }) => {
         <>
           <div style={{ marginBottom: 12 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              {effLoading ? 'Loading EFF data...' : `${rows.length} item(s) with EFF data. Expand rows to see fields.`}
+              {effLoading ? 'Loading EFF data...' : `${rows.length} item(s) with ${allEFFColumnNames.length} EFF columns.`}
             </Text>
           </div>
           <Table size="small" rowKey={(r) => r.ItemNumber + ':' + r.OrganizationCode}
             loading={effLoading}
-            expandable={{
-              expandedRowRender: (r: any) => {
-                const key = `${r.ItemNumber}:${r.OrganizationCode}`;
-                const fields = allEFFData[key] || [];
-                return fields.length === 0 ? (
-                  <Empty description="No EFF data for this item" style={{ margin: 0 }} />
-                ) : (
-                  <div style={{ padding: '12px' }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>EFF Fields ({fields.length}):</Text>
-                    <Table size="small" style={{ marginTop: 12 }} columns={[
-                      { title: 'Column Name', dataIndex: 'name', width: 250, render: v => <Text strong>{v}</Text> },
-                      { title: 'Value', dataIndex: 'value', render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-                    ]} dataSource={fields} pagination={false} />
-                    <Button size="small" style={{ marginTop: 12, color: REDWOOD.success, borderColor: REDWOOD.success }} onClick={() => fetchEFFForEdit(r)}>Edit EFF</Button>
-                  </div>
-                );
-              }
-            }}
             columns={[
-              { title: 'Item Number', dataIndex: 'ItemNumber', width: 150, render: v => <Text strong>{String(v ?? '')}</Text> },
-              { title: 'Description', dataIndex: 'ItemDescription', width: 400, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v == null ? '—' : String(v)}</Text> },
-              { title: 'Org', dataIndex: 'OrganizationCode', width: 80, render: v => <Tag>{String(v ?? '')}</Tag> },
+              { title: 'Item Number', dataIndex: 'ItemNumber', width: 150, fixed: 'left', render: v => <Text strong>{String(v ?? '')}</Text> },
+              { title: 'Description', dataIndex: 'ItemDescription', width: 350, fixed: 'left', ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v == null ? '—' : String(v)}</Text> },
+              { title: 'Org', dataIndex: 'OrganizationCode', width: 80, fixed: 'left', render: v => <Tag>{String(v ?? '')}</Tag> },
+              ...dynamicEFFColumns,
               {
-                title: 'Fields',
-                key: 'fields',
-                width: 80,
-                render: (_: any, r: any) => {
-                  const key = `${r.ItemNumber}:${r.OrganizationCode}`;
-                  const count = allEFFData[key]?.length || 0;
-                  return <Tag color="blue">{count}</Tag>;
-                }
+                title: 'Actions',
+                key: 'actions',
+                width: 100,
+                fixed: 'right',
+                render: (_: any, r: any) => (
+                  <Button size="small" onClick={() => fetchEFFForEdit(r)} style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}>Edit</Button>
+                )
               }
             ]}
             dataSource={rows}
-            pagination={{ pageSize: 20, showSizeChanger: true }} scroll={{ x: 600 }} />
+            pagination={{ pageSize: 20, showSizeChanger: true }} scroll={{ x: 1200 }} />
         </>
       )}
 
