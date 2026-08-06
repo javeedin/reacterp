@@ -30,3 +30,4 @@ src/config/email.secret.ts
 *.sw?
 .claude/
 !dist/assets/ManagePayablesOptions-DfKp8wqN.js
+package-lock.json
