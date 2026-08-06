@@ -76,6 +76,7 @@ import {
   LinkOutlined,
   SyncOutlined,
   CalendarOutlined,
+  AccountBookOutlined,
 } from '@ant-design/icons';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -87,6 +88,7 @@ import CreateInvoice from './CreateInvoice';
 import type { InvoiceInitialData } from './CreateInvoice';
 import { APEX_DB_CONFIG, ORACLE_FUSION_CONFIG } from '../../config/api.config';
 import { getApprovalRules, sendInvoiceApproval, type ApprovalUser, type ApprovalDebugStep } from '../../services/approvals.service';
+import { getAccounting } from '../../services/sla.service';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -489,6 +491,15 @@ const ManageInvoices: React.FC = () => {
   const [mpaModalRecord,  setMpaModalRecord]  = useState<InvoiceRecord | null>(null);
   const [mpaModalData,    setMpaModalData]    = useState<import('../../services/multiperiod.service').MpaInvoiceDetail | null>(null);
   const [mpaModalLoading, setMpaModalLoading] = useState(false);
+
+  // Accounting features state
+  const [accountingAllModalOpen, setAccountingAllModalOpen] = useState(false);
+  const [accountingAllData, setAccountingAllData] = useState<Array<{invoiceNumber: string; invoiceId: number; debits: number; credits: number; lines: any[]}>>([]);
+  const [accountingAllLoading, setAccountingAllLoading] = useState(false);
+  const [accountingSingleModalOpen, setAccountingSingleModalOpen] = useState(false);
+  const [accountingSingleInvoice, setAccountingSingleInvoice] = useState<InvoiceRecord | null>(null);
+  const [accountingSingleData, setAccountingSingleData] = useState<any>(null);
+  const [accountingSingleLoading, setAccountingSingleLoading] = useState(false);
 
   const openMpaModal = async (record: InvoiceRecord) => {
     setMpaModalRecord(record);
@@ -1892,6 +1903,65 @@ const ManageInvoices: React.FC = () => {
     { key: 'print', label: 'Print', icon: <PrinterOutlined /> },
   ];
 
+  // Accounting functions
+  const fetchAllAccountingData = async () => {
+    setAccountingAllLoading(true);
+    setAccountingAllData([]);
+    const data: typeof accountingAllData = [];
+
+    try {
+      for (const invoice of displayedInvoices) {
+        try {
+          const result = await getAccounting('AP_INVOICES', invoice.invoiceId);
+          if (result.items && Array.isArray(result.items)) {
+            let totalDebits = 0;
+            let totalCredits = 0;
+            result.items.forEach((line: any) => {
+              const amount = Number(line.amount || line.lineAmount || 0);
+              if (line.accountingLineType === 'DEBIT' || (line.debitAmount && Number(line.debitAmount) > 0)) {
+                totalDebits += amount;
+              } else if (line.accountingLineType === 'CREDIT' || (line.creditAmount && Number(line.creditAmount) > 0)) {
+                totalCredits += amount;
+              }
+            });
+            data.push({
+              invoiceNumber: invoice.invoiceNumber,
+              invoiceId: invoice.invoiceId,
+              debits: totalDebits,
+              credits: totalCredits,
+              lines: result.items,
+            });
+          }
+        } catch (e) {
+          console.error(`Failed to fetch accounting for ${invoice.invoiceNumber}:`, e);
+        }
+      }
+      setAccountingAllData(data);
+    } catch (error) {
+      message.error('Failed to fetch accounting data');
+      console.error(error);
+    } finally {
+      setAccountingAllLoading(false);
+    }
+  };
+
+  const openAccountingForSingle = async (record: InvoiceRecord) => {
+    setAccountingSingleInvoice(record);
+    setAccountingSingleData(null);
+    setAccountingSingleModalOpen(true);
+    setAccountingSingleLoading(true);
+
+    try {
+      const result = await getAccounting('AP_INVOICES', record.invoiceId);
+      setAccountingSingleData(result);
+    } catch (error) {
+      message.error(`Failed to fetch accounting for ${record.invoiceNumber}`);
+      console.error(error);
+    } finally {
+      setAccountingSingleLoading(false);
+    }
+  };
+
   // Approval menu items
   const approvalMenuItems: MenuProps['items'] = [
     { key: 'approve', label: 'Approve', icon: <CheckCircleOutlined /> },
@@ -1907,6 +1977,23 @@ const ManageInvoices: React.FC = () => {
 
   // Table columns
   const columns: ColumnsType<InvoiceRecord> = [
+    {
+      title: '',
+      key: 'accounting',
+      width: 40,
+      fixed: 'left',
+      render: (_: any, record: InvoiceRecord) => (
+        <Tooltip title="View Accounting">
+          <Button
+            size="small"
+            type="text"
+            icon={<AccountBookOutlined style={{ color: REDWOOD.info, fontSize: 14 }} />}
+            style={{ padding: '0 2px' }}
+            onClick={(e) => { e.stopPropagation(); openAccountingForSingle(record); }}
+          />
+        </Tooltip>
+      ),
+    },
     {
       title: 'Invoice Number',
       dataIndex: 'invoiceNumber',
@@ -2503,6 +2590,20 @@ const ManageInvoices: React.FC = () => {
                     Clear Selection ({selectedRowKeys.length})
                   </Button>
                 )}
+                <Tooltip title="Show invoice-wise debits and credits from GL">
+                  <Button
+                    size="small"
+                    icon={<AccountBookOutlined />}
+                    style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
+                    loading={accountingAllLoading}
+                    onClick={async () => {
+                      setAccountingAllModalOpen(true);
+                      await fetchAllAccountingData();
+                    }}
+                  >
+                    Show Accounting for All Invoices
+                  </Button>
+                </Tooltip>
                 <Tooltip title={
                   selectedRowKeys.length === 0
                     ? 'Select one or more invoices to fetch applied prepayments from Oracle Fusion'
@@ -4077,6 +4178,221 @@ const ManageInvoices: React.FC = () => {
           </>
         ) : (
           <div style={{ textAlign: 'center', padding: 40, color: '#8c8c8c' }}>No schedule data found.</div>
+        )}
+      </Modal>
+
+      {/* Accounting for All Invoices Modal */}
+      <Modal
+        title={
+          <Space>
+            <AccountBookOutlined style={{ color: REDWOOD.success }} />
+            <span>Accounting for All Invoices</span>
+          </Space>
+        }
+        open={accountingAllModalOpen}
+        onCancel={() => setAccountingAllModalOpen(false)}
+        footer={<Button onClick={() => setAccountingAllModalOpen(false)}>Close</Button>}
+        width={1000}
+        styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
+        destroyOnClose
+      >
+        {accountingAllLoading ? (
+          <div style={{ textAlign: 'center', padding: 60 }}>
+            <Spin />
+            <div style={{ marginTop: 12, color: REDWOOD.neutral600 }}>Loading accounting data for all invoices...</div>
+          </div>
+        ) : accountingAllData.length === 0 ? (
+          <Alert type="info" message="No accounting data found for displayed invoices" showIcon />
+        ) : (
+          <Table
+            columns={[
+              {
+                title: 'Invoice Number',
+                dataIndex: 'invoiceNumber',
+                key: 'invoiceNumber',
+                width: 150,
+                render: (text: string, record: any) => (
+                  <a onClick={() => {
+                    const inv = invoices.find(i => i.invoiceId === record.invoiceId);
+                    if (inv) openAccountingForSingle(inv);
+                  }} style={{ color: REDWOOD.info }}>
+                    {text}
+                  </a>
+                ),
+              },
+              {
+                title: 'Total Debits',
+                dataIndex: 'debits',
+                key: 'debits',
+                width: 150,
+                align: 'right',
+                render: (value: number) => <Text strong style={{ color: REDWOOD.success }}>{formatCurrency(value)}</Text>,
+              },
+              {
+                title: 'Total Credits',
+                dataIndex: 'credits',
+                key: 'credits',
+                width: 150,
+                align: 'right',
+                render: (value: number) => <Text strong style={{ color: REDWOOD.error }}>{formatCurrency(value)}</Text>,
+              },
+              {
+                title: 'Net',
+                key: 'net',
+                width: 150,
+                align: 'right',
+                render: (_: any, record: any) => {
+                  const net = record.debits - record.credits;
+                  return <Text strong style={{ color: net >= 0 ? REDWOOD.success : REDWOOD.error }}>{formatCurrency(net)}</Text>;
+                },
+              },
+              {
+                title: 'Action',
+                key: 'action',
+                width: 100,
+                render: (_: any, record: any) => (
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => {
+                      const inv = invoices.find(i => i.invoiceId === record.invoiceId);
+                      if (inv) openAccountingForSingle(inv);
+                    }}
+                    style={{ color: REDWOOD.info }}
+                  >
+                    View Details
+                  </Button>
+                ),
+              },
+            ]}
+            dataSource={accountingAllData}
+            rowKey="invoiceId"
+            pagination={{ pageSize: 20 }}
+            size="small"
+          />
+        )}
+      </Modal>
+
+      {/* Accounting for Single Invoice Modal */}
+      <Modal
+        title={
+          <Space>
+            <AccountBookOutlined style={{ color: REDWOOD.info }} />
+            <span>Accounting Details — {accountingSingleInvoice?.invoiceNumber}</span>
+          </Space>
+        }
+        open={accountingSingleModalOpen}
+        onCancel={() => setAccountingSingleModalOpen(false)}
+        footer={<Button onClick={() => setAccountingSingleModalOpen(false)}>Close</Button>}
+        width={1200}
+        styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
+        destroyOnClose
+      >
+        {accountingSingleLoading ? (
+          <div style={{ textAlign: 'center', padding: 60 }}>
+            <Spin />
+            <div style={{ marginTop: 12, color: REDWOOD.neutral600 }}>Loading accounting details...</div>
+          </div>
+        ) : !accountingSingleData || !accountingSingleData.items || accountingSingleData.items.length === 0 ? (
+          <Alert type="info" message="No accounting lines found for this invoice" showIcon />
+        ) : (
+          <>
+            {/* Summary */}
+            <Card style={{ marginBottom: 16 }}>
+              <Row gutter={32}>
+                <Col span={6}>
+                  <Statistic
+                    title="Accounting Status"
+                    value={accountingSingleData.accountingStatus || 'N/A'}
+                    valueStyle={{ color: accountingSingleData.accountingStatus === 'POSTED' ? REDWOOD.success : REDWOOD.warning, fontSize: 14 }}
+                  />
+                </Col>
+                <Col span={6}>
+                  <Statistic
+                    title="Header ID"
+                    value={accountingSingleData.headerId || 'N/A'}
+                  />
+                </Col>
+                <Col span={6}>
+                  <Statistic
+                    title="Accounting Date"
+                    value={accountingSingleData.accountingDate || 'N/A'}
+                  />
+                </Col>
+                <Col span={6}>
+                  <Statistic
+                    title="Line Count"
+                    value={accountingSingleData.items?.length || 0}
+                  />
+                </Col>
+              </Row>
+            </Card>
+
+            {/* Lines Table */}
+            <Table
+              columns={[
+                {
+                  title: 'Line #',
+                  dataIndex: 'lineNumber',
+                  key: 'lineNumber',
+                  width: 60,
+                },
+                {
+                  title: 'Account',
+                  dataIndex: 'accountCombination',
+                  key: 'accountCombination',
+                  width: 200,
+                  ellipsis: true,
+                },
+                {
+                  title: 'Description',
+                  dataIndex: 'description',
+                  key: 'description',
+                  width: 200,
+                  ellipsis: true,
+                },
+                {
+                  title: 'Debit',
+                  dataIndex: 'debitAmount',
+                  key: 'debitAmount',
+                  width: 120,
+                  align: 'right',
+                  render: (value: number) => value ? <Text style={{ color: REDWOOD.success }}>{formatCurrency(value)}</Text> : '—',
+                },
+                {
+                  title: 'Credit',
+                  dataIndex: 'creditAmount',
+                  key: 'creditAmount',
+                  width: 120,
+                  align: 'right',
+                  render: (value: number) => value ? <Text style={{ color: REDWOOD.error }}>{formatCurrency(value)}</Text> : '—',
+                },
+              ]}
+              dataSource={accountingSingleData.items}
+              rowKey={(_, i) => i}
+              pagination={{ pageSize: 20 }}
+              size="small"
+              summary={() => {
+                const totalDebits = (accountingSingleData.items || []).reduce((sum: number, item: any) => sum + (Number(item.debitAmount) || 0), 0);
+                const totalCredits = (accountingSingleData.items || []).reduce((sum: number, item: any) => sum + (Number(item.creditAmount) || 0), 0);
+                return (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                      <Table.Summary.Cell index={0} colSpan={3}>
+                        <Text strong>TOTAL</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={3} align="right">
+                        <Text strong style={{ color: REDWOOD.success }}>{formatCurrency(totalDebits)}</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={4} align="right">
+                        <Text strong style={{ color: REDWOOD.error }}>{formatCurrency(totalCredits)}</Text>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                );
+              }}
+            />
+          </>
         )}
       </Modal>
 
