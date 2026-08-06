@@ -3129,6 +3129,7 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
   const [sel, setSel] = useState<React.Key[]>([]);
   const [qtys, setQtys] = useState<Record<string, number>>({});
   const [rows, setRows] = useState<ImpRow[] | null>(null);
+  const [uomMap, setUomMap] = useState<Record<string, { uom?: string; desc?: string }>>({});
 
   const loadOnhand = useCallback(async () => {
     if (!org) { message.warning('Select an organization first'); return; }
@@ -3155,7 +3156,28 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
         if (!itemMap[key]) itemMap[key] = { item: item || '', qty: 0, subinv: sub };
         itemMap[key].qty += qty;
       });
-      setItems(Object.values(itemMap));
+
+      // Fetch UOM and description for each item from itemCosts
+      const items = Object.values(itemMap);
+      const uomData: Record<string, { uom?: string; desc?: string }> = {};
+      await Promise.all(items.map(async (item) => {
+        try {
+          const r = await fetch(`${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemNumber=${item.item}`)}&onlyData=true&limit=1`, { headers: FUSION_HDRS });
+          if (r.ok) {
+            const d = await r.json();
+            const row = d.items?.[0];
+            if (row) {
+              uomData[item.item] = {
+                uom: pf(row, ['UOMName', 'UOMCode']),
+                desc: pf(row, ['ItemDescription'])
+              };
+            }
+          }
+        } catch { /* skip */ }
+      }));
+
+      setItems(items);
+      setUomMap(uomData);
       setSel([]);
       setQtys({});
     } catch (e: any) { message.error(`Failed to load on-hand: ${e.message}`); }
@@ -3168,10 +3190,12 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
 
   const setQty = (item: string, v: number) => { setQtys(q => ({ ...q, [item]: v })); if (v > 0) setSel(s => s.includes(item) ? s : [...s, item]); };
   const cols: ColumnsType<any> = [
-    { title: 'Item', width: 140, render: (_, r) => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{r.item}</Text> },
-    { title: 'Subinventory', width: 140, render: (_, r) => <Text style={{ fontSize: 12 }}>{r.subinv || '—'}</Text> },
-    { title: 'On-hand Qty', width: 120, align: 'right', render: (_, r) => <Text style={{ fontVariantNumeric: 'tabular-nums' }}>{r.qty}</Text> },
-    { title: 'Order Qty', width: 100, render: (_, r) => { const it = r.item; return <InputNumber size="small" min={0} value={qtys[it] ?? 0} onChange={v => setQty(it, Number(v) || 0)} style={{ width: 84 }} />; } },
+    { title: 'Item', width: 110, render: (_, r) => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{r.item}</Text> },
+    { title: 'Description', width: 200, ellipsis: true, render: (_, r) => <Text style={{ fontSize: 12 }}>{uomMap[r.item]?.desc || '—'}</Text> },
+    { title: 'UOM', width: 70, render: (_, r) => <Text style={{ fontSize: 12 }}>{uomMap[r.item]?.uom || '—'}</Text> },
+    { title: 'Subinventory', width: 100, render: (_, r) => <Text style={{ fontSize: 12 }}>{r.subinv || '—'}</Text> },
+    { title: 'On-hand Qty', width: 110, align: 'right', render: (_, r) => <Text style={{ fontVariantNumeric: 'tabular-nums' }}>{r.qty}</Text> },
+    { title: 'Order Qty', width: 90, render: (_, r) => { const it = r.item; return <InputNumber size="small" min={0} value={qtys[it] ?? 0} onChange={v => setQty(it, Number(v) || 0)} style={{ width: 76 }} />; } },
   ];
 
   if (rows) return <StagedPreview rows={rows} org={org} ccy={ccy} onAdd={onAdd} onReset={() => setRows(null)} />;
@@ -3187,7 +3211,7 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
       <div style={{ marginTop: 10, display: 'flex', alignItems: 'center' }}>
         <Text type="secondary" style={{ fontSize: 12 }}>{sel.length} selected · {items.length} item(s)</Text>
         <Button type="primary" disabled={!sel.length} icon={<ImportOutlined />} style={{ marginLeft: 'auto', background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-          onClick={() => setRows(items.filter(r => sel.includes(r.item)).map(r => ({ key: impKey(), itemNumber: r.item, description: '', qty: qtys[r.item] || 1, price: 0, valid: true })))}>Stage {sel.length || ''} for preview</Button>
+          onClick={() => setRows(items.filter(r => sel.includes(r.item)).map(r => ({ key: impKey(), itemNumber: r.item, description: uomMap[r.item]?.desc || '', UOMCode: uomMap[r.item]?.uom || '', qty: qtys[r.item] || 1, price: 0, valid: true })))}>Stage {sel.length || ''} for preview</Button>
       </div>
     </div>
   );
