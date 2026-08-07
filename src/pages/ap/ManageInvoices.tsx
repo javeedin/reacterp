@@ -2377,18 +2377,16 @@ const ManageInvoices: React.FC = () => {
       if (autoShowDebug) {
         // Automatically show debug drawer instead of preview modal
         setPreviewModalOpen(false);
-        // Use setTimeout to ensure state is updated before building steps
-        setTimeout(() => {
-          const steps = buildPreviewDebugSteps();
-          setPreviewDebugSteps(steps);
-          setPreviewDebugOpen(true);
-          setSlaDuplicateExists(false);
-          setGlDuplicateExists(false);
-          setPreviewSlaHeaderId(null);
-          setPreviewGlBatchId(null);
-          setPreviewGlHeaderId(null);
-          setPreviewGlBatchName('');
-        }, 100);
+        // Pass payload directly to avoid state closure issues
+        const steps = buildPreviewDebugSteps(payload);
+        setPreviewDebugSteps(steps);
+        setPreviewDebugOpen(true);
+        setSlaDuplicateExists(false);
+        setGlDuplicateExists(false);
+        setPreviewSlaHeaderId(null);
+        setPreviewGlBatchId(null);
+        setPreviewGlHeaderId(null);
+        setPreviewGlBatchName('');
       } else {
         // Show preview modal normally
         setPreviewModalOpen(true);
@@ -2400,48 +2398,49 @@ const ManageInvoices: React.FC = () => {
   };
 
   // Build debug steps for Create Accounting (without running them)
-  const buildPreviewDebugSteps = () => {
-    if (!previewPayload) return [];
+  const buildPreviewDebugSteps = (payload?: any) => {
+    const activePayload = payload || previewPayload;
+    if (!activePayload) return [];
 
-    const invoiceId = previewPayload.header?.sourceId;
-    const invoiceNumber = previewPayload.header?.sourceNumber;
+    const invoiceId = activePayload.header?.sourceId;
+    const invoiceNumber = activePayload.header?.sourceNumber;
 
-    // Get invoice data - use previewPayload.header first, then fall back to invoices array
+    // Get invoice data - use activePayload.header first, then fall back to invoices array
     const inv = invoices.find(i => i.invoiceId === invoiceId) || {};
 
-    const invoiceDate = dayjs(previewPayload.header?.invoiceDate || inv.invoiceDate || new Date());
+    const invoiceDate = dayjs(activePayload.header?.invoiceDate || inv.invoiceDate || new Date());
     const acctDate = invoiceDate.format('YYYY-MM-DD');
-    const periodName = previewPayload.header?.periodName || `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][invoiceDate.month()]}-${invoiceDate.format('YY')}`;
-    const conversionRate = previewPayload.header?.conversionRate || inv.conversionRate || 1;
-    const currency = previewPayload.header?.currencyCode || inv.invoiceCurrency || 'AED';
+    const periodName = activePayload.header?.periodName || `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][invoiceDate.month()]}-${invoiceDate.format('YY')}`;
+    const conversionRate = activePayload.header?.conversionRate || inv.conversionRate || 1;
+    const currency = activePayload.header?.currencyCode || inv.invoiceCurrency || 'AED';
 
-    const totalDr = previewPayload.lines.filter((l: any) => l.lineType === 'DR').reduce((s: number, l: any) => s + (l.enteredDr || 0), 0);
-    const totalCr = previewPayload.lines.filter((l: any) => l.lineType === 'CR').reduce((s: number, l: any) => s + (l.enteredCr || 0), 0);
+    const totalDr = activePayload.lines.filter((l: any) => l.lineType === 'DR').reduce((s: number, l: any) => s + (l.enteredDr || 0), 0);
+    const totalCr = activePayload.lines.filter((l: any) => l.lineType === 'CR').reduce((s: number, l: any) => s + (l.enteredCr || 0), 0);
     const batchName = `AP-${invoiceNumber}-${dayjs().format('YYYYMMDD-HHmmss')}`;
 
     // Build SLA payload with correct structure
     const slaPayload = {
       header: {
         moduleName: 'AP',
-        sourceTable: previewPayload.header.sourceTable,
-        sourceId: previewPayload.header.sourceId,
-        sourceNumber: previewPayload.header.sourceNumber,
-        sourceType: previewPayload.header.sourceType,
-        eventTypeCode: previewPayload.header.eventTypeCode,
+        sourceTable: activePayload.header.sourceTable,
+        sourceId: activePayload.header.sourceId,
+        sourceNumber: activePayload.header.sourceNumber,
+        sourceType: activePayload.header.sourceType,
+        eventTypeCode: activePayload.header.eventTypeCode,
         eventDate: acctDate,
         accountingDate: acctDate,
         periodName: periodName,
-        ledgerId: previewPayload.header.ledgerId,
-        ledgerName: previewPayload.header.ledgerName,
+        ledgerId: activePayload.header.ledgerId,
+        ledgerName: activePayload.header.ledgerName,
         ledgerCurrency: currency,
-        businessUnit: previewPayload.header.reference4 || '',
+        businessUnit: activePayload.header.reference4 || '',
         currencyCode: currency,
         exchangeRate: conversionRate,
         exchangeRateType: 'User',
-        description: previewPayload.header.description,
+        description: activePayload.header.description,
         createdBy: 'user',
       },
-      lines: previewPayload.lines.map((l: any) => ({
+      lines: activePayload.lines.map((l: any) => ({
         lineNumber: l.lineNumber,
         lineType: l.lineType,
         accountingClass: l.accountingClass,
@@ -2460,8 +2459,8 @@ const ManageInvoices: React.FC = () => {
     };
 
     // Build GL journal payload with correct field names
-    const ledgerName = previewPayload.header?.ledgerName || inv.ledgerName || 'BCL DIFC';
-    const ledgerId = previewPayload.header?.ledgerId || inv.ledgerId || 300000003259529;
+    const ledgerName = activePayload.header?.ledgerName || inv.ledgerName || 'BCL DIFC';
+    const ledgerId = activePayload.header?.ledgerId || inv.ledgerId || 300000003259529;
 
     const journalPayload = {
       batch: {
@@ -2495,7 +2494,7 @@ const ManageInvoices: React.FC = () => {
         runningTotalCr: totalCr,
         createdBy: 'user',
       },
-      lines: previewPayload.lines.map((l: any) => ({
+      lines: activePayload.lines.map((l: any) => ({
         enteredDr: l.lineType === 'DR' ? (l.enteredDr || null) : null,
         enteredCr: l.lineType === 'CR' ? (l.enteredCr || null) : null,
         accountedDr: l.lineType === 'DR' ? (l.enteredDr || 0) * conversionRate : null,
@@ -2555,7 +2554,7 @@ const ManageInvoices: React.FC = () => {
   // Handle Create Accounting - Show debug drawer without running
   const handleCreateAccounting = () => {
     if (!previewPayload) return;
-    const steps = buildPreviewDebugSteps();
+    const steps = buildPreviewDebugSteps(previewPayload);
     setPreviewDebugSteps(steps);
     setPreviewDebugOpen(true);
     // Reset duplicate flags and IDs for new flow
