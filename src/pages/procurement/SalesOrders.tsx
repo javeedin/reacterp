@@ -3258,6 +3258,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
   const [subs, setSubs] = useState<string[]>([]);
   const [orderTypeOpts, setOrderTypeOpts] = useState<any[]>([]);
   const [orderTypeLookup, setOrderTypeLookup] = useState<Map<string, any>>(new Map());
+  const [isBranchSales, setIsBranchSales] = useState(false);
   const [branchSalesModalOpen, setBranchSalesModalOpen] = useState(false);
   const [branchForm] = Form.useForm();
   const [custSearchModalOpen, setCustSearchModalOpen] = useState(false);
@@ -3269,6 +3270,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
     // Start with all fields disabled until Business Unit is selected
     form.setFieldsValue({ orderType: 'LSO01', rate: 1, orderDate: dayjs() });
     setSubs([]);
+    setIsBranchSales(false);
   }, [open, form]);
 
   useEffect(() => {
@@ -3374,9 +3376,10 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
 
   const onOrderTypeChange = (orderTypeCode: string) => {
     const lookupDetail = orderTypeLookup.get(orderTypeCode);
-    if (lookupDetail && lookupDetail.Tag === 'BRANCH SALES') {
+    const isBranch = lookupDetail && lookupDetail.Tag === 'BRANCH SALES';
+    setIsBranchSales(isBranch);
+    if (isBranch) {
       message.info('⚠️ This is a Branch Sales order. Additional branch details will be required after saving.');
-      // Could open branch sales details form here if needed
     }
   };
 
@@ -3411,6 +3414,24 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
       footer={<Space><Button onClick={onClose}>Cancel</Button>
         <Button type="primary" icon={<ExportOutlined />} style={{ background: REDWOOD.info, borderColor: REDWOOD.info }} onClick={submit}>Proceed to Lines</Button></Space>}>
       <Form form={form} layout="vertical" size="small" requiredMark colon={false}>
+        {isBranchSales && (
+          <div style={{
+            background: '#fff7e6',
+            border: `2px solid ${REDWOOD.warning}`,
+            borderRadius: 8,
+            padding: '12px 16px',
+            marginBottom: 16,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12
+          }}>
+            <ShoppingOutlined style={{ fontSize: 20, color: REDWOOD.warning }} />
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.warning }}>🔖 BRANCH SALES ORDER</div>
+              <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 2 }}>After saving, you'll be prompted to create a linked Purchase Order with BRNS- prefix</div>
+            </div>
+          </div>
+        )}
         <Section icon={<BankOutlined />} title="Order Details" color={REDWOOD.primary}>
           <Col xs={24} md={12}><Form.Item label="Business Unit" name="businessUnit" rules={req('Select business unit')} style={{ marginBottom: 8 }}>
             <Select showSearch placeholder="Select" size="small" onChange={onBU} optionFilterProp="label"
