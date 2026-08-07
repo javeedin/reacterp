@@ -5131,9 +5131,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       SourceTransactionId: srcId,
       ...(revision != null ? { SourceTransactionRevisionNumber: revision } : {}),
       TransactionalCurrencyCode: hdr.txnCurrency,
-      ...(hdr.rate != null ? { ConversionRate: Number(hdr.rate) } : {}),
-      ...(hdr.currencyRateType ? { CurrencyConversionRateType: hdr.currencyRateType } : {}),
-      ...(hdr.currencyDate ? { ConversionDate: hdr.currencyDate.format('YYYY-MM-DD') } : {}),
+      AppliedCurrencyCode: hdr.txnCurrency,
+      ...(hdr.rate != null ? { CurrencyConversionRate: Number(hdr.rate) } : {}),
+      ...(hdr.currencyRateType ? { CurrencyConversionType: hdr.currencyRateType } : {}),
+      ...(hdr.currencyDate ? { CurrencyConversionDate: hdr.currencyDate.format('YYYY-MM-DD') } : {}),
       ...(hdr.businessUnitId != null ? { BusinessUnitId: numOrStr(hdr.businessUnitId) } : {}),
       ...(hdr.accountNumber ? { BuyingPartyNumber: hdr.accountNumber } : {}),
       RequestedShipDate: dateIso,
@@ -6890,9 +6891,9 @@ const SalesOrders: React.FC = () => {
       accountNumber: order.BuyingPartyNumber ?? undefined,
       paymentTerms: order.PaymentTerms ?? order.PaymentTermsCode ?? undefined,
       warehouse: order.RequestedFulfillmentOrganizationCode ?? undefined,
-      rate: order.ConversionRate != null ? Number(order.ConversionRate) : 1,
-      currencyRateType: order.CurrencyConversionRateType ?? 'Corporate',
-      currencyDate: order.ConversionDate ? dayjs(order.ConversionDate) : dayjs(),
+      rate: order.CurrencyConversionRate != null ? Number(order.CurrencyConversionRate) : 1,
+      currencyRateType: order.CurrencyConversionType ?? 'Corporate',
+      currencyDate: order.CurrencyConversionDate ? dayjs(order.CurrencyConversionDate) : dayjs(),
     };
     const hide = message.loading('Loading customer details…', 0);
     const refs = await fetchOrderCustomerRefs(order);
@@ -6913,9 +6914,9 @@ const SalesOrders: React.FC = () => {
     accountNumber: order.BuyingPartyNumber ?? undefined,
     paymentTerms: order.PaymentTerms ?? order.PaymentTermsCode ?? undefined,
     warehouse: order.RequestedFulfillmentOrganizationCode ?? undefined,
-    rate: order.ConversionRate != null ? Number(order.ConversionRate) : 1,
-    currencyRateType: order.CurrencyConversionRateType ?? 'Corporate',
-    currencyDate: order.ConversionDate ? dayjs(order.ConversionDate) : dayjs(),
+    rate: order.CurrencyConversionRate != null ? Number(order.CurrencyConversionRate) : 1,
+    currencyRateType: order.CurrencyConversionType ?? 'Corporate',
+    currencyDate: order.CurrencyConversionDate ? dayjs(order.CurrencyConversionDate) : dayjs(),
   });
 
   // Copy an order → a brand-new draft order pre-filled with the same lines.
