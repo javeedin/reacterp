@@ -5650,54 +5650,63 @@ const ManageInvoices: React.FC = () => {
                 key: 'action',
                 width: 200,
                 fixed: 'right',
-                render: (_: any, record: any) => (
-                  <Space size="small">
-                    <Button
-                      type="link"
-                      size="small"
-                      onClick={() => handleRecreateAccountingPreview(record)}
-                      style={{ color: REDWOOD.info, padding: '0 4px' }}
-                    >
-                      Review
-                    </Button>
-                    <Button
-                      type="link"
-                      size="small"
-                      onClick={() => {
-                        const inv = invoices.find(i => i.invoiceId === record.invoiceId);
-                        if (inv) {
-                          setSelectedInvoiceForRecreate(inv);
-                          setRecreateAcModalOpen(true);
-                          setRecreateAcSteps([
-                            { step: 'Query SLA', status: 'pending' },
-                            { step: 'Query GL Journal Lines', status: 'pending' },
-                            { step: 'Delete SLA', status: 'pending' },
-                            { step: 'Delete GL', status: 'pending' },
-                            { step: 'Create SLA', status: 'pending' },
-                            { step: 'Create GL', status: 'pending' },
-                            { step: 'POST GL', status: 'pending' },
-                            { step: 'POST SLA', status: 'pending' },
-                            { step: 'Stamp GL IDs on SLA Header', status: 'pending' },
-                          ]);
-                        }
-                      }}
-                      style={{ color: '#ff7a45', padding: '0 4px' }}
-                    >
-                      Re-Create A/C
-                    </Button>
-                    <Button
-                      type="link"
-                      size="small"
-                      onClick={() => {
-                        const inv = invoices.find(i => i.invoiceId === record.invoiceId);
-                        if (inv) openAccountingForSingle(inv);
-                      }}
-                      style={{ color: REDWOOD.info, padding: '0 4px' }}
-                    >
-                      Details
-                    </Button>
-                  </Space>
-                ),
+                render: (_: any, record: any) => {
+                  const hasIssue = record.debitAccount && record.creditAccount && record.debitAccount === record.creditAccount;
+                  return (
+                    <Space size="small">
+                      <Button
+                        type="link"
+                        size="small"
+                        onClick={() => handleRecreateAccountingPreview(record)}
+                        style={{ color: REDWOOD.info, padding: '0 4px' }}
+                      >
+                        Review
+                      </Button>
+                      <Button
+                        type="link"
+                        size="small"
+                        disabled={!hasIssue}
+                        onClick={() => {
+                          const inv = invoices.find(i => i.invoiceId === record.invoiceId);
+                          if (inv) {
+                            setSelectedInvoiceForRecreate(inv);
+                            setRecreateAcModalOpen(true);
+                            setRecreateAcSteps([
+                              { step: 'Query SLA', status: 'pending' },
+                              { step: 'Query GL Journal Lines', status: 'pending' },
+                              { step: 'Delete SLA', status: 'pending' },
+                              { step: 'Delete GL', status: 'pending' },
+                              { step: 'Create SLA', status: 'pending' },
+                              { step: 'Create GL', status: 'pending' },
+                              { step: 'POST GL', status: 'pending' },
+                              { step: 'POST SLA', status: 'pending' },
+                              { step: 'Stamp GL IDs on SLA Header', status: 'pending' },
+                            ]);
+                          }
+                        }}
+                        title={hasIssue ? 'Run full accounting recreation sequence' : 'Only available for invoices with accounting issues'}
+                        style={{
+                          color: hasIssue ? '#ff7a45' : REDWOOD.neutral300,
+                          padding: '0 4px',
+                          cursor: hasIssue ? 'pointer' : 'not-allowed',
+                        }}
+                      >
+                        Re-Create A/C
+                      </Button>
+                      <Button
+                        type="link"
+                        size="small"
+                        onClick={() => {
+                          const inv = invoices.find(i => i.invoiceId === record.invoiceId);
+                          if (inv) openAccountingForSingle(inv);
+                        }}
+                        style={{ color: REDWOOD.info, padding: '0 4px' }}
+                      >
+                        Details
+                      </Button>
+                    </Space>
+                  );
+                },
               },
             ]}
             dataSource={accountingAllData}
