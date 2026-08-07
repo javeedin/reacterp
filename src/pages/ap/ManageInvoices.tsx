@@ -2655,14 +2655,14 @@ const ManageInvoices: React.FC = () => {
       invoiceNumber: acc.invoiceNumber,
       amount: acc.debits || 0,
       steps: [
-        { label: 'Step 0: Check SLA', status: null }, // null = not started, 'success' or 'failed'
-        { label: 'Step 0.1: Delete SLA', status: null },
-        { label: 'Step 1: Check GL', status: null },
-        { label: 'Step 1.1: Delete GL', status: null },
-        { label: 'Step 2: Create SLA', status: null },
-        { label: 'Step 3: Create GL', status: null },
-        { label: 'Step 4: Post GL', status: null },
-        { label: 'Step 5: Stamp GL IDs', status: null },
+        { label: 'Step 0: Check SLA', status: null, url: null, request: null, response: null, responseStatus: null },
+        { label: 'Step 0.1: Delete SLA', status: null, url: null, request: null, response: null, responseStatus: null },
+        { label: 'Step 1: Check GL', status: null, url: null, request: null, response: null, responseStatus: null },
+        { label: 'Step 1.1: Delete GL', status: null, url: null, request: null, response: null, responseStatus: null },
+        { label: 'Step 2: Create SLA', status: null, url: null, request: null, response: null, responseStatus: null },
+        { label: 'Step 3: Create GL', status: null, url: null, request: null, response: null, responseStatus: null },
+        { label: 'Step 4: Post GL', status: null, url: null, request: null, response: null, responseStatus: null },
+        { label: 'Step 5: Stamp GL IDs', status: null, url: null, request: null, response: null, responseStatus: null },
       ],
     }));
 
@@ -2739,12 +2739,19 @@ const ManageInvoices: React.FC = () => {
             try {
               await runPreviewDebugStep(stepIdx);
 
+              // Capture step details from previewDebugSteps
+              const completedStep = previewDebugSteps[stepIdx];
+
               // Mark step as success
               setBatchProgressData(prev => {
                 const updated = [...prev];
                 const invIdx = updated.findIndex(p => p.invoiceId === accRecord.invoiceId);
                 if (invIdx >= 0 && stepIdx < updated[invIdx].steps.length) {
                   updated[invIdx].steps[stepIdx].status = 'success';
+                  updated[invIdx].steps[stepIdx].url = completedStep?.url;
+                  updated[invIdx].steps[stepIdx].request = completedStep?.requestBody;
+                  updated[invIdx].steps[stepIdx].response = completedStep?.response;
+                  updated[invIdx].steps[stepIdx].responseStatus = completedStep?.status;
                 }
                 return updated;
               });
@@ -2753,12 +2760,19 @@ const ManageInvoices: React.FC = () => {
             } catch (error) {
               console.error(`✗ [${accRecord.invoiceNumber}] Step ${stepIdx} failed:`, error);
 
+              // Capture step details from previewDebugSteps
+              const completedStep = previewDebugSteps[stepIdx];
+
               // Mark step as failed
               setBatchProgressData(prev => {
                 const updated = [...prev];
                 const invIdx = updated.findIndex(p => p.invoiceId === accRecord.invoiceId);
                 if (invIdx >= 0 && stepIdx < updated[invIdx].steps.length) {
                   updated[invIdx].steps[stepIdx].status = 'failed';
+                  updated[invIdx].steps[stepIdx].url = completedStep?.url;
+                  updated[invIdx].steps[stepIdx].request = completedStep?.requestBody;
+                  updated[invIdx].steps[stepIdx].response = completedStep?.response;
+                  updated[invIdx].steps[stepIdx].responseStatus = completedStep?.status;
                 }
                 return updated;
               });
@@ -5852,15 +5866,115 @@ const ManageInvoices: React.FC = () => {
               width: 70,
               align: 'center' as const,
               render: (_: any, record: any) => {
-                const stepStatus = record.steps[idx]?.status;
+                const step = record.steps[idx];
+                const stepStatus = step?.status;
+                let icon = null;
+                let color = REDWOOD.neutral300;
+
                 if (stepStatus === 'success') {
-                  return <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 14 }} />;
+                  icon = <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 14 }} />;
+                  color = REDWOOD.success;
                 } else if (stepStatus === 'failed') {
-                  return <CloseCircleOutlined style={{ color: REDWOOD.error, fontSize: 14 }} />;
+                  icon = <CloseCircleOutlined style={{ color: REDWOOD.error, fontSize: 14 }} />;
+                  color = REDWOOD.error;
                 } else if (batchProcessing && stepStatus === null) {
-                  return <LoadingOutlined style={{ color: REDWOOD.warning, fontSize: 14 }} />;
+                  icon = <LoadingOutlined style={{ color: REDWOOD.warning, fontSize: 14 }} />;
+                  color = REDWOOD.warning;
+                } else {
+                  return <span style={{ color: REDWOOD.neutral300, fontSize: 12 }}>—</span>;
                 }
-                return <span style={{ color: REDWOOD.neutral300, fontSize: 12 }}>—</span>;
+
+                return (
+                  <Tooltip
+                    title={
+                      <div style={{ maxWidth: 600, maxHeight: 400, overflowY: 'auto' }}>
+                        <div style={{ marginBottom: 12 }}>
+                          <Text strong style={{ color: 'white', fontSize: 12 }}>
+                            {step?.label}
+                          </Text>
+                        </div>
+
+                        {/* URL */}
+                        {step?.url && (
+                          <div style={{ marginBottom: 8 }}>
+                            <Text type="secondary" style={{ color: '#ccc', fontSize: 11, display: 'block', marginBottom: 2 }}>
+                              📤 URL:
+                            </Text>
+                            <div style={{
+                              background: '#1f1f1f',
+                              padding: 6,
+                              borderRadius: 4,
+                              fontSize: 10,
+                              fontFamily: 'monospace',
+                              color: '#4cd964',
+                              wordBreak: 'break-all',
+                              maxHeight: 100,
+                              overflowY: 'auto',
+                            }}>
+                              {step.url}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Request Body */}
+                        {step?.request && typeof step.request === 'object' && (
+                          <div style={{ marginBottom: 8 }}>
+                            <Text type="secondary" style={{ color: '#ccc', fontSize: 11, display: 'block', marginBottom: 2 }}>
+                              📥 Request:
+                            </Text>
+                            <div style={{
+                              background: '#1f1f1f',
+                              padding: 6,
+                              borderRadius: 4,
+                              fontSize: 10,
+                              fontFamily: 'monospace',
+                              color: '#64b5f6',
+                              wordBreak: 'break-all',
+                              maxHeight: 100,
+                              overflowY: 'auto',
+                            }}>
+                              {JSON.stringify(step.request, null, 2)}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Response */}
+                        {step?.response && (
+                          <div style={{ marginBottom: 8 }}>
+                            <Text type="secondary" style={{ color: '#ccc', fontSize: 11, display: 'block', marginBottom: 2 }}>
+                              ✓ Response (Status: {step.responseStatus}):
+                            </Text>
+                            <div style={{
+                              background: '#1f1f1f',
+                              padding: 6,
+                              borderRadius: 4,
+                              fontSize: 10,
+                              fontFamily: 'monospace',
+                              color: step.responseStatus === 200 ? '#81c784' : '#e57373',
+                              wordBreak: 'break-all',
+                              maxHeight: 150,
+                              overflowY: 'auto',
+                            }}>
+                              {JSON.stringify(step.response, null, 2)}
+                            </div>
+                          </div>
+                        )}
+
+                        {!step?.response && (
+                          <Text type="secondary" style={{ color: '#999', fontSize: 11 }}>
+                            No response data yet
+                          </Text>
+                        )}
+                      </div>
+                    }
+                    color="#1f1f1f"
+                    overlayStyle={{ maxWidth: 700 }}
+                  >
+                    <div style={{ cursor: 'pointer', display: 'inline-block' }}>
+                      {icon}
+                    </div>
+                  </Tooltip>
+                );
               },
             })),
           ]}
