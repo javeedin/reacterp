@@ -2660,10 +2660,10 @@ const ManageInvoices: React.FC = () => {
         });
       }
 
-      // 3-second delay between steps
+      // 1-second delay between steps
       if (i < stepsToRun.length - 1) {
-        console.log(`${prefix} ⏳ Waiting 3 seconds before next step...`);
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        console.log(`${prefix} ⏳ Waiting 1 second before next step...`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
@@ -2803,8 +2803,8 @@ const ManageInvoices: React.FC = () => {
 
           // Add delay between invoices
           if (batchIdx < batchProgressData.length - 1) {
-            console.log(`\n⏳ Waiting 3 seconds before next invoice...\n`);
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            console.log(`\n⏳ Waiting 1 second before next invoice...\n`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
           }
         } catch (error: any) {
           console.error(`Error processing invoice ${progressRecord.invoiceNumber}:`, error);
