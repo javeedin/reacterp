@@ -311,7 +311,7 @@ const mapApiToInvoiceRecord = (item: any, index: number): InvoiceRecord => ({
   validationStatus: item.validation_status || 'Never validated',
   approvalStatus: item.approval_status || 'Not required',
   holdPaidStatus: item.paid_status || 'Unpaid',
-  accountingStatus: item.accounting_status || 'Not Accounted',
+  accountingStatus: (item.invoice_source && item.invoice_source !== 'MANUAL') ? 'POSTED' : (item.accounting_status || 'Not Accounted'),
   applyAfterDate: item.apply_after_date || '',
   businessUnit: item.business_unit || '',
   invoiceCurrency: item.invoice_currency || 'AED',
