@@ -2584,6 +2584,28 @@ const ManageInvoices: React.FC = () => {
   };
 
 
+  // Run all debug steps sequentially
+  const runAllPreviewDebugSteps = async () => {
+    if (!previewPayload || previewDebugSteps.length === 0) {
+      message.warning('No steps to run');
+      return;
+    }
+
+    try {
+      for (let i = 0; i < previewDebugSteps.length; i++) {
+        // Add a small delay between steps
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        await runPreviewDebugStep(i);
+      }
+      message.success('✓ All steps completed!');
+    } catch (error: any) {
+      message.error(`Error running steps: ${error.message}`);
+    }
+  };
+
   // Run individual debug step
   const runPreviewDebugStep = async (stepIdx: number) => {
     if (!previewPayload || !previewDebugSteps[stepIdx]) return;
@@ -5968,6 +5990,34 @@ const ManageInvoices: React.FC = () => {
             </div>
           ) : (
             <div style={{ padding: 0 }}>
+              {/* Run All Button */}
+              <div style={{
+                position: 'sticky',
+                top: 0,
+                zIndex: 10,
+                padding: 16,
+                background: '#ffffff',
+                borderBottom: `2px solid ${REDWOOD.primary}`,
+                display: 'flex',
+                gap: 12,
+                alignItems: 'center',
+              }}>
+                <Button
+                  type="primary"
+                  size="large"
+                  icon={<SendOutlined />}
+                  onClick={runAllPreviewDebugSteps}
+                  loading={executingStepIdx !== null}
+                  style={{ flex: 1, background: REDWOOD.primary }}
+                >
+                  {executingStepIdx !== null ? '⏳ Running Steps...' : '▶ Run All Steps'}
+                </Button>
+                <Button
+                  onClick={() => setPreviewDebugOpen(false)}
+                >
+                  Close
+                </Button>
+              </div>
               {previewDebugSteps.map((step: any, idx: number) => (
                 <Card
                   key={idx}
