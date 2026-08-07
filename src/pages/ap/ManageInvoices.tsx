@@ -2518,23 +2518,7 @@ const ManageInvoices: React.FC = () => {
 
     return [
       {
-        step: '0 — Check for Duplicate SLA Accounting',
-        method: 'GET',
-        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${invoiceId}&eventType=AP_INVOICE_CREATION`,
-        requestBody: null,
-        status: undefined,
-        response: undefined,
-      },
-      {
-        step: '1 — Check for Duplicate GL Journal',
-        method: 'GET',
-        url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/check?reference1=${invoiceNumber}&reference2=${invoiceId}&reference5=AP-INVOICE-CREATION`,
-        requestBody: null,
-        status: undefined,
-        response: undefined,
-      },
-      {
-        step: '2 — Create SLA Accounting',
+        step: '0 — Create SLA Accounting',
         method: 'POST',
         url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`,
         requestBody: slaPayload,
@@ -2542,7 +2526,7 @@ const ManageInvoices: React.FC = () => {
         response: undefined,
       },
       {
-        step: '3 — Create Journal in GL',
+        step: '1 — Create Journal in GL',
         method: 'POST',
         url: `${APEX_DB_CONFIG.baseUrl}/journals/create`,
         requestBody: journalPayload,
@@ -2550,7 +2534,7 @@ const ManageInvoices: React.FC = () => {
         response: undefined,
       },
       {
-        step: '4 — Post Journal to GL',
+        step: '2 — Post Journal to GL',
         method: 'PUT',
         url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/{glBatchId}/post`,
         requestBody: null,
@@ -2558,7 +2542,7 @@ const ManageInvoices: React.FC = () => {
         response: undefined,
       },
       {
-        step: '5 — Stamp GL IDs on SLA Header',
+        step: '3 — Stamp GL IDs on SLA Header',
         method: 'POST',
         url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`,
         requestBody: { headerId: '{slaHeaderId}', glBatchId: '{glBatchId}', glBatchName: '{glBatchName}', glHeaderId: '{glHeaderId}', postedBy: 'user' },
@@ -2613,18 +2597,6 @@ const ManageInvoices: React.FC = () => {
     // Prevent concurrent execution of the same step
     if (executingStepIdx === stepIdx) {
       message.warning('⏳ This step is already running...');
-      return;
-    }
-
-    // Skip Step 2 (Create SLA) if duplicate exists
-    if (stepIdx === 2 && slaDuplicateExists) {
-      message.warning('⏭️ Skipping Step 2: SLA Accounting already exists, will not create duplicate.');
-      return;
-    }
-
-    // Skip Step 3 (Create GL Journal) if duplicate exists
-    if (stepIdx === 3 && glDuplicateExists) {
-      message.warning('⏭️ Skipping Step 3: GL Journal already exists, will not create duplicate.');
       return;
     }
 
@@ -2710,38 +2682,6 @@ const ManageInvoices: React.FC = () => {
 
       if (res.ok) {
         if (stepIdx === 0) {
-          // SLA duplicate check step
-          const exists = data.exists || data.header_exists || false;
-          setSlaDuplicateExists(exists);
-
-          // Capture IDs from check response if available (existing accounting)
-          const existingHeaderId = data.headerId || data.header_id;
-          if (existingHeaderId && exists) {
-            setPreviewSlaHeaderId(existingHeaderId);
-            console.log('Existing SLA found:', existingHeaderId);
-          }
-          if (exists) {
-            message.warning('⚠️ SLA Accounting already exists (ID: ' + existingHeaderId + '). Step 2 will be skipped to prevent duplicate creation.');
-          } else {
-            message.success('✓ No duplicate SLA accounting found. Safe to create.');
-          }
-        } else if (stepIdx === 1) {
-          // GL Journal duplicate check step
-          const journalExists = data.exists || data.journal_exists || data.items?.length > 0 || false;
-          setGlDuplicateExists(journalExists);
-
-          // Capture IDs from check response if available (existing journal)
-          const existingBatchId = data.batchId || data.batch_id || data.jeBatchId || data.je_batch_id;
-          if (existingBatchId && journalExists) {
-            setPreviewGlBatchId(existingBatchId);
-            console.log('Existing GL journal found:', existingBatchId);
-          }
-          if (journalExists) {
-            message.warning('⚠️ GL Journal already exists (ID: ' + existingBatchId + '). Step 3 will be skipped to prevent duplicate creation.');
-          } else {
-            message.success('✓ No duplicate GL journal found. Safe to create.');
-          }
-        } else if (stepIdx === 2) {
           // SLA creation - extract and save SLA header ID
           const slaId = data.headerId || data.header_id;
           if (slaId) {
@@ -2751,9 +2691,9 @@ const ManageInvoices: React.FC = () => {
           } else {
             message.success(`Step ${stepIdx + 1} completed successfully`);
           }
-        } else if (stepIdx === 3) {
+        } else if (stepIdx === 1) {
           // GL journal creation - extract and save batch ID
-          console.log('Step 3 full response:', data);
+          console.log('Step 1 full response:', data);
 
           // Try multiple field names for batchId
           let batchId = data.jeBatchId || data.je_batch_id || data.batchId || data.batch_id;
