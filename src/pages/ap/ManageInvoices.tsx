@@ -2517,17 +2517,17 @@ const ManageInvoices: React.FC = () => {
 
     return [
       {
-        step: '0 — Check if SLA Deleted',
-        method: 'GET',
-        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${invoiceId}&eventType=AP_INVOICE_CREATION`,
+        step: '0 — Delete SLA',
+        method: 'DELETE',
+        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?sourceTable=AP_INVOICES&sourceId=${invoiceId}&eventType=AP_INVOICE_CREATION`,
         requestBody: null,
         status: undefined,
         response: undefined,
       },
       {
-        step: '1 — Check if GL Deleted',
-        method: 'GET',
-        url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/check?reference1=${invoiceNumber}&reference2=${invoiceId}&reference5=AP-INVOICE-CREATION`,
+        step: '1 — Delete GL',
+        method: 'DELETE',
+        url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/delete?reference1=${invoiceNumber}&reference2=${invoiceId}&reference5=AP-INVOICE-CREATION`,
         requestBody: null,
         status: undefined,
         response: undefined,
@@ -2696,14 +2696,12 @@ const ManageInvoices: React.FC = () => {
       setLoading(false);
 
       if (res.ok) {
-        if (stepIdx === 0 || stepIdx === 1) {
-          // Check steps - just show verification result
-          const exists = data.exists || data.header_exists || data.items?.length > 0 || false;
-          if (stepIdx === 0) {
-            message.success(exists ? '✓ SLA still exists (needs deletion)' : '✓ SLA successfully deleted');
-          } else {
-            message.success(exists ? '✓ GL still exists (needs deletion)' : '✓ GL successfully deleted');
-          }
+        if (stepIdx === 0) {
+          // SLA deletion - show result
+          message.success('✓ SLA deleted successfully');
+        } else if (stepIdx === 1) {
+          // GL deletion - show result
+          message.success('✓ GL deleted successfully');
         } else if (stepIdx === 2) {
           // SLA creation - extract and save SLA header ID
           const slaId = data.headerId || data.header_id;
