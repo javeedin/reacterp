@@ -548,6 +548,9 @@ const ManageInvoices: React.FC = () => {
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [accountingAllSelectedKeys, setAccountingAllSelectedKeys] = useState<React.Key[]>([]);
+  const [batchProgressModalOpen, setBatchProgressModalOpen] = useState(false);
+  const [batchProgressData, setBatchProgressData] = useState<any[]>([]);
+  const [batchConfirmed, setBatchConfirmed] = useState(false);
 
 
   const openMpaModal = async (record: InvoiceRecord) => {
@@ -2626,8 +2629,8 @@ const ManageInvoices: React.FC = () => {
     }
   };
 
-  // Batch run all steps for multiple selected invoices from accounting all modal
-  const runBatchReCreateAccounting = async () => {
+  // Show batch progress modal with confirmation
+  const showBatchProgressModal = async () => {
     if (accountingAllSelectedKeys.length === 0) {
       message.warning('Select at least one invoice');
       return;
@@ -2640,10 +2643,41 @@ const ManageInvoices: React.FC = () => {
       return;
     }
 
+    // Initialize progress data for each invoice
+    const progressData = selectedInvoices.map(acc => ({
+      invoiceId: acc.invoiceId,
+      invoiceNumber: acc.invoiceNumber,
+      amount: acc.debits || 0,
+      steps: [
+        { label: 'Step 0: Check SLA', status: null }, // null = not started, 'success' or 'failed'
+        { label: 'Step 0.1: Delete SLA', status: null },
+        { label: 'Step 1: Check GL', status: null },
+        { label: 'Step 1.1: Delete GL', status: null },
+        { label: 'Step 2: Create SLA', status: null },
+        { label: 'Step 3: Create GL', status: null },
+        { label: 'Step 4: Post GL', status: null },
+        { label: 'Step 5: Stamp GL IDs', status: null },
+      ],
+    }));
+
+    setBatchProgressData(progressData);
+    setBatchProgressModalOpen(true);
+    setBatchConfirmed(false);
+  };
+
+  // Batch run all steps for multiple selected invoices from accounting all modal
+  const runBatchReCreateAccounting = async () => {
+    if (!batchConfirmed) return;
+
+    const selectedInvoices = accountingAllData.filter(acc => accountingAllSelectedKeys.includes(acc.invoiceId));
+
+    if (selectedInvoices.length === 0) {
+      message.warning('No valid invoices selected');
+      return;
+    }
+
     setBatchProcessing(true);
     setBatchProgress({ current: 0, total: selectedInvoices.length });
-
-    const results: { invoiceNumber: string; status: 'success' | 'failed'; message: string }[] = [];
 
     try {
       for (let idx = 0; idx < selectedInvoices.length; idx++) {
@@ -2652,24 +2686,30 @@ const ManageInvoices: React.FC = () => {
 
         setBatchProgress({ current: idx + 1, total: selectedInvoices.length });
 
-        try {
-          if (!invoice) {
-            results.push({
-              invoiceNumber: accRecord.invoiceNumber,
-              status: 'failed',
-              message: 'Invoice not found in records',
-            });
-            continue;
-          }
+        if (!invoice) {
+          // Mark as failed
+          setBatchProgressData(prev => {
+            const updated = [...prev];
+            const invIdx = updated.findIndex(p => p.invoiceId === accRecord.invoiceId);
+            if (invIdx >= 0) {
+              updated[invIdx].steps.forEach(step => step.status = 'failed');
+            }
+            return updated;
+          });
+          continue;
+        }
 
+        try {
           console.log(`Processing invoice ${accRecord.invoiceNumber}...`);
 
-          // Build payload for this invoice
           if (!previewPayload) {
-            results.push({
-              invoiceNumber: accRecord.invoiceNumber,
-              status: 'failed',
-              message: 'No accounting payload available',
+            setBatchProgressData(prev => {
+              const updated = [...prev];
+              const invIdx = updated.findIndex(p => p.invoiceId === accRecord.invoiceId);
+              if (invIdx >= 0) {
+                updated[invIdx].steps.forEach(step => step.status = 'failed');
+              }
+              return updated;
             });
             continue;
           }
@@ -2691,37 +2731,50 @@ const ManageInvoices: React.FC = () => {
             if (stepIdx > 0) {
               await new Promise(resolve => setTimeout(resolve, 300));
             }
-            await runPreviewDebugStep(stepIdx);
-          }
 
-          results.push({
-            invoiceNumber: accRecord.invoiceNumber,
-            status: 'success',
-            message: 'All steps completed',
-          });
+            try {
+              await runPreviewDebugStep(stepIdx);
+
+              // Mark step as success
+              setBatchProgressData(prev => {
+                const updated = [...prev];
+                const invIdx = updated.findIndex(p => p.invoiceId === accRecord.invoiceId);
+                if (invIdx >= 0 && stepIdx < updated[invIdx].steps.length) {
+                  updated[invIdx].steps[stepIdx].status = 'success';
+                }
+                return updated;
+              });
+            } catch (error) {
+              // Mark step as failed
+              setBatchProgressData(prev => {
+                const updated = [...prev];
+                const invIdx = updated.findIndex(p => p.invoiceId === accRecord.invoiceId);
+                if (invIdx >= 0 && stepIdx < updated[invIdx].steps.length) {
+                  updated[invIdx].steps[stepIdx].status = 'failed';
+                }
+                return updated;
+              });
+            }
+          }
 
           // Add delay between invoices
           if (idx < selectedInvoices.length - 1) {
             await new Promise(resolve => setTimeout(resolve, 1000));
           }
         } catch (error: any) {
-          results.push({
-            invoiceNumber: accRecord.invoiceNumber,
-            status: 'failed',
-            message: error.message,
+          console.error(`Error processing invoice ${accRecord.invoiceNumber}:`, error);
+          setBatchProgressData(prev => {
+            const updated = [...prev];
+            const invIdx = updated.findIndex(p => p.invoiceId === accRecord.invoiceId);
+            if (invIdx >= 0) {
+              updated[invIdx].steps.forEach(step => step.status = 'failed');
+            }
+            return updated;
           });
         }
       }
 
-      // Show results
-      const successCount = results.filter(r => r.status === 'success').length;
-      const failedCount = results.filter(r => r.status === 'failed').length;
-
-      message.success(
-        `✓ Batch completed! Success: ${successCount}, Failed: ${failedCount}`
-      );
-
-      console.log('Batch Results:', results);
+      message.success('✓ Batch processing completed!');
       setAccountingAllSelectedKeys([]);
     } catch (error: any) {
       message.error(`Batch processing error: ${error.message}`);
@@ -5372,9 +5425,9 @@ const ManageInvoices: React.FC = () => {
                 icon={<ApiOutlined />}
                 type="primary"
                 style={{ color: 'white', background: REDWOOD.success, borderColor: REDWOOD.success }}
-                disabled={accountingAllSelectedKeys.length === 0}
+                disabled={accountingAllSelectedKeys.length === 0 || batchProcessing}
                 loading={batchProcessing}
-                onClick={runBatchReCreateAccounting}
+                onClick={showBatchProgressModal}
               >
                 Batch Run Re-Create A/C ({accountingAllSelectedKeys.length})
               </Button>
@@ -5700,6 +5753,141 @@ const ManageInvoices: React.FC = () => {
             </>
           );
         })()}
+      </Modal>
+
+      {/* Batch Progress Modal */}
+      <Modal
+        title={
+          <Space>
+            <ApiOutlined style={{ color: REDWOOD.success }} />
+            <span>Batch Re-Create Accounting Progress</span>
+            {batchProcessing && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+                <Progress type="circle" percent={Math.round((batchProgress.current / batchProgress.total) * 100)} width={40} />
+                <Text>{batchProgress.current} of {batchProgress.total}</Text>
+              </div>
+            )}
+          </Space>
+        }
+        open={batchProgressModalOpen}
+        onCancel={() => !batchProcessing && setBatchProgressModalOpen(false)}
+        footer={
+          <Space>
+            {!batchProcessing ? (
+              <>
+                <Button onClick={() => setBatchProgressModalOpen(false)}>Cancel</Button>
+                <Button
+                  type="primary"
+                  style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+                  onClick={() => {
+                    setBatchConfirmed(true);
+                    runBatchReCreateAccounting();
+                  }}
+                >
+                  ✓ Confirm & Run Batch
+                </Button>
+              </>
+            ) : (
+              <Text type="secondary">Processing... Please wait</Text>
+            )}
+          </Space>
+        }
+        width="95vw"
+        styles={{ body: { maxHeight: '75vh', overflowY: 'auto' } }}
+        closable={!batchProcessing}
+      >
+        <Table
+          columns={[
+            {
+              title: 'Invoice',
+              key: 'invoiceNumber',
+              width: 120,
+              render: (_: any, record: any) => (
+                <a style={{ color: REDWOOD.info }}>
+                  {record.invoiceNumber}
+                </a>
+              ),
+            },
+            {
+              title: 'ID',
+              dataIndex: 'invoiceId',
+              key: 'invoiceId',
+              width: 80,
+              render: (value: any) => <Text type="secondary" style={{ fontSize: 11 }}>{value}</Text>,
+            },
+            {
+              title: 'Amount',
+              dataIndex: 'amount',
+              key: 'amount',
+              width: 100,
+              align: 'right',
+              render: (value: number) => <Text strong>{formatCurrency(value)}</Text>,
+            },
+            ...Array.from({ length: 8 }, (_, idx) => ({
+              title: `Step ${idx === 0 ? '0' : idx === 1 ? '0.1' : idx === 2 ? '1' : idx === 3 ? '1.1' : idx - 2}`,
+              key: `step${idx}`,
+              width: 70,
+              align: 'center' as const,
+              render: (_: any, record: any) => {
+                const stepStatus = record.steps[idx]?.status;
+                if (stepStatus === 'success') {
+                  return <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 14 }} />;
+                } else if (stepStatus === 'failed') {
+                  return <CloseCircleOutlined style={{ color: REDWOOD.error, fontSize: 14 }} />;
+                } else if (batchProcessing && stepStatus === null) {
+                  return <LoadingOutlined style={{ color: REDWOOD.warning, fontSize: 14 }} />;
+                }
+                return <span style={{ color: REDWOOD.neutral300, fontSize: 12 }}>—</span>;
+              },
+            })),
+          ]}
+          dataSource={batchProgressData}
+          rowKey="invoiceId"
+          pagination={false}
+          size="small"
+          scroll={{ x: 1400 }}
+          style={{ marginBottom: 16 }}
+        />
+
+        {/* Step Labels Legend */}
+        <Card size="small" style={{ background: REDWOOD.neutral100 }}>
+          <Row gutter={24}>
+            <Col span={3}><Text type="secondary" style={{ fontSize: 11 }}>Step 0: Check SLA</Text></Col>
+            <Col span={3}><Text type="secondary" style={{ fontSize: 11 }}>Step 0.1: Delete SLA</Text></Col>
+            <Col span={3}><Text type="secondary" style={{ fontSize: 11 }}>Step 1: Check GL</Text></Col>
+            <Col span={3}><Text type="secondary" style={{ fontSize: 11 }}>Step 1.1: Delete GL</Text></Col>
+            <Col span={3}><Text type="secondary" style={{ fontSize: 11 }}>Step 2: Create SLA</Text></Col>
+            <Col span={3}><Text type="secondary" style={{ fontSize: 11 }}>Step 3: Create GL</Text></Col>
+            <Col span={3}><Text type="secondary" style={{ fontSize: 11 }}>Step 4: Post GL</Text></Col>
+            <Col span={3}><Text type="secondary" style={{ fontSize: 11 }}>Step 5: Stamp IDs</Text></Col>
+          </Row>
+          <Row gutter={24} style={{ marginTop: 12 }}>
+            <Col span={6}>
+              <Space size={4}>
+                <CheckCircleOutlined style={{ color: REDWOOD.success }} />
+                <Text type="secondary" style={{ fontSize: 11 }}>Success</Text>
+              </Space>
+            </Col>
+            <Col span={6}>
+              <Space size={4}>
+                <CloseCircleOutlined style={{ color: REDWOOD.error }} />
+                <Text type="secondary" style={{ fontSize: 11 }}>Failed</Text>
+              </Space>
+            </Col>
+            <Col span={6}>
+              <Space size={4}>
+                <LoadingOutlined style={{ color: REDWOOD.warning }} />
+                <Text type="secondary" style={{ fontSize: 11 }}>In Progress</Text>
+              </Space>
+            </Col>
+            <Col span={6}>
+              <Space size={4}>
+                <span style={{ color: REDWOOD.neutral300 }}>—</span>
+                <Text type="secondary" style={{ fontSize: 11 }}>Not Started</Text>
+              </Space>
+            </Col>
+          </Row>
+        </Card>
       </Modal>
 
       {/* Accounting for Single Invoice Modal */}
