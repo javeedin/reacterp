@@ -3809,43 +3809,6 @@ const ManageInvoices: React.FC = () => {
                 </Tooltip>
                 <Tooltip title={
                   selectedRowKeys.length === 0
-                    ? 'Select one invoice to run full accounting recreation sequence'
-                    : selectedRowKeys.length === 1
-                      ? `Run Re-Create AC for invoice ${invoices.find(i => i.key === selectedRowKeys[0])?.invoiceNumber || ''}`
-                      : 'Select only one invoice to run Re-Create AC'
-                }>
-                  <Button
-                    size="small"
-                    icon={<SyncOutlined />}
-                    style={{ color: '#ff7a45', borderColor: '#ff7a45' }}
-                    disabled={selectedRowKeys.length !== 1}
-                    loading={recreateAcRunning}
-                    onClick={() => {
-                      if (selectedRowKeys.length === 1) {
-                        const rec = invoices.find(i => i.key === selectedRowKeys[0]);
-                        if (rec) {
-                          setSelectedInvoiceForRecreate(rec);
-                          setRecreateAcModalOpen(true);
-                          setRecreateAcSteps([
-                            { step: 'Query SLA', status: 'pending' },
-                            { step: 'Query GL Journal Lines', status: 'pending' },
-                            { step: 'Delete SLA', status: 'pending' },
-                            { step: 'Delete GL', status: 'pending' },
-                            { step: 'Create SLA', status: 'pending' },
-                            { step: 'Create GL', status: 'pending' },
-                            { step: 'POST GL', status: 'pending' },
-                            { step: 'POST SLA', status: 'pending' },
-                            { step: 'Stamp GL IDs on SLA Header', status: 'pending' },
-                          ]);
-                        }
-                      }
-                    }}
-                  >
-                    Run Re-Create AC
-                  </Button>
-                </Tooltip>
-                <Tooltip title={
-                  selectedRowKeys.length === 0
                     ? 'Select one or more invoices to fetch applied prepayments from Oracle Fusion'
                     : selectedRowKeys.length === 1
                       ? `Fetch prepayments for invoice ${invoices.find(i => i.key === selectedRowKeys[0])?.invoiceNumber || ''}`
@@ -5685,7 +5648,7 @@ const ManageInvoices: React.FC = () => {
               {
                 title: 'Action',
                 key: 'action',
-                width: 140,
+                width: 200,
                 fixed: 'right',
                 render: (_: any, record: any) => (
                   <Space size="small">
@@ -5695,7 +5658,32 @@ const ManageInvoices: React.FC = () => {
                       onClick={() => handleRecreateAccountingPreview(record)}
                       style={{ color: REDWOOD.info, padding: '0 4px' }}
                     >
-                      Re-Create
+                      Review
+                    </Button>
+                    <Button
+                      type="link"
+                      size="small"
+                      onClick={() => {
+                        const inv = invoices.find(i => i.invoiceId === record.invoiceId);
+                        if (inv) {
+                          setSelectedInvoiceForRecreate(inv);
+                          setRecreateAcModalOpen(true);
+                          setRecreateAcSteps([
+                            { step: 'Query SLA', status: 'pending' },
+                            { step: 'Query GL Journal Lines', status: 'pending' },
+                            { step: 'Delete SLA', status: 'pending' },
+                            { step: 'Delete GL', status: 'pending' },
+                            { step: 'Create SLA', status: 'pending' },
+                            { step: 'Create GL', status: 'pending' },
+                            { step: 'POST GL', status: 'pending' },
+                            { step: 'POST SLA', status: 'pending' },
+                            { step: 'Stamp GL IDs on SLA Header', status: 'pending' },
+                          ]);
+                        }
+                      }}
+                      style={{ color: '#ff7a45', padding: '0 4px' }}
+                    >
+                      Re-Create A/C
                     </Button>
                     <Button
                       type="link"
