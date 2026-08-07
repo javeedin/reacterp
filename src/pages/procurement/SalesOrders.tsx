@@ -3339,23 +3339,32 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
       return;
     }
 
-    // Fetch conversion rate from BMS rate webservice
+    // Fetch conversion rate from daily rates webservice
     try {
-      const checkDate = orderDate ? orderDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
-      const datePart = checkDate ? `&rate_date=${checkDate}` : '';
-      const url = `${APEX_BASE}/currencies/bmsrate?source_cur=${baseCcy}&target_cur=${txnCcy}${datePart}`;
+      const params = new URLSearchParams({ from_currency: baseCcy, to_currency: txnCcy });
+      const url = `${APEX_BASE}/currencies/dailyrates?${params}`;
       const res = await fetch(url);
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.status === 'ok' && data.rate) {
-          frm.setFieldsValue({ rate: Number(data.rate) || 1 });
-          message.success(`✓ Conversion rate fetched: 1 ${baseCcy} = ${data.rate} ${txnCcy}`);
-        } else {
-          message.info(`No rate found for ${baseCcy}-${txnCcy} on ${checkDate}, please enter manually`);
-        }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const raw = (await res.text()).replace(/:\s*(-?)\.(\d)/g, ': $10.$2');
+      const json = JSON.parse(raw);
+      const items: any[] = json.items ?? json.data ?? (Array.isArray(json) ? json : []);
+
+      if (items.length === 0) {
+        message.info(`No rate found for ${baseCcy} → ${txnCcy}, please enter manually`);
+        return;
+      }
+
+      // Pick the most recent date
+      const latest = items.reduce((a: any, b: any) =>
+        (a.rateDate ?? a.rate_date ?? '') > (b.rateDate ?? b.rate_date ?? '') ? a : b
+      );
+      const rate = Number(latest.rate ?? latest.RATE ?? 0);
+      if (rate > 0) {
+        frm.setFieldsValue({ rate });
+        message.success(`✓ Conversion rate fetched: 1 ${baseCcy} = ${rate} ${txnCcy}`);
       } else {
-        message.warning(`Could not fetch conversion rate (HTTP ${res.status}), please enter manually`);
+        message.info(`Could not get valid rate for ${baseCcy} → ${txnCcy}, please enter manually`);
       }
     } catch (err) {
       console.error('Error fetching conversion rate:', err);
@@ -4338,6 +4347,58 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       taxAmount: opt ? round2(num(l.qty) * num(l.unitPrice) * opt.pct / 100) : 0,
     }));
   };
+
+  // Fetch currency conversion rate
+  const onTxnCurrencyChange = async (frm: any) => {
+    const baseCcy = frm.getFieldValue('baseCurrency');
+    const txnCcy = frm.getFieldValue('txnCurrency');
+    const orderDate = frm.getFieldValue('orderDate');
+
+    // Set default rate type and date
+    frm.setFieldsValue({
+      currencyRateType: 'Corporate',
+      currencyDate: orderDate || dayjs()
+    });
+
+    // If same currency, set rate to 1
+    if (!baseCcy || !txnCcy || baseCcy === txnCcy) {
+      frm.setFieldsValue({ rate: 1 });
+      return;
+    }
+
+    // Fetch conversion rate from daily rates webservice
+    try {
+      const params = new URLSearchParams({ from_currency: baseCcy, to_currency: txnCcy });
+      const url = `${APEX_BASE}/currencies/dailyrates?${params}`;
+      const res = await fetch(url);
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const raw = (await res.text()).replace(/:\s*(-?)\.(\d)/g, ': $10.$2');
+      const json = JSON.parse(raw);
+      const items: any[] = json.items ?? json.data ?? (Array.isArray(json) ? json : []);
+
+      if (items.length === 0) {
+        message.info(`No rate found for ${baseCcy} → ${txnCcy}, please enter manually`);
+        return;
+      }
+
+      // Pick the most recent date
+      const latest = items.reduce((a: any, b: any) =>
+        (a.rateDate ?? a.rate_date ?? '') > (b.rateDate ?? b.rate_date ?? '') ? a : b
+      );
+      const rate = Number(latest.rate ?? latest.RATE ?? 0);
+      if (rate > 0) {
+        frm.setFieldsValue({ rate });
+        message.success(`✓ Conversion rate fetched: 1 ${baseCcy} = ${rate} ${txnCcy}`);
+      } else {
+        message.info(`Could not get valid rate for ${baseCcy} → ${txnCcy}, please enter manually`);
+      }
+    } catch (err) {
+      console.error('Error fetching conversion rate:', err);
+      message.warning('Could not fetch conversion rate automatically, please enter manually');
+    }
+  };
+
   const [discAmt, setDiscAmt] = useState(initialDraft?.discAmt ?? 0);
   const [expAmt, setExpAmt] = useState(initialDraft?.expAmt ?? 0);
   const [lineSearch, setLineSearch] = useState<Record<string, { loading?: boolean; tooShort?: boolean; opts: any[] }>>({});
