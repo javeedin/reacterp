@@ -3266,16 +3266,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
   useEffect(() => {
     if (!open) return;
     form.resetFields();
-    // Restore last selected business unit
-    try {
-      const lastBU = localStorage.getItem('lastSelectedBU');
-      if (lastBU) {
-        form.setFieldsValue({ businessUnit: lastBU });
-        onBU(lastBU);
-      }
-    } catch (e) {
-      // localStorage not available
-    }
+    // Start with all fields disabled until Business Unit is selected
     form.setFieldsValue({ orderType: 'LSO01', rate: 1, orderDate: dayjs() });
     setSubs([]);
   }, [open, form]);
@@ -3323,12 +3314,6 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
     const row = bUnits.find(b => b.businessUnitName === name);
     const cur = pf(row, ['paymentCurrency', 'ledgerCurrency', 'invoiceCurrency']);
     form.setFieldsValue({ baseCurrency: cur, txnCurrency: form.getFieldValue('txnCurrency') || cur, warehouse: undefined, subinventory: undefined });
-    // Save last selected business unit
-    try {
-      localStorage.setItem('lastSelectedBU', name);
-    } catch (e) {
-      // localStorage not available
-    }
     setSubs([]);
   };
   const onWarehouse = (code: string) => {
