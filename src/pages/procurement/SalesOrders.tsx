@@ -3256,6 +3256,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
   const salesRepOpts = useOrdsOptions(SALESREPS_URL, SALESREP_KEYS);
   const custOptions = useMemo(() => custOptionList(customers), [customers]);
   const [subs, setSubs] = useState<string[]>([]);
+  const [orderTypeOpts, setOrderTypeOpts] = useState<any[]>([]);
   const [custSearchModalOpen, setCustSearchModalOpen] = useState(false);
   const instance = getFusionInstance();
 
@@ -3275,6 +3276,26 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
     form.setFieldsValue({ orderType: 'LSO01', rate: 1, orderDate: dayjs() });
     setSubs([]);
   }, [open, form]);
+
+  useEffect(() => {
+    // Fetch order types from standardLookups
+    fetch(`${FUSION_BASE}/standardLookups?q=LookupType LIKE 'ORA_DOO_ORDER_TYPES%'&expand=lookupCodes&onlyData=true&limit=500`, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        const items = d.items ?? [];
+        if (items.length > 0 && items[0].lookupCodes) {
+          const opts = items[0].lookupCodes
+            .filter((lc: any) => lc.EnabledFlag === 'Y')
+            .map((lc: any) => ({ value: lc.LookupCode, label: lc.Meaning }))
+            .sort((a: any, b: any) => a.label.localeCompare(b.label));
+          setOrderTypeOpts(opts);
+        }
+      })
+      .catch(err => {
+        console.error('Error fetching order types:', err);
+        setOrderTypeOpts([]);
+      });
+  }, []);
 
   const onCustomer = (name: string, opt: any) => {
     const row = opt?._c ?? customers.find(c => custName(c) === name);
@@ -3391,7 +3412,8 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
           <Col xs={12} md={6}><Form.Item label="Rate Type" name="currencyRateType" style={{ marginBottom: 8 }}>
             <Select placeholder="Rate type" size="small" options={[{ value: 'Corporate', label: 'Corporate' }, { value: 'Spot', label: 'Spot' }, { value: 'User', label: 'User' }]} /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Currency Date" name="currencyDate" style={{ marginBottom: 8 }}><DatePicker style={{ width: '100%' }} size="small" /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Order Type" name="orderType" rules={req('Order type')} style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Order Type" name="orderType" rules={req('Order type')} style={{ marginBottom: 8 }}>
+            <Select showSearch placeholder="Select order type" size="small" loading={orderTypeOpts.length === 0} options={orderTypeOpts} /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')} style={{ marginBottom: 0 }}><DatePicker style={{ width: '100%' }} size="small" /></Form.Item></Col>
         </Section>
 
