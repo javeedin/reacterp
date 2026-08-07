@@ -2658,16 +2658,18 @@ const ManageInvoices: React.FC = () => {
           await runPreviewDebugStep(0);
           await new Promise(resolve => setTimeout(resolve, 500));
           // Now check the response
-          if (previewSlaCheckResponse && previewSlaCheckResponse.canCreate === false) {
-            message.warning(`⏭️ Skipping SLA creation: ${previewSlaCheckResponse.message}`);
+          const exists = previewSlaCheckResponse?.exists || false;
+          if (exists) {
+            message.warning(`⏭️ SLA already exists (ID: ${previewSlaCheckResponse?.headerId}) - Skipping creation`);
             return;
           }
-          message.info(`✓ Check approved: ${previewSlaCheckResponse?.message || 'Safe to create'}`);
+          message.info('✓ No SLA exists - Safe to create');
           // Continue with Step 4
         } else {
           // Check already ran, verify response
-          if (previewSlaCheckResponse.canCreate === false) {
-            message.warning(`⏭️ Skipping SLA creation: ${previewSlaCheckResponse.message}`);
+          const exists = previewSlaCheckResponse.exists || false;
+          if (exists) {
+            message.warning(`⏭️ SLA already exists (ID: ${previewSlaCheckResponse.headerId}) - Skipping creation`);
             setExecutingStepIdx(null);
             setLoading(false);
             return;
@@ -2687,16 +2689,16 @@ const ManageInvoices: React.FC = () => {
           // Now check the response
           const exists = previewGlCheckResponse?.exists || previewGlCheckResponse?.journal_exists || false;
           if (exists) {
-            message.warning('⏭️ Skipping GL creation: GL Journal already exists');
+            message.warning(`⏭️ GL already exists (Batch ID: ${previewGlCheckResponse?.batchId}) - Skipping creation`);
             return;
           }
-          message.info('✓ Check approved: Safe to create GL');
+          message.info('✓ No GL exists - Safe to create');
           // Continue with Step 5
         } else {
           // Check already ran, verify response
           const exists = previewGlCheckResponse.exists || previewGlCheckResponse.journal_exists || false;
           if (exists) {
-            message.warning('⏭️ Skipping GL creation: GL Journal already exists');
+            message.warning(`⏭️ GL already exists (Batch ID: ${previewGlCheckResponse.batchId}) - Skipping creation`);
             setExecutingStepIdx(null);
             setLoading(false);
             return;
