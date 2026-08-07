@@ -2616,15 +2616,21 @@ const ManageInvoices: React.FC = () => {
 
     try {
       for (let i = 0; i < previewDebugSteps.length; i++) {
-        // Add a small delay between steps
-        if (i > 0) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
+        console.log(`\n=== STARTING STEP ${i} ===`);
 
         await runPreviewDebugStep(i);
+
+        console.log(`✓ Step ${i} completed\n`);
+
+        // Add delay between steps - give time for state updates and API response
+        if (i < previewDebugSteps.length - 1) {
+          console.log(`⏳ Waiting 3 seconds before next step...`);
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
       }
       message.success('✓ All steps completed!');
     } catch (error: any) {
+      console.error('Error running all steps:', error);
       message.error(`Error running steps: ${error.message}`);
     }
   };
@@ -2728,9 +2734,7 @@ const ManageInvoices: React.FC = () => {
 
           // Run all 8 steps for this invoice
           for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
-            if (stepIdx > 0) {
-              await new Promise(resolve => setTimeout(resolve, 300));
-            }
+            console.log(`\n[${accRecord.invoiceNumber}] === STARTING STEP ${stepIdx} ===`);
 
             try {
               await runPreviewDebugStep(stepIdx);
@@ -2744,7 +2748,11 @@ const ManageInvoices: React.FC = () => {
                 }
                 return updated;
               });
+
+              console.log(`✓ [${accRecord.invoiceNumber}] Step ${stepIdx} completed`);
             } catch (error) {
+              console.error(`✗ [${accRecord.invoiceNumber}] Step ${stepIdx} failed:`, error);
+
               // Mark step as failed
               setBatchProgressData(prev => {
                 const updated = [...prev];
@@ -2755,11 +2763,18 @@ const ManageInvoices: React.FC = () => {
                 return updated;
               });
             }
+
+            // Add delay between steps - give time for state updates
+            if (stepIdx < steps.length - 1) {
+              console.log(`⏳ [${accRecord.invoiceNumber}] Waiting 3 seconds before next step...`);
+              await new Promise(resolve => setTimeout(resolve, 3000));
+            }
           }
 
           // Add delay between invoices
           if (idx < selectedInvoices.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            console.log(`\n⏳ Waiting 3 seconds before next invoice...\n`);
+            await new Promise(resolve => setTimeout(resolve, 3000));
           }
         } catch (error: any) {
           console.error(`Error processing invoice ${accRecord.invoiceNumber}:`, error);
@@ -2810,6 +2825,7 @@ const ManageInvoices: React.FC = () => {
     try {
       // Step 4 (Create SLA) - ALWAYS refresh SLA check status before creating
       if (stepIdx === 4) {
+        console.log('🔍 Step 4: Refreshing SLA status before creation...');
         message.info('🔍 Refreshing SLA status before creation...');
 
         try {
@@ -2818,10 +2834,11 @@ const ManageInvoices: React.FC = () => {
           const invoiceId = activePayload?.header?.sourceId;
 
           const checkUrl = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${invoiceId}&eventType=AP_INVOICE_CREATION`;
+          console.log(`📤 Checking SLA: ${checkUrl}`);
           const checkResponse = await fetch(checkUrl, { method: 'GET', headers: { Accept: 'application/json' } });
           const checkData = await checkResponse.json();
 
-          console.log('SLA Check response before creation:', checkData);
+          console.log('📥 SLA Check response:', checkData);
 
           // Update the stored SLA check response with fresh data
           setPreviewSlaCheckResponse(checkData);
@@ -2855,6 +2872,7 @@ const ManageInvoices: React.FC = () => {
 
       // Step 5 (Create GL) - ALWAYS refresh GL check status before creating
       if (stepIdx === 5) {
+        console.log('🔍 Step 5: Refreshing GL status before creation...');
         message.info('🔍 Refreshing GL status before creation...');
 
         try {
@@ -2864,10 +2882,11 @@ const ManageInvoices: React.FC = () => {
           const invoiceNumber = activePayload?.header?.sourceNumber;
 
           const checkUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/check?reference1=${invoiceNumber}&reference2=${invoiceId}&reference5=AP-INVOICE-CREATION`;
+          console.log(`📤 Checking GL: ${checkUrl}`);
           const checkResponse = await fetch(checkUrl, { method: 'GET', headers: { Accept: 'application/json' } });
           const checkData = await checkResponse.json();
 
-          console.log('GL Check response before creation:', checkData);
+          console.log('📥 GL Check response:', checkData);
 
           // Update the stored GL check response with fresh data
           setPreviewGlCheckResponse(checkData);
@@ -2941,6 +2960,8 @@ const ManageInvoices: React.FC = () => {
         body: requestBody
       });
 
+      console.log(`📤 Fetching: ${step.method} ${url.split('?')[0]}`);
+
       const res = await fetch(url, opts);
       const text = await res.text();
       let data: any = {};
@@ -2953,6 +2974,8 @@ const ManageInvoices: React.FC = () => {
           data = { message: text };
         }
       }
+
+      console.log(`📥 Response Status: ${res.status}`, { data });
 
       // Update response and clear loading
       setPreviewDebugSteps(prev => {
