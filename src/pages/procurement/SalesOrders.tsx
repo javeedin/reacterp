@@ -2078,6 +2078,8 @@ interface OrderHeader {
   billToSite?: string; shipToSite?: string; billToAddress?: string; shipToAddress?: string;
   paymentTerms?: string; salesRep?: string; warehouse?: string; subinventory?: string; remarks?: string;
   custAccountId?: string; partyId?: string;
+  // Currency conversion details
+  currencyRateType?: string; currencyDate?: Dayjs | null;
   // Header EFF (Additional Information) segment values, keyed by segment API name.
   effVals?: Record<string, string>;
 }
@@ -3305,6 +3307,44 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => setSubs(Array.from(new Set((d.items ?? []).map((s: any) => s.SecondaryInventoryName).filter(Boolean))).sort() as string[])).catch(() => setSubs([]));
   };
+  const onTxnCurrencyChange = async (frm: any) => {
+    const baseCcy = frm.getFieldValue('baseCurrency');
+    const txnCcy = frm.getFieldValue('txnCurrency');
+    const orderDate = frm.getFieldValue('orderDate');
+
+    // Set default rate type and date
+    frm.setFieldsValue({
+      currencyRateType: 'Corporate',
+      currencyDate: orderDate || dayjs()
+    });
+
+    // If same currency, set rate to 1
+    if (!baseCcy || !txnCcy || baseCcy === txnCcy) {
+      frm.setFieldsValue({ rate: 1 });
+      return;
+    }
+
+    // Fetch conversion rate from Fusion
+    try {
+      const checkDate = orderDate ? orderDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
+      const url = `${FUSION_BASE}/currencyConversionRates?q=FromCurrency=${baseCcy} and ToCurrency=${txnCcy} and ConversionDate='${checkDate}'&onlyData=true&limit=1`;
+      const res = await fetch(url, { headers: FUSION_HDRS });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.items && data.items.length > 0) {
+          const rate = data.items[0].ConversionRate || data.items[0].conversionRate;
+          frm.setFieldsValue({ rate: Number(rate) || 1 });
+          message.success(`✓ Conversion rate fetched: 1 ${baseCcy} = ${rate} ${txnCcy}`);
+        } else {
+          message.info(`No rate found for ${baseCcy}-${txnCcy} on ${checkDate}, please enter manually`);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching conversion rate:', err);
+      message.warning('Could not fetch conversion rate automatically, please enter manually');
+    }
+  };
 
   const submit = () => form.validateFields().then(() => {
     // getFieldsValue(true) keeps values set via setFieldsValue that have no
@@ -3343,8 +3383,11 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
               options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Base Ccy" name="baseCurrency" rules={req('Base currency')} style={{ marginBottom: 8 }}><Input placeholder="AED" readOnly size="small" /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Txn Ccy" name="txnCurrency" rules={req('Currency')} style={{ marginBottom: 8 }}>
-            <Select showSearch placeholder="Currency" size="small" options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Rate" name="rate" style={{ marginBottom: 8 }}><InputNumber style={{ width: '100%' }} size="small" min={0} /></Form.Item></Col>
+            <Select showSearch placeholder="Currency" size="small" onChange={() => onTxnCurrencyChange(form)} options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Rate" name="rate" style={{ marginBottom: 8 }}><InputNumber style={{ width: '100%' }} size="small" min={0} placeholder="Auto-populated" /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Rate Type" name="currencyRateType" style={{ marginBottom: 8 }}>
+            <Select placeholder="Rate type" size="small" options={[{ value: 'Corporate', label: 'Corporate' }, { value: 'Spot', label: 'Spot' }, { value: 'User', label: 'User' }]} /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Currency Date" name="currencyDate" style={{ marginBottom: 8 }}><DatePicker style={{ width: '100%' }} size="small" /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Order Type" name="orderType" rules={req('Order type')} style={{ marginBottom: 8 }}><Input size="small" /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')} style={{ marginBottom: 0 }}><DatePicker style={{ width: '100%' }} size="small" /></Form.Item></Col>
         </Section>
@@ -4976,6 +5019,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       SourceTransactionId: srcId,
       ...(revision != null ? { SourceTransactionRevisionNumber: revision } : {}),
       TransactionalCurrencyCode: hdr.txnCurrency,
+      ...(hdr.rate != null ? { ConversionRate: Number(hdr.rate) } : {}),
+      ...(hdr.currencyRateType ? { CurrencyConversionRateType: hdr.currencyRateType } : {}),
+      ...(hdr.currencyDate ? { ConversionDate: hdr.currencyDate.format('YYYY-MM-DD') } : {}),
       ...(hdr.businessUnitId != null ? { BusinessUnitId: numOrStr(hdr.businessUnitId) } : {}),
       ...(hdr.accountNumber ? { BuyingPartyNumber: hdr.accountNumber } : {}),
       RequestedShipDate: dateIso,
@@ -6614,7 +6660,9 @@ const SalesOrders: React.FC = () => {
       accountNumber: order.BuyingPartyNumber ?? undefined,
       paymentTerms: order.PaymentTerms ?? order.PaymentTermsCode ?? undefined,
       warehouse: order.RequestedFulfillmentOrganizationCode ?? undefined,
-      rate: 1,
+      rate: order.ConversionRate != null ? Number(order.ConversionRate) : 1,
+      currencyRateType: order.CurrencyConversionRateType ?? 'Corporate',
+      currencyDate: order.ConversionDate ? dayjs(order.ConversionDate) : dayjs(),
     };
     const hide = message.loading('Loading customer details…', 0);
     const refs = await fetchOrderCustomerRefs(order);
@@ -6635,7 +6683,9 @@ const SalesOrders: React.FC = () => {
     accountNumber: order.BuyingPartyNumber ?? undefined,
     paymentTerms: order.PaymentTerms ?? order.PaymentTermsCode ?? undefined,
     warehouse: order.RequestedFulfillmentOrganizationCode ?? undefined,
-    rate: 1,
+    rate: order.ConversionRate != null ? Number(order.ConversionRate) : 1,
+    currencyRateType: order.CurrencyConversionRateType ?? 'Corporate',
+    currencyDate: order.ConversionDate ? dayjs(order.ConversionDate) : dayjs(),
   });
 
   // Copy an order → a brand-new draft order pre-filled with the same lines.
