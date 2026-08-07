@@ -2527,8 +2527,8 @@ const ManageInvoices: React.FC = () => {
       {
         step: '0.1 — Delete SLA',
         method: 'POST',
-        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?sourceTable=AP_INVOICES&sourceId=${invoiceId}&eventType=AP_INVOICE_CREATION`,
-        requestBody: { sourceTable: 'AP_INVOICES', sourceId: invoiceId, eventType: 'AP_INVOICE_CREATION' },
+        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete`,
+        requestBody: { headerId: '{headerId}' },
         status: undefined,
         response: undefined,
       },
@@ -2713,15 +2713,15 @@ const ManageInvoices: React.FC = () => {
 
       if (res.ok) {
         if (stepIdx === 0) {
-          // SLA check - capture headerid for deletion and update Step 0.1 URL
+          // SLA check - capture headerid for deletion and update Step 0.1 request body
           const exists = data.exists || data.header_exists || false;
           const headerId = data.headerId || data.header_id;
           if (headerId) {
             setPreviewSlaHeaderId(headerId);
-            // Update Step 0.1 URL with the captured headerId
+            // Update Step 0.1 request body with the captured headerId
             setPreviewDebugSteps(prev => {
               const updated = [...prev];
-              updated[1] = { ...updated[1], url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/${headerId}/delete` };
+              updated[1] = { ...updated[1], requestBody: { headerId } };
               return updated;
             });
             console.log('SLA found with ID:', headerId);
