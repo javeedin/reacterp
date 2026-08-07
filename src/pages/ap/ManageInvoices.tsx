@@ -2713,11 +2713,17 @@ const ManageInvoices: React.FC = () => {
 
       if (res.ok) {
         if (stepIdx === 0) {
-          // SLA check - capture headerid for deletion
+          // SLA check - capture headerid for deletion and update Step 0.1 URL
           const exists = data.exists || data.header_exists || false;
           const headerId = data.headerId || data.header_id;
           if (headerId) {
             setPreviewSlaHeaderId(headerId);
+            // Update Step 0.1 URL with the captured headerId
+            setPreviewDebugSteps(prev => {
+              const updated = [...prev];
+              updated[1] = { ...updated[1], url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/${headerId}/delete` };
+              return updated;
+            });
             console.log('SLA found with ID:', headerId);
           }
           message.success(exists ? `✓ SLA exists (ID: ${headerId}) - Step 0.1 will delete it` : '✓ No SLA found');
@@ -2725,7 +2731,7 @@ const ManageInvoices: React.FC = () => {
           // SLA delete
           message.success('✓ SLA deleted successfully');
         } else if (stepIdx === 2) {
-          // GL check - capture batchid for deletion
+          // GL check - capture batchid for deletion and update Step 1.1 URL
           const exists = data.exists || data.journal_exists || data.items?.length > 0 || false;
           let batchId = data.jeBatchId || data.je_batch_id || data.batchId || data.batch_id;
           if (!batchId && data.items?.length > 0) {
@@ -2733,6 +2739,12 @@ const ManageInvoices: React.FC = () => {
           }
           if (batchId) {
             setPreviewGlBatchId(batchId);
+            // Update Step 1.1 URL with the captured batchId
+            setPreviewDebugSteps(prev => {
+              const updated = [...prev];
+              updated[3] = { ...updated[3], url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/${batchId}/delete` };
+              return updated;
+            });
             console.log('GL found with Batch ID:', batchId);
           }
           message.success(exists ? `✓ GL exists (Batch ID: ${batchId}) - Step 1.1 will delete it` : '✓ No GL found');
