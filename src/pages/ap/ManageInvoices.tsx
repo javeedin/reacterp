@@ -2517,7 +2517,23 @@ const ManageInvoices: React.FC = () => {
 
     return [
       {
-        step: '0 — Create SLA Accounting',
+        step: '0 — Check if SLA Deleted',
+        method: 'GET',
+        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${invoiceId}&eventType=AP_INVOICE_CREATION`,
+        requestBody: null,
+        status: undefined,
+        response: undefined,
+      },
+      {
+        step: '1 — Check if GL Deleted',
+        method: 'GET',
+        url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/check?reference1=${invoiceNumber}&reference2=${invoiceId}&reference5=AP-INVOICE-CREATION`,
+        requestBody: null,
+        status: undefined,
+        response: undefined,
+      },
+      {
+        step: '2 — Create SLA Accounting',
         method: 'POST',
         url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`,
         requestBody: slaPayload,
@@ -2525,7 +2541,7 @@ const ManageInvoices: React.FC = () => {
         response: undefined,
       },
       {
-        step: '1 — Create Journal in GL',
+        step: '3 — Create Journal in GL',
         method: 'POST',
         url: `${APEX_DB_CONFIG.baseUrl}/journals/create`,
         requestBody: journalPayload,
@@ -2533,7 +2549,7 @@ const ManageInvoices: React.FC = () => {
         response: undefined,
       },
       {
-        step: '2 — Post Journal to GL',
+        step: '4 — Post Journal to GL',
         method: 'PUT',
         url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/{glBatchId}/post`,
         requestBody: null,
@@ -2541,7 +2557,7 @@ const ManageInvoices: React.FC = () => {
         response: undefined,
       },
       {
-        step: '3 — Stamp GL IDs on SLA Header',
+        step: '5 — Stamp GL IDs on SLA Header',
         method: 'POST',
         url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`,
         requestBody: { headerId: '{slaHeaderId}', glBatchId: '{glBatchId}', glBatchName: '{glBatchName}', glHeaderId: '{glHeaderId}', postedBy: 'user' },
@@ -2680,7 +2696,15 @@ const ManageInvoices: React.FC = () => {
       setLoading(false);
 
       if (res.ok) {
-        if (stepIdx === 0) {
+        if (stepIdx === 0 || stepIdx === 1) {
+          // Check steps - just show verification result
+          const exists = data.exists || data.header_exists || data.items?.length > 0 || false;
+          if (stepIdx === 0) {
+            message.success(exists ? '✓ SLA still exists (needs deletion)' : '✓ SLA successfully deleted');
+          } else {
+            message.success(exists ? '✓ GL still exists (needs deletion)' : '✓ GL successfully deleted');
+          }
+        } else if (stepIdx === 2) {
           // SLA creation - extract and save SLA header ID
           const slaId = data.headerId || data.header_id;
           if (slaId) {
@@ -2690,9 +2714,9 @@ const ManageInvoices: React.FC = () => {
           } else {
             message.success(`Step ${stepIdx + 1} completed successfully`);
           }
-        } else if (stepIdx === 1) {
+        } else if (stepIdx === 3) {
           // GL journal creation - extract and save batch ID
-          console.log('Step 1 full response:', data);
+          console.log('Step 3 full response:', data);
 
           // Try multiple field names for batchId
           let batchId = data.jeBatchId || data.je_batch_id || data.batchId || data.batch_id;
