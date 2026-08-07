@@ -5957,6 +5957,45 @@ const ManageInvoices: React.FC = () => {
                   Close
                 </Button>
               </div>
+
+              {/* Invoice Details Section */}
+              {previewPayload && (
+                <div style={{
+                  padding: 16,
+                  background: '#fafafa',
+                  borderBottom: `1px solid ${REDWOOD.neutral200}`,
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: 12, color: REDWOOD.neutral800 }}>Invoice Details</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, fontSize: 13 }}>
+                    <div>
+                      <div style={{ color: REDWOOD.neutral600, marginBottom: 4 }}>Invoice No</div>
+                      <div style={{ fontWeight: 600, color: REDWOOD.neutral900 }}>{previewPayload.header?.sourceNumber || 'N/A'}</div>
+                    </div>
+                    <div>
+                      <div style={{ color: REDWOOD.neutral600, marginBottom: 4 }}>Invoice ID</div>
+                      <div style={{ fontWeight: 600, color: REDWOOD.neutral900 }}>{previewPayload.header?.sourceId || 'N/A'}</div>
+                    </div>
+                    <div>
+                      <div style={{ color: REDWOOD.neutral600, marginBottom: 4 }}>Amount</div>
+                      <div style={{ fontWeight: 600, color: REDWOOD.neutral900 }}>
+                        {previewPayload.lines
+                          .reduce((total: number, line: any) => total + (line.enteredDr || line.enteredCr || 0), 0)
+                          .toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ color: REDWOOD.neutral600, marginBottom: 4 }}>Tax Amount</div>
+                      <div style={{ fontWeight: 600, color: REDWOOD.neutral900 }}>
+                        {previewPayload.lines
+                          .filter((line: any) => line.accountingClass === 'TAX' || line.lineType === 'TAX')
+                          .reduce((total: number, line: any) => total + (line.enteredDr || line.enteredCr || 0), 0)
+                          .toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {previewDebugSteps.map((step: any, idx: number) => (
                 <Card
                   key={idx}
