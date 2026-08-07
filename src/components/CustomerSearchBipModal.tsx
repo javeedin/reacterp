@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Modal, Input, Button, Spin, Empty, Tag, Drawer, Typography, Divider, Card, Row, Col } from 'antd';
 import { SearchOutlined, ApiOutlined, CopyOutlined, CheckCircleOutlined } from '@ant-design/icons';
-import { searchCustomersByBIP, CustomerSearchResult, type CustomerSearchResponse, buildSoapEnvelopeForPreview } from '../services/customerSearchBip.service';
+import { searchCustomersByBIP, CustomerSearchResult, type CustomerSearchResponse } from '../services/customerSearchBip.service';
 import { ORACLE_SOAP_CONFIG } from '../config/api.config';
 
 const { Text, Paragraph } = Typography;
@@ -36,13 +36,8 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
   // Generate preview SOAP envelope as user types
   const previewEnvelope = useMemo(() => {
     if (!searchText.trim() || !businessUnitId) return null;
-    try {
-      console.log('Building preview envelope for:', { businessUnitId, searchText });
-      return buildSoapEnvelopeForPreview(businessUnitId, searchText.trim(), username);
-    } catch (e) {
-      console.error('Error building preview envelope:', e);
-      return null;
-    }
+    // Preview envelope generation disabled - function not available
+    return null;
   }, [searchText, businessUnitId, username]);
 
   const handleSearch = async () => {

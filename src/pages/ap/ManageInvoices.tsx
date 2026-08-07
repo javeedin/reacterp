@@ -90,7 +90,7 @@ import CreateInvoice from './CreateInvoice';
 import type { InvoiceInitialData } from './CreateInvoice';
 import { APEX_DB_CONFIG, ORACLE_FUSION_CONFIG } from '../../config/api.config';
 import { getApprovalRules, sendInvoiceApproval, type ApprovalUser, type ApprovalDebugStep } from '../../services/approvals.service';
-import { getAccounting, buildApInvoiceSlaPayload, fetchLedgerByBusinessUnit, checkGLJournalExists, deleteSlaAccounting, deleteGlJournal } from '../../services/sla.service';
+import { getAccounting, buildApInvoiceSlaPayload, fetchLedgerByBusinessUnit, checkGLJournalExists } from '../../services/sla.service';
 import { getGlJournalLines } from '../../services/glPosting.service';
 import { validateAccountCode } from '../../components/AccountSelector';
 import jsPDF from 'jspdf';
@@ -2607,7 +2607,70 @@ const ManageInvoices: React.FC = () => {
   };
 
 
-  // Run all debug steps sequentially
+  // Core function to run all steps - works for both debug dialog and batch
+  const executeAllSteps = async (stepsToRun: any[], invoiceName: string = '') => {
+    if (!stepsToRun || stepsToRun.length === 0) {
+      console.warn('No steps to run');
+      return [];
+    }
+
+    const results: any[] = [];
+    let capturedSlaHeaderId: any = null;
+    let capturedGlBatchId: any = null;
+    let capturedGlHeaderId: any = null;
+
+    for (let i = 0; i < stepsToRun.length; i++) {
+      const prefix = invoiceName ? `[${invoiceName}]` : '';
+      console.log(`${prefix} === STARTING STEP ${i} ===`);
+      console.log(`${prefix} 📋 Current captured IDs: SLA=${capturedSlaHeaderId}, GL=${capturedGlBatchId}`);
+
+      try {
+        // Set state temporarily so runPreviewDebugStep can read step details
+        setPreviewDebugSteps(stepsToRun);
+
+        const stepResult = await runPreviewDebugStep(i, {
+          capturedSlaHeaderId,
+          capturedGlBatchId,
+          capturedGlHeaderId,
+          setCapturedIds: (ids: any) => {
+            if (ids.slaHeaderId !== undefined) capturedSlaHeaderId = ids.slaHeaderId;
+            if (ids.glBatchId !== undefined) capturedGlBatchId = ids.glBatchId;
+            if (ids.glHeaderId !== undefined) capturedGlHeaderId = ids.glHeaderId;
+          }
+        });
+
+        results.push({
+          stepIdx: i,
+          status: stepResult?.response?.status === 'error' ? 'API_ERROR'
+            : (stepResult?.status === 200 || stepResult?.status === 204) ? 'success' : 'failed',
+          url: stepResult?.url,
+          request: stepResult?.request,
+          response: stepResult?.response,
+          responseStatus: stepResult?.status,
+          capturedIds: { slaHeaderId: capturedSlaHeaderId, glBatchId: capturedGlBatchId, glHeaderId: capturedGlHeaderId }
+        });
+
+        console.log(`${prefix} ✓ Step ${i} completed\n`);
+      } catch (error: any) {
+        console.error(`${prefix} Error on step ${i}:`, error);
+        results.push({
+          stepIdx: i,
+          status: 'failed',
+          error: error.message
+        });
+      }
+
+      // 3-second delay between steps
+      if (i < stepsToRun.length - 1) {
+        console.log(`${prefix} ⏳ Waiting 3 seconds before next step...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+    }
+
+    return results;
+  };
+
+  // Run all debug steps sequentially (for API Debug dialog "Run All Steps" button)
   const runAllPreviewDebugSteps = async () => {
     if (!previewPayload || previewDebugSteps.length === 0) {
       message.warning('No steps to run');
@@ -2615,19 +2678,7 @@ const ManageInvoices: React.FC = () => {
     }
 
     try {
-      for (let i = 0; i < previewDebugSteps.length; i++) {
-        console.log(`\n=== STARTING STEP ${i} ===`);
-
-        await runPreviewDebugStep(i);
-
-        console.log(`✓ Step ${i} completed\n`);
-
-        // Add delay between steps - give time for state updates and API response
-        if (i < previewDebugSteps.length - 1) {
-          console.log(`⏳ Waiting 3 seconds before next step...`);
-          await new Promise(resolve => setTimeout(resolve, 3000));
-        }
-      }
+      await executeAllSteps(previewDebugSteps, '');
       message.success('✓ All steps completed!');
     } catch (error: any) {
       console.error('Error running all steps:', error);
@@ -2671,7 +2722,7 @@ const ManageInvoices: React.FC = () => {
     setBatchConfirmed(false);
   };
 
-  // Batch run all steps for multiple selected invoices from accounting all modal
+  // Batch run all steps for multiple selected invoices - uses same executeAllSteps logic as debug dialog
   const runBatchReCreateAccounting = async () => {
     if (!batchConfirmed) return;
 
@@ -2683,48 +2734,48 @@ const ManageInvoices: React.FC = () => {
     }
 
     setBatchProcessing(true);
-    setBatchProgress({ current: 0, total: selectedInvoices.length });
+    message.destroy();
 
     try {
-      for (let idx = 0; idx < selectedInvoices.length; idx++) {
-        const accRecord = selectedInvoices[idx];
-        const invoice = invoices.find(i => i.invoiceId === accRecord.invoiceId);
-
-        setBatchProgress({ current: idx + 1, total: selectedInvoices.length });
+      for (let batchIdx = 0; batchIdx < batchProgressData.length; batchIdx++) {
+        const progressRecord = batchProgressData[batchIdx];
+        const invoice = invoices.find(i => i.invoiceId === progressRecord.invoiceId);
 
         if (!invoice) {
-          // Mark as failed
+          console.warn(`Invoice not found: ${progressRecord.invoiceId}`);
           setBatchProgressData(prev => {
             const updated = [...prev];
-            const invIdx = updated.findIndex(p => p.invoiceId === accRecord.invoiceId);
-            if (invIdx >= 0) {
-              updated[invIdx].steps.forEach(step => step.status = 'failed');
-            }
+            updated[batchIdx].steps.forEach((step: any) => step.status = 'failed');
             return updated;
           });
           continue;
         }
 
+        console.log(`\n🔄 PROCESSING: ${progressRecord.invoiceNumber} (${batchIdx + 1}/${batchProgressData.length})`);
+
         try {
-          console.log(`Processing invoice ${accRecord.invoiceNumber}...`);
+          // Fetch invoice lines
+          const linesUrl = `${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines?P_INVOICE_ID=${invoice.invoiceId}`;
+          const linesRes = await fetch(linesUrl);
+          const linesData = linesRes.ok ? await linesRes.json().catch(() => ({})) : {};
+          const allItems: any[] = linesData.items || (Array.isArray(linesData) ? linesData : []);
 
-          if (!previewPayload) {
-            setBatchProgressData(prev => {
-              const updated = [...prev];
-              const invIdx = updated.findIndex(p => p.invoiceId === accRecord.invoiceId);
-              if (invIdx >= 0) {
-                updated[invIdx].steps.forEach(step => step.status = 'failed');
-              }
-              return updated;
-            });
-            continue;
-          }
+          // Build payload for this invoice
+          const invoicePayload = {
+            header: {
+              sourceId: invoice.invoiceId,
+              sourceNumber: invoice.invoiceNumber,
+              sourceTable: 'AP_INVOICES',
+              eventType: 'AP_INVOICE_CREATION'
+            },
+            lines: allItems
+          };
 
-          // Build fresh steps for this invoice
-          const steps = buildPreviewDebugSteps(previewPayload);
-          setPreviewDebugSteps(steps);
+          // Build steps for this invoice
+          const steps = buildPreviewDebugSteps(invoicePayload);
 
           // Reset state for this invoice
+          setPreviewPayload(invoicePayload);
           setPreviewSlaHeaderId(null);
           setPreviewGlBatchId(null);
           setPreviewGlHeaderId(null);
@@ -2732,72 +2783,34 @@ const ManageInvoices: React.FC = () => {
           setPreviewSlaCheckResponse(null);
           setPreviewGlCheckResponse(null);
 
-          // Run all 8 steps for this invoice
-          for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
-            console.log(`\n[${accRecord.invoiceNumber}] === STARTING STEP ${stepIdx} ===`);
+          // Run all 8 steps using the same shared logic as debug dialog
+          const results = await executeAllSteps(steps, progressRecord.invoiceNumber);
 
-            try {
-              await runPreviewDebugStep(stepIdx);
-
-              // Capture step details from previewDebugSteps
-              const completedStep = previewDebugSteps[stepIdx];
-
-              // Mark step as success
-              setBatchProgressData(prev => {
-                const updated = [...prev];
-                const invIdx = updated.findIndex(p => p.invoiceId === accRecord.invoiceId);
-                if (invIdx >= 0 && stepIdx < updated[invIdx].steps.length) {
-                  updated[invIdx].steps[stepIdx].status = 'success';
-                  updated[invIdx].steps[stepIdx].url = completedStep?.url;
-                  updated[invIdx].steps[stepIdx].request = completedStep?.requestBody;
-                  updated[invIdx].steps[stepIdx].response = completedStep?.response;
-                  updated[invIdx].steps[stepIdx].responseStatus = completedStep?.status;
-                }
-                return updated;
-              });
-
-              console.log(`✓ [${accRecord.invoiceNumber}] Step ${stepIdx} completed`);
-            } catch (error) {
-              console.error(`✗ [${accRecord.invoiceNumber}] Step ${stepIdx} failed:`, error);
-
-              // Capture step details from previewDebugSteps
-              const completedStep = previewDebugSteps[stepIdx];
-
-              // Mark step as failed
-              setBatchProgressData(prev => {
-                const updated = [...prev];
-                const invIdx = updated.findIndex(p => p.invoiceId === accRecord.invoiceId);
-                if (invIdx >= 0 && stepIdx < updated[invIdx].steps.length) {
-                  updated[invIdx].steps[stepIdx].status = 'failed';
-                  updated[invIdx].steps[stepIdx].url = completedStep?.url;
-                  updated[invIdx].steps[stepIdx].request = completedStep?.requestBody;
-                  updated[invIdx].steps[stepIdx].response = completedStep?.response;
-                  updated[invIdx].steps[stepIdx].responseStatus = completedStep?.status;
-                }
-                return updated;
-              });
-            }
-
-            // Add delay between steps - give time for state updates
-            if (stepIdx < steps.length - 1) {
-              console.log(`⏳ [${accRecord.invoiceNumber}] Waiting 3 seconds before next step...`);
-              await new Promise(resolve => setTimeout(resolve, 3000));
-            }
-          }
+          // Update batch progress with results
+          setBatchProgressData(prev => {
+            const updated = [...prev];
+            results.forEach((result: any) => {
+              if (updated[batchIdx] && updated[batchIdx].steps[result.stepIdx]) {
+                updated[batchIdx].steps[result.stepIdx].status = result.status;
+                updated[batchIdx].steps[result.stepIdx].url = result.url;
+                updated[batchIdx].steps[result.stepIdx].request = result.request;
+                updated[batchIdx].steps[result.stepIdx].response = result.response;
+                updated[batchIdx].steps[result.stepIdx].responseStatus = result.responseStatus;
+              }
+            });
+            return updated;
+          });
 
           // Add delay between invoices
-          if (idx < selectedInvoices.length - 1) {
+          if (batchIdx < batchProgressData.length - 1) {
             console.log(`\n⏳ Waiting 3 seconds before next invoice...\n`);
             await new Promise(resolve => setTimeout(resolve, 3000));
           }
         } catch (error: any) {
-          console.error(`Error processing invoice ${accRecord.invoiceNumber}:`, error);
+          console.error(`Error processing invoice ${progressRecord.invoiceNumber}:`, error);
           setBatchProgressData(prev => {
             const updated = [...prev];
-            const invIdx = updated.findIndex(p => p.invoiceId === accRecord.invoiceId);
-            if (invIdx >= 0) {
-              updated[invIdx].steps.forEach(step => step.status = 'failed');
-            }
+            updated[batchIdx].steps.forEach((step: any) => step.status = 'failed');
             return updated;
           });
         }
@@ -2809,12 +2822,11 @@ const ManageInvoices: React.FC = () => {
       message.error(`Batch processing error: ${error.message}`);
     } finally {
       setBatchProcessing(false);
-      setBatchProgress({ current: 0, total: 0 });
     }
   };
 
   // Run individual debug step
-  const runPreviewDebugStep = async (stepIdx: number) => {
+  const runPreviewDebugStep = async (stepIdx: number, executionContext?: any) => {
     if (!previewPayload || !previewDebugSteps[stepIdx]) return;
 
     // Prevent concurrent execution of the same step
@@ -3010,7 +3022,11 @@ const ManageInvoices: React.FC = () => {
           // Store check response for Step 2 conditional
           setPreviewSlaCheckResponse(data);
           if (headerId) {
-            setPreviewSlaHeaderId(headerId);
+            if (executionContext?.setCapturedIds) {
+              executionContext.setCapturedIds({ slaHeaderId: headerId });
+            } else {
+              setPreviewSlaHeaderId(headerId);
+            }
             // Update Step 0.1 request body with the captured headerId
             setPreviewDebugSteps(prev => {
               const updated = [...prev];
@@ -3033,7 +3049,11 @@ const ManageInvoices: React.FC = () => {
           // Store check response for Step 3 conditional
           setPreviewGlCheckResponse(data);
           if (batchId) {
-            setPreviewGlBatchId(batchId);
+            if (executionContext?.setCapturedIds) {
+              executionContext.setCapturedIds({ glBatchId: batchId });
+            } else {
+              setPreviewGlBatchId(batchId);
+            }
             // Update Step 1.1 URL with the captured batchId
             setPreviewDebugSteps(prev => {
               const updated = [...prev];
@@ -3050,7 +3070,11 @@ const ManageInvoices: React.FC = () => {
           // SLA creation - extract and save SLA header ID
           const slaId = data.headerId || data.header_id;
           if (slaId) {
-            setPreviewSlaHeaderId(slaId);
+            if (executionContext?.setCapturedIds) {
+              executionContext.setCapturedIds({ slaHeaderId: slaId });
+            } else {
+              setPreviewSlaHeaderId(slaId);
+            }
             console.log('SLA created:', slaId);
             message.success(`✓ SLA Accounting created (ID: ${slaId})`);
           } else {
@@ -3077,7 +3101,11 @@ const ManageInvoices: React.FC = () => {
           const headerId = data.jeHeaderId || data.je_header_id || data.headerId || data.header_id;
 
           if (batchId) {
-            setPreviewGlBatchId(batchId);
+            if (executionContext?.setCapturedIds) {
+              executionContext.setCapturedIds({ glBatchId: batchId });
+            } else {
+              setPreviewGlBatchId(batchId);
+            }
             console.log('✓ GL journal created with Batch ID:', batchId);
             message.success(`✓ GL Journal created (Batch ID: ${batchId})`);
           } else {
@@ -3085,7 +3113,11 @@ const ManageInvoices: React.FC = () => {
             message.warning('⚠️ Step completed but Batch ID not found in response. Check console logs.');
           }
           if (headerId) {
-            setPreviewGlHeaderId(headerId);
+            if (executionContext?.setCapturedIds) {
+              executionContext.setCapturedIds({ glHeaderId: headerId });
+            } else {
+              setPreviewGlHeaderId(headerId);
+            }
           }
 
           // Capture batch name if available
@@ -3117,12 +3149,17 @@ const ManageInvoices: React.FC = () => {
     }
 
     try {
-      const result = await deleteSlaAccounting(previewSlaHeaderId);
-      if (result.success) {
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ headerId: previewSlaHeaderId })
+      });
+
+      if (res.ok) {
         message.success(`✓ SLA accounting (ID: ${previewSlaHeaderId}) deleted successfully`);
         setPreviewSlaHeaderId(null);
       } else {
-        message.error(`Failed to delete SLA: ${result.error || result.message}`);
+        message.error(`Failed to delete SLA: HTTP ${res.status}`);
       }
     } catch (err: any) {
       message.error(`Error deleting SLA: ${err.message}`);
@@ -3137,12 +3174,16 @@ const ManageInvoices: React.FC = () => {
     }
 
     try {
-      const result = await deleteGlJournal(previewGlBatchId);
-      if (result.success) {
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${previewGlBatchId}`, {
+        method: 'DELETE',
+        headers: { Accept: 'application/json' }
+      });
+
+      if (res.ok) {
         message.success(`✓ GL journal batch (ID: ${previewGlBatchId}) deleted successfully`);
         setPreviewGlBatchId(null);
       } else {
-        message.error(`Failed to delete GL journal: ${result.error || result.message}`);
+        message.error(`Failed to delete GL journal: HTTP ${res.status}`);
       }
     } catch (err: any) {
       message.error(`Error deleting GL journal: ${err.message}`);
@@ -3165,15 +3206,20 @@ const ManageInvoices: React.FC = () => {
         body: { headerId: idToDelete },
       });
 
-      const result = await deleteSlaAccounting(idToDelete);
-      console.log('📥 SLA Delete Response:', result);
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ headerId: idToDelete })
+      });
 
-      if (result.success) {
+      console.log('📥 SLA Delete Response Status:', res.status);
+
+      if (res.ok) {
         message.success(`✓ SLA (ID: ${idToDelete}) deleted successfully`);
         setManualSlaDeleteId('');
         setPreviewSlaHeaderId(null);
       } else {
-        message.error(`Failed to delete SLA: ${result.error || result.message}`);
+        message.error(`Failed to delete SLA: HTTP ${res.status}`);
       }
     } catch (err: any) {
       console.error('❌ SLA Delete Error:', err);
@@ -3197,15 +3243,19 @@ const ManageInvoices: React.FC = () => {
         body: 'No body (DELETE request)',
       });
 
-      const result = await deleteGlJournal(idToDelete);
-      console.log('📥 GL Delete Response:', result);
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${idToDelete}`, {
+        method: 'DELETE',
+        headers: { Accept: 'application/json' }
+      });
 
-      if (result.success) {
+      console.log('📥 GL Delete Response Status:', res.status);
+
+      if (res.ok) {
         message.success(`✓ GL Journal (ID: ${idToDelete}) deleted successfully`);
         setManualGlDeleteId('');
         setPreviewGlBatchId(null);
       } else {
-        message.error(`Failed to delete GL journal: ${result.error || result.message}`);
+        message.error(`Failed to delete GL journal: HTTP ${res.status}`);
       }
     } catch (err: any) {
       console.error('❌ GL Delete Error:', err);
