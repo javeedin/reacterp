@@ -1919,27 +1919,53 @@ const ManageInvoices: React.FC = () => {
     try {
       for (const invoice of displayedInvoices) {
         try {
-          const result = await getAccounting('AP_INVOICES', invoice.invoiceId);
-          if (result.found && result.lines && Array.isArray(result.lines)) {
-            let totalDebits = 0;
-            let totalCredits = 0;
-            let debitAccount = '';
-            let creditAccount = '';
+          // Query GL journal lines directly by reference2 (invoice ID) and reference5 (AP-INVOICE-CREATION)
+          console.log(`📍 Fetching GL journal lines for invoice ${invoice.invoiceNumber}:`, {
+            reference2: invoice.invoiceId,
+            reference5: 'AP-INVOICE-CREATION',
+          });
 
-            result.lines.forEach((line: any) => {
-              totalDebits += Number(line.enteredDr || line.accountedDr || 0);
-              totalCredits += Number(line.enteredCr || line.accountedCr || 0);
+          const glLinesUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${invoice.invoiceId}&reference5=AP-INVOICE-CREATION`;
+          const res = await fetch(glLinesUrl, {
+            headers: { Accept: 'application/json' }
+          });
 
-              // Extract debit account (first DR line)
-              if ((line.enteredDr || line.accountedDr) && !debitAccount) {
-                debitAccount = line.accountCombination || '';
-              }
-              // Extract credit account (first CR line)
-              if ((line.enteredCr || line.accountedCr) && !creditAccount) {
-                creditAccount = line.accountCombination || '';
-              }
-            });
+          if (!res.ok) {
+            console.warn(`Failed to fetch GL journal lines for ${invoice.invoiceNumber}: HTTP ${res.status}`);
+            continue;
+          }
 
+          const glLinesData = await res.json();
+          console.log(`📥 GL Journal Lines for ${invoice.invoiceNumber}:`, glLinesData);
+
+          if (!Array.isArray(glLinesData) || glLinesData.length === 0) {
+            continue;
+          }
+
+          // Process GL journal lines to extract accounting data
+          let totalDebits = 0;
+          let totalCredits = 0;
+          let debitAccount = '';
+          let creditAccount = '';
+
+          glLinesData.forEach((line: any) => {
+            const dr = Number(line.enteredDr || line.accountedDr || 0);
+            const cr = Number(line.enteredCr || line.accountedCr || 0);
+            totalDebits += dr;
+            totalCredits += cr;
+
+            // Extract debit account (first DR line)
+            if (dr > 0 && !debitAccount) {
+              debitAccount = line.accountCombination || '';
+            }
+            // Extract credit account (first CR line)
+            if (cr > 0 && !creditAccount) {
+              creditAccount = line.accountCombination || '';
+            }
+          });
+
+          // Only add if there are journal lines
+          if (totalDebits > 0 || totalCredits > 0) {
             data.push({
               invoiceNumber: invoice.invoiceNumber,
               invoiceId: invoice.invoiceId,
@@ -1947,11 +1973,11 @@ const ManageInvoices: React.FC = () => {
               credits: totalCredits,
               debitAccount,
               creditAccount,
-              lines: result.lines,
+              lines: glLinesData,
             });
           }
         } catch (e) {
-          console.error(`Failed to fetch accounting for ${invoice.invoiceNumber}:`, e);
+          console.error(`Failed to fetch GL journal lines for ${invoice.invoiceNumber}:`, e);
         }
       }
       setAccountingAllData(data);
@@ -1970,11 +1996,54 @@ const ManageInvoices: React.FC = () => {
     setAccountingSingleLoading(true);
 
     try {
-      const result = await getAccounting('AP_INVOICES', record.invoiceId);
-      setAccountingSingleData(result);
-    } catch (error) {
-      message.error(`Failed to fetch accounting for ${record.invoiceNumber}`);
-      console.error(error);
+      // Query GL journal lines directly by reference2 (invoice ID) and reference5 (AP-INVOICE-CREATION)
+      const glLinesUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${record.invoiceId}&reference5=AP-INVOICE-CREATION`;
+
+      console.log('📍 Fetching GL journal lines:', {
+        reference2: record.invoiceId,
+        reference5: 'AP-INVOICE-CREATION',
+        endpoint: glLinesUrl
+      });
+
+      const res = await fetch(glLinesUrl, {
+        headers: { Accept: 'application/json' }
+      });
+
+      if (!res.ok) {
+        throw new Error(`Failed to fetch GL journal lines: HTTP ${res.status}`);
+      }
+
+      const glLinesData = await res.json();
+      console.log('📥 GL Journal Lines Response:', glLinesData);
+
+      // Extract journal info from response
+      let lines: any[] = [];
+      let headerId: number | null = null;
+      let batchId: number | null = null;
+      let accountingStatus = 'N/A';
+      let accountingDate = record.invoiceDate;
+
+      if (Array.isArray(glLinesData)) {
+        lines = glLinesData;
+        if (lines.length > 0) {
+          headerId = lines[0].je_header_id || lines[0].jeHeaderId || lines[0].headerId;
+          batchId = lines[0].je_batch_id || lines[0].jeBatchId || lines[0].batchId;
+          accountingStatus = lines[0].status || 'N/A';
+          accountingDate = lines[0].defaultEffectiveDate || lines[0].createdDate || record.invoiceDate;
+        }
+      }
+
+      setAccountingSingleData({
+        found: true,
+        headerId,
+        batchId,
+        accountingStatus,
+        accountingDate,
+        lines,
+      });
+    } catch (error: any) {
+      message.error(`Failed to fetch GL journal lines for ${record.invoiceNumber}: ${error.message}`);
+      console.error('Error fetching GL journal lines:', error);
     } finally {
       setAccountingSingleLoading(false);
     }
