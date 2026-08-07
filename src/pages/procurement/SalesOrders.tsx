@@ -5853,8 +5853,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                   <Col xs={24} sm={12} md={6}><VSection icon={<DollarOutlined />} title="Totals" color={REDWOOD.success}>
                     <Row gutter={8} style={{ marginBottom: 4 }}>
                       <Col span={14}><Form.Item label="Txn Currency" name="txnCurrency" layout="vertical" labelCol={{ span: 24 }} wrapperCol={{ span: 24 }} style={{ marginBottom: 2 }}>
-                        <Select showSearch options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
-                      <Col span={10}><Form.Item label="Rate" name="rate" layout="vertical" labelCol={{ span: 24 }} wrapperCol={{ span: 24 }} style={{ marginBottom: 2 }}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+                        <Select showSearch onChange={() => onTxnCurrencyChange(form)} options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
+                      <Col span={10}><Form.Item label="Rate" name="rate" layout="vertical" labelCol={{ span: 24 }} wrapperCol={{ span: 24 }} style={{ marginBottom: 2 }}><InputNumber min={0} placeholder="Auto" style={{ width: '100%' }} /></Form.Item></Col>
+                    </Row>
+                    <Row gutter={8} style={{ marginBottom: 4 }}>
+                      <Col span={14}><Form.Item label="Rate Type" name="currencyRateType" layout="vertical" labelCol={{ span: 24 }} wrapperCol={{ span: 24 }} style={{ marginBottom: 2 }}>
+                        <Select options={[{ value: 'Corporate', label: 'Corporate' }, { value: 'Spot', label: 'Spot' }, { value: 'User', label: 'User' }]} /></Form.Item></Col>
+                      <Col span={10}><Form.Item label="Currency Date" name="currencyDate" layout="vertical" labelCol={{ span: 24 }} wrapperCol={{ span: 24 }} style={{ marginBottom: 2 }}><DatePicker style={{ width: '100%' }} /></Form.Item></Col>
                     </Row>
                     <TotalLine label="Gross" value={fmtAmount(totAmt, ccy)} />
                     <TotalLine label="Tax (from lines)" value={fmtAmount(lineTax, ccy)} />
