@@ -545,6 +545,8 @@ const ManageInvoices: React.FC = () => {
   const [slaDuplicateExists, setSlaDuplicateExists] = useState(false);
   const [glDuplicateExists, setGlDuplicateExists] = useState(false);
   const [executingStepIdx, setExecutingStepIdx] = useState<number | null>(null);
+  const [batchProcessing, setBatchProcessing] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
 
 
   const openMpaModal = async (record: InvoiceRecord) => {
@@ -2623,6 +2625,99 @@ const ManageInvoices: React.FC = () => {
     }
   };
 
+  // Batch run all steps for multiple selected invoices
+  const runBatchReCreateAccounting = async () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('Select at least one invoice');
+      return;
+    }
+
+    const selectedInvoices = invoices.filter(inv => selectedRowKeys.includes(inv.key));
+
+    if (selectedInvoices.length === 0) {
+      message.warning('No valid invoices selected');
+      return;
+    }
+
+    setBatchProcessing(true);
+    setBatchProgress({ current: 0, total: selectedInvoices.length });
+
+    const results: { invoiceNumber: string; status: 'success' | 'failed'; message: string }[] = [];
+
+    try {
+      for (let idx = 0; idx < selectedInvoices.length; idx++) {
+        const invoice = selectedInvoices[idx];
+        setBatchProgress({ current: idx + 1, total: selectedInvoices.length });
+
+        try {
+          console.log(`Processing invoice ${invoice.invoiceNumber}...`);
+
+          // Build payload for this invoice
+          if (!previewPayload) {
+            results.push({
+              invoiceNumber: invoice.invoiceNumber,
+              status: 'failed',
+              message: 'No accounting payload available',
+            });
+            continue;
+          }
+
+          // Build fresh steps for this invoice
+          const steps = buildPreviewDebugSteps(previewPayload);
+          setPreviewDebugSteps(steps);
+
+          // Reset state for this invoice
+          setPreviewSlaHeaderId(null);
+          setPreviewGlBatchId(null);
+          setPreviewGlHeaderId(null);
+          setPreviewGlBatchName('');
+          setPreviewSlaCheckResponse(null);
+          setPreviewGlCheckResponse(null);
+
+          // Run all 8 steps for this invoice
+          for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
+            if (stepIdx > 0) {
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+            await runPreviewDebugStep(stepIdx);
+          }
+
+          results.push({
+            invoiceNumber: invoice.invoiceNumber,
+            status: 'success',
+            message: 'All steps completed',
+          });
+
+          // Add delay between invoices
+          if (idx < selectedInvoices.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        } catch (error: any) {
+          results.push({
+            invoiceNumber: invoice.invoiceNumber,
+            status: 'failed',
+            message: error.message,
+          });
+        }
+      }
+
+      // Show results
+      const successCount = results.filter(r => r.status === 'success').length;
+      const failedCount = results.filter(r => r.status === 'failed').length;
+
+      message.success(
+        `✓ Batch completed! Success: ${successCount}, Failed: ${failedCount}`
+      );
+
+      console.log('Batch Results:', results);
+    } catch (error: any) {
+      message.error(`Batch processing error: ${error.message}`);
+    } finally {
+      setBatchProcessing(false);
+      setBatchProgress({ current: 0, total: 0 });
+    }
+  };
+
   // Run individual debug step
   const runPreviewDebugStep = async (stepIdx: number) => {
     if (!previewPayload || !previewDebugSteps[stepIdx]) return;
@@ -3657,6 +3752,28 @@ const ManageInvoices: React.FC = () => {
                     Show Accounting for All Invoices
                   </Button>
                 </Tooltip>
+                <Tooltip title={
+                  selectedRowKeys.length === 0
+                    ? 'Select one or more invoices to batch run Re-Create Accounting'
+                    : `Run Re-Create Accounting for ${selectedRowKeys.length} selected invoice(s)`
+                }>
+                  <Button
+                    size="small"
+                    icon={<ApiOutlined />}
+                    style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
+                    disabled={selectedRowKeys.length === 0}
+                    loading={batchProcessing}
+                    onClick={runBatchReCreateAccounting}
+                  >
+                    Batch Run Re-Create A/C ({selectedRowKeys.length})
+                  </Button>
+                </Tooltip>
+                {batchProcessing && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Progress type="circle" percent={Math.round((batchProgress.current / batchProgress.total) * 100)} width={40} />
+                    <Text>{batchProgress.current} of {batchProgress.total}</Text>
+                  </div>
+                )}
                 <Tooltip title={
                   selectedRowKeys.length === 0
                     ? 'Select one or more invoices to fetch applied prepayments from Oracle Fusion'
