@@ -2517,17 +2517,17 @@ const ManageInvoices: React.FC = () => {
 
     return [
       {
-        step: '0 — Delete SLA',
-        method: 'DELETE',
-        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?sourceTable=AP_INVOICES&sourceId=${invoiceId}&eventType=AP_INVOICE_CREATION`,
+        step: '0 — Check if SLA Exists',
+        method: 'GET',
+        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${invoiceId}&eventType=AP_INVOICE_CREATION`,
         requestBody: null,
         status: undefined,
         response: undefined,
       },
       {
-        step: '1 — Delete GL',
-        method: 'DELETE',
-        url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/delete?reference1=${invoiceNumber}&reference2=${invoiceId}&reference5=AP-INVOICE-CREATION`,
+        step: '1 — Check if GL Exists',
+        method: 'GET',
+        url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/check?reference1=${invoiceNumber}&reference2=${invoiceId}&reference5=AP-INVOICE-CREATION`,
         requestBody: null,
         status: undefined,
         response: undefined,
@@ -2697,11 +2697,13 @@ const ManageInvoices: React.FC = () => {
 
       if (res.ok) {
         if (stepIdx === 0) {
-          // SLA deletion - show result
-          message.success('✓ SLA deleted successfully');
+          // SLA check - show if exists
+          const exists = data.exists || data.header_exists || false;
+          message.success(exists ? '⚠️ SLA exists - please delete manually first' : '✓ No SLA found - safe to create');
         } else if (stepIdx === 1) {
-          // GL deletion - show result
-          message.success('✓ GL deleted successfully');
+          // GL check - show if exists
+          const exists = data.exists || data.journal_exists || data.items?.length > 0 || false;
+          message.success(exists ? '⚠️ GL exists - please delete manually first' : '✓ No GL found - safe to create');
         } else if (stepIdx === 2) {
           // SLA creation - extract and save SLA header ID
           const slaId = data.headerId || data.header_id;
