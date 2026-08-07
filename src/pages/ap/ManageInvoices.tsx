@@ -544,6 +544,17 @@ const ManageInvoices: React.FC = () => {
   const [glDuplicateExists, setGlDuplicateExists] = useState(false);
   const [executingStepIdx, setExecutingStepIdx] = useState<number | null>(null);
 
+  // Re-Create AC (Run All Sequence) state
+  const [recreateAcModalOpen, setRecreateAcModalOpen] = useState(false);
+  const [recreateAcRunning, setRecreateAcRunning] = useState(false);
+  const [recreateAcSteps, setRecreateAcSteps] = useState<Array<{
+    step: string;
+    status: 'pending' | 'in-progress' | 'completed' | 'error';
+    message?: string;
+    response?: any;
+  }>>([]);
+  const [selectedInvoiceForRecreate, setSelectedInvoiceForRecreate] = useState<InvoiceRecord | null>(null);
+
   const openMpaModal = async (record: InvoiceRecord) => {
     setMpaModalRecord(record);
     setMpaModalData(null);
@@ -2563,6 +2574,295 @@ const ManageInvoices: React.FC = () => {
     setPreviewGlBatchName('');
   };
 
+  // Execute full Re-Create AC sequence: Query SLA → Query GL → Delete SLA → Delete GL → Create SLA → Create GL → POST GL → POST SLA → Stamp GL IDs
+  const executeRecreateAcSequence = async () => {
+    if (!selectedInvoiceForRecreate) return;
+
+    const inv = selectedInvoiceForRecreate;
+    setRecreateAcRunning(true);
+
+    try {
+      // Fetch invoice lines to build payloads
+      const linesRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines?P_INVOICE_ID=${inv.invoiceId}`, { headers: { Accept: 'application/json' } });
+      const linesData = linesRes.ok ? await linesRes.json().catch(() => ({})) : {};
+
+      const allItems: any[] = linesData.items || (Array.isArray(linesData) ? linesData : []);
+      const rawLines: any[] = allItems.filter((item: any) => item.line_type !== 'Tax' && item.line_type !== 'TAX');
+      const rawTaxLines: any[] = allItems.filter((item: any) => item.line_type === 'Tax' || item.line_type === 'TAX');
+
+      // Build payload (simplified from buildPreviewDebugSteps)
+      const invoiceDate = dayjs(inv.invoiceDate || new Date());
+      const acctDate = invoiceDate.format('YYYY-MM-DD');
+      const periodName = `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][invoiceDate.month()]}-${invoiceDate.format('YY')}`;
+      const conversionRate = inv.conversionRate || 1;
+      const currency = inv.invoiceCurrency || 'AED';
+
+      // Process lines into accounting entries
+      const lines: any[] = [];
+      rawLines.forEach((line: any, idx: number) => {
+        const lineTotalDr = (line.line_amount || 0) * (1 + (line.tax_percent || 0) / 100);
+        lines.push({
+          lineNumber: idx + 1,
+          lineType: 'DR',
+          accountingClass: line.accounting_class || 'EXPENSE',
+          accountCombination: line.account_combination || '',
+          enteredDr: lineTotalDr,
+          enteredCr: 0,
+          description: line.line_description || '',
+          reference3: line.accounting_class || 'EXPENSE',
+          reference4: inv.businessUnit || '',
+        });
+      });
+
+      rawTaxLines.forEach((line: any, idx: number) => {
+        lines.push({
+          lineNumber: rawLines.length + idx + 1,
+          lineType: 'DR',
+          accountingClass: 'TAX',
+          accountCombination: line.account_combination || '',
+          enteredDr: line.line_amount || 0,
+          enteredCr: 0,
+          description: line.line_description || '',
+          reference3: 'TAX',
+          reference4: inv.businessUnit || '',
+        });
+      });
+
+      const totalDr = lines.filter(l => l.lineType === 'DR').reduce((s, l) => s + l.enteredDr, 0);
+      lines.push({
+        lineNumber: lines.length + 1,
+        lineType: 'CR',
+        accountingClass: 'PAYABLE',
+        accountCombination: inv.apAccount || '',
+        enteredDr: 0,
+        enteredCr: totalDr,
+        description: `AP Liability - ${inv.invoiceNumber}`,
+        reference3: 'PAYABLE',
+        reference4: inv.businessUnit || '',
+      });
+
+      const batchName = `AP-${inv.invoiceNumber}-${dayjs().format('YYYYMMDD-HHmmss')}`;
+      const ledgerName = inv.ledgerName || 'BCL DIFC';
+      const ledgerId = inv.ledgerId || 300000003259529;
+
+      // Build SLA payload
+      const slaPayload = {
+        header: {
+          moduleName: 'AP',
+          sourceTable: 'AP_INVOICES',
+          sourceId: inv.invoiceId,
+          sourceNumber: inv.invoiceNumber,
+          sourceType: 'STANDARD',
+          eventTypeCode: 'AP_INVOICE_CREATION',
+          eventDate: acctDate,
+          accountingDate: acctDate,
+          periodName: periodName,
+          ledgerId,
+          ledgerName,
+          ledgerCurrency: currency,
+          businessUnit: inv.businessUnit || '',
+          currencyCode: currency,
+          exchangeRate: conversionRate,
+          exchangeRateType: 'User',
+          description: `Invoice ${inv.invoiceNumber}`,
+          createdBy: 'user',
+        },
+        lines: lines.map(l => ({
+          lineNumber: l.lineNumber,
+          lineType: l.lineType,
+          accountingClass: l.accountingClass,
+          accountCombination: l.accountCombination,
+          enteredDr: l.enteredDr,
+          enteredCr: l.enteredCr,
+          currencyCode: currency,
+          exchangeRate: conversionRate,
+          exchangeRateType: 'User',
+          description: l.description,
+          sourceLineId: inv.invoiceId,
+          sourceLineNumber: l.lineNumber,
+        })),
+      };
+
+      // Build GL journal payload
+      const journalPayload = {
+        batch: {
+          batchName,
+          batchDescription: `AP Invoice ${inv.invoiceNumber} – Posted from SLA`,
+          ledgerName,
+          ledgerId,
+          status: 'NEW',
+          accountingPeriod: periodName,
+          controlTotal: totalDr,
+          runningTotalDr: totalDr,
+          runningTotalCr: totalDr,
+          batchSource: 'Payables',
+          createdBy: 'user',
+        },
+        header: {
+          ledgerId,
+          ledgerName,
+          jeCategory: 'Purchase Invoices',
+          jeSource: 'Payables',
+          periodName,
+          journalName: `AP Invoice ${inv.invoiceNumber}`,
+          description: `Subledger accounting – Invoice ${inv.invoiceNumber}`,
+          currencyCode: currency,
+          currencyConversionType: 'User',
+          currencyConversionDate: acctDate,
+          currencyConversionRate: conversionRate,
+          defaultEffectiveDate: acctDate,
+          status: 'NEW',
+          runningTotalDr: totalDr,
+          runningTotalCr: totalDr,
+          createdBy: 'user',
+        },
+        lines: lines.map(l => ({
+          enteredDr: l.lineType === 'DR' ? l.enteredDr : null,
+          enteredCr: l.lineType === 'CR' ? l.enteredCr : null,
+          accountedDr: l.lineType === 'DR' ? (l.enteredDr * conversionRate) : null,
+          accountedCr: l.lineType === 'CR' ? (l.enteredCr * conversionRate) : null,
+          description: l.description,
+          currencyCode: currency,
+          currencyConversionDate: acctDate,
+          currencyConversionRate: conversionRate,
+          userCurrencyConversionType: 'User',
+          accountCombination: l.accountCombination,
+          reference1: inv.invoiceNumber,
+          reference2: String(inv.invoiceId),
+          reference3: l.reference3,
+          reference4: l.reference4,
+          reference5: 'AP-INVOICE-CREATION',
+          reconciledFlag: 'N',
+          createdBy: 'user',
+        })),
+      };
+
+      let slaHeaderId: number | null = null;
+      let glBatchId: number | null = null;
+      let glHeaderId: number | null = null;
+      let slaExists = false;
+      let glExists = false;
+
+      // Step 1: Query SLA
+      const updateStep = (stepIdx: number, status: 'pending' | 'in-progress' | 'completed' | 'error', message?: string, response?: any) => {
+        setRecreateAcSteps(prev => {
+          const updated = [...prev];
+          if (updated[stepIdx]) {
+            updated[stepIdx] = { ...updated[stepIdx], status, message, response };
+          }
+          return updated;
+        });
+      };
+
+      // Query SLA
+      updateStep(0, 'in-progress');
+      const querySlaRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${inv.invoiceId}&eventType=AP_INVOICE_CREATION`, { headers: { Accept: 'application/json' } });
+      const slaQueryData = querySlaRes.ok ? await querySlaRes.json() : {};
+      slaExists = slaQueryData.exists || slaQueryData.header_exists || false;
+      slaHeaderId = slaQueryData.headerId || slaQueryData.header_id || null;
+      updateStep(0, 'completed', slaExists ? `SLA exists (ID: ${slaHeaderId})` : 'No SLA found', slaQueryData);
+
+      // Query GL
+      updateStep(1, 'in-progress');
+      const queryGlRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/check?reference1=${inv.invoiceNumber}&reference2=${inv.invoiceId}&reference5=AP-INVOICE-CREATION`, { headers: { Accept: 'application/json' } });
+      const glQueryData = queryGlRes.ok ? await queryGlRes.json() : {};
+      glExists = glQueryData.exists || glQueryData.journal_exists || glQueryData.items?.length > 0 || false;
+      glBatchId = glQueryData.batchId || glQueryData.batch_id || glQueryData.jeBatchId || glQueryData.je_batch_id || null;
+      updateStep(1, 'completed', glExists ? `GL exists (ID: ${glBatchId})` : 'No GL found', glQueryData);
+
+      // Delete SLA if exists
+      if (slaExists && slaHeaderId) {
+        updateStep(2, 'in-progress');
+        try {
+          const delSlaRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete/${slaHeaderId}`, { method: 'DELETE', headers: { Accept: 'application/json' } });
+          const delSlaData = delSlaRes.ok ? await delSlaRes.json() : { message: 'Deleted' };
+          updateStep(2, 'completed', 'SLA deleted', delSlaData);
+        } catch (e: any) {
+          updateStep(2, 'error', `Error: ${e.message}`);
+          throw e;
+        }
+      } else {
+        updateStep(2, 'completed', 'No SLA to delete');
+      }
+
+      // Delete GL if exists
+      if (glExists && glBatchId) {
+        updateStep(3, 'in-progress');
+        try {
+          const delGlRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${glBatchId}`, { method: 'DELETE', headers: { Accept: 'application/json' } });
+          const delGlData = delGlRes.ok ? await delGlRes.json() : { message: 'Deleted' };
+          updateStep(3, 'completed', 'GL deleted', delGlData);
+        } catch (e: any) {
+          updateStep(3, 'error', `Error: ${e.message}`);
+          throw e;
+        }
+      } else {
+        updateStep(3, 'completed', 'No GL to delete');
+      }
+
+      // Create SLA
+      updateStep(4, 'in-progress');
+      const createSlaRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(slaPayload),
+      });
+      const createSlaData = await createSlaRes.json();
+      if (!createSlaRes.ok) throw new Error(createSlaData.message || 'Failed to create SLA');
+      slaHeaderId = createSlaData.headerId || createSlaData.header_id;
+      updateStep(4, 'completed', `SLA created (ID: ${slaHeaderId})`, createSlaData);
+
+      // Create GL
+      updateStep(5, 'in-progress');
+      const createGlRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/journals/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(journalPayload),
+      });
+      const createGlData = await createGlRes.json();
+      if (!createGlRes.ok) throw new Error(createGlData.message || 'Failed to create GL');
+      glBatchId = createGlData.jeBatchId || createGlData.je_batch_id || createGlData.batchId || createGlData.batch_id;
+      glHeaderId = createGlData.jeHeaderId || createGlData.je_header_id || createGlData.headerId || createGlData.header_id;
+      updateStep(5, 'completed', `GL created (Batch ID: ${glBatchId})`, createGlData);
+
+      // POST GL
+      updateStep(6, 'in-progress');
+      const postGlRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/${glBatchId}/post`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      });
+      const postGlData = postGlRes.ok ? await postGlRes.json() : { message: 'Posted' };
+      updateStep(6, 'completed', 'GL posted', postGlData);
+
+      // POST SLA
+      updateStep(7, 'in-progress');
+      const postSlaRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ headerId: slaHeaderId, postedBy: 'user' }),
+      });
+      const postSlaData = postSlaRes.ok ? await postSlaRes.json() : { message: 'Posted' };
+      updateStep(7, 'completed', 'SLA posted', postSlaData);
+
+      // Stamp GL IDs on SLA Header
+      updateStep(8, 'in-progress');
+      const stampRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/sla/accounting/stamp-gl-ids`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ headerId: slaHeaderId, glBatchId, glBatchName: batchName, glHeaderId, stampedBy: 'user' }),
+      });
+      const stampData = stampRes.ok ? await stampRes.json() : { message: 'Stamped' };
+      updateStep(8, 'completed', 'GL IDs stamped on SLA Header', stampData);
+
+      message.success('✓ Re-Create AC sequence completed successfully!');
+    } catch (error: any) {
+      console.error('Re-Create AC sequence error:', error);
+      message.error(`Sequence failed: ${error.message}`);
+    } finally {
+      setRecreateAcRunning(false);
+    }
+  };
+
   // Run individual debug step
   const runPreviewDebugStep = async (stepIdx: number) => {
     if (!previewPayload || !previewDebugSteps[stepIdx]) return;
@@ -3505,6 +3805,43 @@ const ManageInvoices: React.FC = () => {
                     }}
                   >
                     Show Accounting for All Invoices
+                  </Button>
+                </Tooltip>
+                <Tooltip title={
+                  selectedRowKeys.length === 0
+                    ? 'Select one invoice to run full accounting recreation sequence'
+                    : selectedRowKeys.length === 1
+                      ? `Run Re-Create AC for invoice ${invoices.find(i => i.key === selectedRowKeys[0])?.invoiceNumber || ''}`
+                      : 'Select only one invoice to run Re-Create AC'
+                }>
+                  <Button
+                    size="small"
+                    icon={<SyncOutlined />}
+                    style={{ color: '#ff7a45', borderColor: '#ff7a45' }}
+                    disabled={selectedRowKeys.length !== 1}
+                    loading={recreateAcRunning}
+                    onClick={() => {
+                      if (selectedRowKeys.length === 1) {
+                        const rec = invoices.find(i => i.key === selectedRowKeys[0]);
+                        if (rec) {
+                          setSelectedInvoiceForRecreate(rec);
+                          setRecreateAcModalOpen(true);
+                          setRecreateAcSteps([
+                            { step: 'Query SLA', status: 'pending' },
+                            { step: 'Query GL Journal Lines', status: 'pending' },
+                            { step: 'Delete SLA', status: 'pending' },
+                            { step: 'Delete GL', status: 'pending' },
+                            { step: 'Create SLA', status: 'pending' },
+                            { step: 'Create GL', status: 'pending' },
+                            { step: 'POST GL', status: 'pending' },
+                            { step: 'POST SLA', status: 'pending' },
+                            { step: 'Stamp GL IDs on SLA Header', status: 'pending' },
+                          ]);
+                        }
+                      }
+                    }}
+                  >
+                    Run Re-Create AC
                   </Button>
                 </Tooltip>
                 <Tooltip title={
@@ -6228,6 +6565,145 @@ const ManageInvoices: React.FC = () => {
           )}
         </div>
       </Drawer>
+
+      {/* Run Re-Create AC Modal */}
+      <Modal
+        title={
+          <Space>
+            <SyncOutlined style={{ color: '#ff7a45' }} spin={recreateAcRunning} />
+            <span>Run Re-Create AC — {selectedInvoiceForRecreate?.invoiceNumber}</span>
+          </Space>
+        }
+        open={recreateAcModalOpen}
+        onCancel={() => {
+          if (!recreateAcRunning) {
+            setRecreateAcModalOpen(false);
+          }
+        }}
+        width={1000}
+        footer={[
+          <Button key="close" onClick={() => setRecreateAcModalOpen(false)} disabled={recreateAcRunning}>
+            Close
+          </Button>,
+          <Button
+            key="run"
+            type="primary"
+            loading={recreateAcRunning}
+            onClick={executeRecreateAcSequence}
+            disabled={!selectedInvoiceForRecreate}
+            icon={<SyncOutlined />}
+          >
+            Run All
+          </Button>,
+        ]}
+        styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
+        destroyOnClose
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="large">
+          {/* Info Alert */}
+          <Alert
+            type="info"
+            message="This will execute the complete accounting recreation sequence:"
+            description="Query SLA → Query GL → Delete SLA → Delete GL → Create SLA → Create GL → POST GL → POST SLA → Stamp GL IDs on SLA Header"
+            showIcon
+          />
+
+          {/* Steps Progress */}
+          <div>
+            <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14 }}>Progress</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+              {recreateAcSteps.map((step, idx) => (
+                <Card
+                  key={idx}
+                  size="small"
+                  style={{
+                    background:
+                      step.status === 'completed' ? '#f6ffed' :
+                      step.status === 'error' ? '#fff1f0' :
+                      step.status === 'in-progress' ? '#e6f7ff' :
+                      '#fafafa',
+                    borderColor:
+                      step.status === 'completed' ? '#52c41a' :
+                      step.status === 'error' ? '#ff4d4f' :
+                      step.status === 'in-progress' ? '#1890ff' :
+                      '#d9d9d9',
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                    Step {idx + 1}
+                  </div>
+                  <div style={{ fontSize: 11, marginBottom: 6, color: REDWOOD.neutral600 }}>
+                    {step.step}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color:
+                        step.status === 'completed' ? '#52c41a' :
+                        step.status === 'error' ? '#ff4d4f' :
+                        step.status === 'in-progress' ? '#1890ff' :
+                        REDWOOD.neutral600,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {step.status === 'pending' && '⏳ Pending'}
+                    {step.status === 'in-progress' && '⏳ Running...'}
+                    {step.status === 'completed' && '✓ Completed'}
+                    {step.status === 'error' && '✕ Error'}
+                  </div>
+                  {step.message && (
+                    <div style={{ fontSize: 10, marginTop: 6, color: REDWOOD.neutral600, maxHeight: 60, overflow: 'auto' }}>
+                      {step.message}
+                    </div>
+                  )}
+                </Card>
+              ))}
+            </div>
+          </div>
+
+          {/* Response Log */}
+          {recreateAcSteps.some(s => s.response) && (
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14 }}>Response Log</div>
+              <Collapse
+                items={recreateAcSteps
+                  .map((step, idx) => ({
+                    key: String(idx),
+                    label: (
+                      <div>
+                        <span style={{ marginRight: 8 }}>Step {idx + 1}: {step.step}</span>
+                        {step.status === 'completed' && <Tag color="success">✓ Success</Tag>}
+                        {step.status === 'error' && <Tag color="error">✕ Error</Tag>}
+                      </div>
+                    ),
+                    children: step.response ? (
+                      <div
+                        style={{
+                          background: '#f5f5f5',
+                          padding: 12,
+                          borderRadius: 4,
+                          fontFamily: 'monospace',
+                          fontSize: 10,
+                          maxHeight: 300,
+                          overflowY: 'auto',
+                          whiteSpace: 'pre-wrap',
+                          wordWrap: 'break-word',
+                        }}
+                      >
+                        {JSON.stringify(step.response, null, 2)}
+                      </div>
+                    ) : (
+                      <div style={{ color: REDWOOD.neutral600 }}>No response yet</div>
+                    ),
+                  }))
+                  .filter(item => recreateAcSteps[Number(item.key)].response)}
+              />
+            </div>
+          )}
+        </Space>
+      </Modal>
 
       </Content>
 
