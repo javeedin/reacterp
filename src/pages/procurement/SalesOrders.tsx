@@ -5524,6 +5524,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         SupplierName: branchSupplier,
         ReceivingLocationCode: shipToLoc,
         TransactionalCurrencyCode: currency,
+        AppliedCurrencyCode: currency,
+        ...(header.rate != null ? { CurrencyConversionRate: Number(header.rate) } : {}),
+        ...(header.currencyRateType ? { CurrencyConversionType: header.currencyRateType } : {}),
+        ...(header.currencyDate ? { CurrencyConversionDate: header.currencyDate.format('YYYY-MM-DD') } : {}),
         Lines: poLines,
       };
 
