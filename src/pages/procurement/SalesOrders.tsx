@@ -3257,6 +3257,9 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
   const custOptions = useMemo(() => custOptionList(customers), [customers]);
   const [subs, setSubs] = useState<string[]>([]);
   const [orderTypeOpts, setOrderTypeOpts] = useState<any[]>([]);
+  const [orderTypeLookup, setOrderTypeLookup] = useState<Map<string, any>>(new Map());
+  const [branchSalesModalOpen, setBranchSalesModalOpen] = useState(false);
+  const [branchForm] = Form.useForm();
   const [custSearchModalOpen, setCustSearchModalOpen] = useState(false);
   const instance = getFusionInstance();
 
@@ -3284,11 +3287,16 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
       .then(d => {
         const items = d.items ?? [];
         if (items.length > 0 && items[0].lookupCodes) {
+          const lookupMap = new Map<string, any>();
           const opts = items[0].lookupCodes
             .filter((lc: any) => lc.EnabledFlag === 'Y')
-            .map((lc: any) => ({ value: lc.LookupCode, label: lc.Meaning }))
+            .map((lc: any) => {
+              lookupMap.set(lc.LookupCode, lc);
+              return { value: lc.LookupCode, label: lc.Meaning };
+            })
             .sort((a: any, b: any) => a.label.localeCompare(b.label));
           setOrderTypeOpts(opts);
+          setOrderTypeLookup(lookupMap);
         }
       })
       .catch(err => {
@@ -3370,6 +3378,14 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
     }
   };
 
+  const onOrderTypeChange = (orderTypeCode: string) => {
+    const lookupDetail = orderTypeLookup.get(orderTypeCode);
+    if (lookupDetail && lookupDetail.Tag === 'BRANCH SALES') {
+      message.info('⚠️ This is a Branch Sales order. Additional branch details will be required after saving.');
+      // Could open branch sales details form here if needed
+    }
+  };
+
   const submit = () => form.validateFields().then(() => {
     // getFieldsValue(true) keeps values set via setFieldsValue that have no
     // Form.Item (customer ids, sites, addresses); add the BU id from its row.
@@ -3413,7 +3429,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
             <Select disabled={!buName} placeholder="Rate type" size="small" options={[{ value: 'Corporate', label: 'Corporate' }, { value: 'Spot', label: 'Spot' }, { value: 'User', label: 'User' }]} /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Currency Date" name="currencyDate" style={{ marginBottom: 8 }}><DatePicker disabled={!buName} style={{ width: '100%' }} size="small" /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Order Type" name="orderType" rules={req('Order type')} style={{ marginBottom: 8 }}>
-            <Select showSearch disabled={!buName} placeholder="Select order type" size="small" loading={orderTypeOpts.length === 0} options={orderTypeOpts} /></Form.Item></Col>
+            <Select showSearch disabled={!buName} placeholder="Select order type" size="small" loading={orderTypeOpts.length === 0} onChange={onOrderTypeChange} options={orderTypeOpts} /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')} style={{ marginBottom: 0 }}><DatePicker disabled={!buName} style={{ width: '100%' }} size="small" /></Form.Item></Col>
         </Section>
 
