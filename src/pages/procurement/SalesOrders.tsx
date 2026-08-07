@@ -3331,7 +3331,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
 
     // Set default rate type and date
     frm.setFieldsValue({
-      currencyRateType: 'Corporate',
+      currencyRateType: 'User',
       currencyDate: orderDate || dayjs()
     });
 
@@ -4377,7 +4377,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
     // Set default rate type and date
     frm.setFieldsValue({
-      currencyRateType: 'Corporate',
+      currencyRateType: 'User',
       currencyDate: orderDate || dayjs()
     });
 
