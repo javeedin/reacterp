@@ -536,6 +536,8 @@ const ManageInvoices: React.FC = () => {
   const [previewDebugOpen, setPreviewDebugOpen] = useState(false);
   const [previewSlaHeaderId, setPreviewSlaHeaderId] = useState<number | null>(null);
   const [previewGlBatchId, setPreviewGlBatchId] = useState<number | null>(null);
+  const [previewSlaCheckResponse, setPreviewSlaCheckResponse] = useState<any>(null);
+  const [previewGlCheckResponse, setPreviewGlCheckResponse] = useState<any>(null);
   const [previewGlHeaderId, setPreviewGlHeaderId] = useState<number | null>(null);
   const [previewGlBatchName, setPreviewGlBatchName] = useState<string>('');
   const [manualSlaDeleteId, setManualSlaDeleteId] = useState<string>('');
@@ -2645,6 +2647,29 @@ const ManageInvoices: React.FC = () => {
     setLoading(true);
 
     try {
+      // Conditional checks before creating SLA and GL
+      // Step 4 (Create SLA) - check if Step 0 (Check SLA) allows creation
+      if (stepIdx === 4) {
+        const canCreate = previewSlaCheckResponse?.canCreate !== false;
+        if (!canCreate) {
+          message.warning('⏭️ Cannot create SLA - Check response indicates it already exists or is in an invalid state');
+          setExecutingStepIdx(null);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Step 5 (Create GL) - check if Step 2 (Check GL) allows creation
+      if (stepIdx === 5) {
+        const exists = previewGlCheckResponse?.exists || previewGlCheckResponse?.journal_exists || false;
+        if (exists) {
+          message.warning('⏭️ Cannot create GL - Check response indicates GL Journal already exists');
+          setExecutingStepIdx(null);
+          setLoading(false);
+          return;
+        }
+      }
+
       const step = previewDebugSteps[stepIdx];
       const opts: RequestInit = {
         method: step.method,
@@ -2713,9 +2738,11 @@ const ManageInvoices: React.FC = () => {
 
       if (res.ok) {
         if (stepIdx === 0) {
-          // SLA check - capture headerid for deletion and update Step 0.1 request body
+          // SLA check - capture response and prepare deletion
           const exists = data.exists || data.header_exists || false;
           const headerId = data.headerId || data.header_id;
+          // Store check response for Step 2 conditional
+          setPreviewSlaCheckResponse(data);
           if (headerId) {
             setPreviewSlaHeaderId(headerId);
             // Update Step 0.1 request body with the captured headerId
@@ -2731,12 +2758,14 @@ const ManageInvoices: React.FC = () => {
           // SLA delete
           message.success('✓ SLA deleted successfully');
         } else if (stepIdx === 2) {
-          // GL check - capture batchid for deletion and update Step 1.1 URL
+          // GL check - capture response and prepare deletion
           const exists = data.exists || data.journal_exists || data.items?.length > 0 || false;
           let batchId = data.jeBatchId || data.je_batch_id || data.batchId || data.batch_id;
           if (!batchId && data.items?.length > 0) {
             batchId = data.items[0].jeBatchId || data.items[0].je_batch_id || data.items[0].batchId;
           }
+          // Store check response for Step 3 conditional
+          setPreviewGlCheckResponse(data);
           if (batchId) {
             setPreviewGlBatchId(batchId);
             // Update Step 1.1 URL with the captured batchId
