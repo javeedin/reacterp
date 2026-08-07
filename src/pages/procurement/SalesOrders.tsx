@@ -35,6 +35,7 @@ const _isElectron = !!(window as unknown as { electron?: unknown; electronAPI?: 
 const FUSION_BASE = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
 const AUTH_HEADER = FUSION_POD_AUTH;
 const FUSION_HDRS = { Authorization: AUTH_HEADER, Accept: 'application/json' };
+const APEX_BASE = 'https://g15d6279501ae08-buimerc.adb.me-dubai-1.oraclecloudapps.com/ords/bcldifc/reerp';
 const PAGE_LIMIT = 500;
 
 const REDWOOD = {
@@ -3324,21 +3325,23 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
       return;
     }
 
-    // Fetch conversion rate from Fusion
+    // Fetch conversion rate from BMS rate webservice
     try {
       const checkDate = orderDate ? orderDate.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
-      const url = `${FUSION_BASE}/currencyConversionRates?q=FromCurrency=${baseCcy} and ToCurrency=${txnCcy} and ConversionDate='${checkDate}'&onlyData=true&limit=1`;
-      const res = await fetch(url, { headers: FUSION_HDRS });
+      const datePart = checkDate ? `&rate_date=${checkDate}` : '';
+      const url = `${APEX_BASE}/currencies/bmsrate?source_cur=${baseCcy}&target_cur=${txnCcy}${datePart}`;
+      const res = await fetch(url);
 
       if (res.ok) {
         const data = await res.json();
-        if (data.items && data.items.length > 0) {
-          const rate = data.items[0].ConversionRate || data.items[0].conversionRate;
-          frm.setFieldsValue({ rate: Number(rate) || 1 });
-          message.success(`✓ Conversion rate fetched: 1 ${baseCcy} = ${rate} ${txnCcy}`);
+        if (data.status === 'ok' && data.rate) {
+          frm.setFieldsValue({ rate: Number(data.rate) || 1 });
+          message.success(`✓ Conversion rate fetched: 1 ${baseCcy} = ${data.rate} ${txnCcy}`);
         } else {
           message.info(`No rate found for ${baseCcy}-${txnCcy} on ${checkDate}, please enter manually`);
         }
+      } else {
+        message.warning(`Could not fetch conversion rate (HTTP ${res.status}), please enter manually`);
       }
     } catch (err) {
       console.error('Error fetching conversion rate:', err);
