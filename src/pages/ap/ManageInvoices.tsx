@@ -1974,7 +1974,15 @@ const ManageInvoices: React.FC = () => {
           const glLinesData = await res.json();
           console.log(`📥 GL Journal Lines for ${invoice.invoiceNumber}:`, glLinesData);
 
-          if (!Array.isArray(glLinesData) || glLinesData.length === 0) {
+          // Handle both direct array and object with items wrapper
+          let lines: any[] = [];
+          if (Array.isArray(glLinesData)) {
+            lines = glLinesData;
+          } else if (glLinesData && typeof glLinesData === 'object' && Array.isArray(glLinesData.items)) {
+            lines = glLinesData.items;
+          }
+
+          if (lines.length === 0) {
             continue;
           }
 
@@ -1987,7 +1995,7 @@ const ManageInvoices: React.FC = () => {
           let glHeaderId: number | null = null;
           let glStatus = '';
 
-          glLinesData.forEach((line: any) => {
+          lines.forEach((line: any) => {
             glBatchId = line.je_batch_id || line.jeBatchId || line.batchId || glBatchId;
             glHeaderId = line.je_header_id || line.jeHeaderId || line.headerId || glHeaderId;
             glStatus = line.status || glStatus;
@@ -2010,7 +2018,7 @@ const ManageInvoices: React.FC = () => {
           // Only add if there are journal lines
           if (totalDebits > 0 || totalCredits > 0) {
             // Extract reference fields from first GL journal line
-            const firstLine = glLinesData[0] || {};
+            const firstLine = lines[0] || {};
             data.push({
               invoiceNumber: invoice.invoiceNumber,
               invoiceId: invoice.invoiceId,
@@ -2027,6 +2035,7 @@ const ManageInvoices: React.FC = () => {
               reference3: firstLine.reference3 || '',
               reference4: firstLine.reference4 || '',
               reference5: firstLine.reference5 || '',
+              lines,
             });
           }
         } catch (e) {
@@ -2076,14 +2085,18 @@ const ManageInvoices: React.FC = () => {
       let accountingStatus = 'N/A';
       let accountingDate = record.invoiceDate;
 
+      // Handle both direct array and object with items wrapper
       if (Array.isArray(glLinesData)) {
         lines = glLinesData;
-        if (lines.length > 0) {
-          headerId = lines[0].je_header_id || lines[0].jeHeaderId || lines[0].headerId;
-          batchId = lines[0].je_batch_id || lines[0].jeBatchId || lines[0].batchId;
-          accountingStatus = lines[0].status || 'N/A';
-          accountingDate = lines[0].defaultEffectiveDate || lines[0].createdDate || record.invoiceDate;
-        }
+      } else if (glLinesData && typeof glLinesData === 'object' && Array.isArray(glLinesData.items)) {
+        lines = glLinesData.items;
+      }
+
+      if (lines.length > 0) {
+        headerId = lines[0].je_header_id || lines[0].jeHeaderId || lines[0].headerId;
+        batchId = lines[0].je_batch_id || lines[0].jeBatchId || lines[0].batchId;
+        accountingStatus = lines[0].status || 'N/A';
+        accountingDate = lines[0].defaultEffectiveDate || lines[0].createdDate || record.invoiceDate;
       }
 
       setAccountingSingleData({
