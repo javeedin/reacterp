@@ -2542,9 +2542,9 @@ const ManageInvoices: React.FC = () => {
       },
       {
         step: '1.1 — Delete GL',
-        method: 'POST',
-        url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/delete?reference1=${invoiceNumber}&reference2=${invoiceId}&reference5=AP-INVOICE-CREATION`,
-        requestBody: { reference1: invoiceNumber, reference2: invoiceId, reference5: 'AP-INVOICE-CREATION' },
+        method: 'DELETE',
+        url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/{batchId}`,
+        requestBody: null,
         status: undefined,
         response: undefined,
       },
