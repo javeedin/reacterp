@@ -2677,32 +2677,49 @@ const ManageInvoices: React.FC = () => {
         }
       }
 
-      // Step 5 (Create GL) - auto-run Step 2 (Check GL) if needed
+      // Step 5 (Create GL) - ALWAYS refresh GL check status before creating
       if (stepIdx === 5) {
-        if (!previewGlCheckResponse) {
-          message.info('🔍 Running Step 1 (Check GL) first...');
-          setExecutingStepIdx(null);
-          setLoading(false);
-          // Auto-run Step 2, then Step 5
-          await runPreviewDebugStep(2);
-          await new Promise(resolve => setTimeout(resolve, 500));
-          // Now check the response
-          const exists = previewGlCheckResponse?.exists || previewGlCheckResponse?.journal_exists || false;
+        message.info('🔍 Refreshing GL status before creation...');
+
+        try {
+          // Get fresh GL check data with proper parameters
+          const activePayload = previewPayload;
+          const invoiceId = activePayload?.header?.sourceId;
+          const invoiceNumber = activePayload?.header?.sourceNumber;
+
+          const checkUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/check?reference1=${invoiceNumber}&reference2=${invoiceId}&reference5=AP-INVOICE-CREATION`;
+          const checkResponse = await fetch(checkUrl, { method: 'GET', headers: { Accept: 'application/json' } });
+          const checkData = await checkResponse.json();
+
+          console.log('GL Check response before creation:', checkData);
+
+          // Update the stored GL check response with fresh data
+          setPreviewGlCheckResponse(checkData);
+
+          // Update Step 2 response in the steps array
+          setPreviewDebugSteps(prev => {
+            const updated = [...prev];
+            updated[2] = { ...updated[2], response: checkData, status: checkResponse.status };
+            return updated;
+          });
+
+          // Check the fresh response
+          const exists = checkData.exists || checkData.journal_exists || false;
+
           if (exists) {
-            message.warning(`⏭️ GL already exists (Batch ID: ${previewGlCheckResponse?.batchId}) - Skipping creation`);
-            return;
-          }
-          message.info('✓ No GL exists - Safe to create');
-          // Continue with Step 5
-        } else {
-          // Check already ran, verify response
-          const exists = previewGlCheckResponse.exists || previewGlCheckResponse.journal_exists || false;
-          if (exists) {
-            message.warning(`⏭️ GL already exists (Batch ID: ${previewGlCheckResponse.batchId}) - Skipping creation`);
+            message.warning(`⏭️ GL already exists (exists: ${exists}) - Skipping creation`);
             setExecutingStepIdx(null);
             setLoading(false);
             return;
           }
+
+          message.success(`✓ GL check passed (exists: false) - Safe to create`);
+        } catch (checkError: any) {
+          console.error('Error refreshing GL check:', checkError);
+          message.error(`Failed to check GL status before creation: ${checkError.message}`);
+          setExecutingStepIdx(null);
+          setLoading(false);
+          return;
         }
       }
 
