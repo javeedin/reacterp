@@ -3435,9 +3435,9 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
 
         <Section icon={<ProfileOutlined />} title="Customer" color={REDWOOD.info}>
           <Col xs={24} md={20}><Form.Item label="Customer Name" name="customerName" rules={req('Customer')} style={{ marginBottom: 8, display: 'flex', alignItems: 'flex-end', gap: 8 }}>
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Input placeholder="Select a customer..." value={form.getFieldValue('customerName')} readOnly style={{ flex: 1, fontSize: '14px', fontWeight: '500' }} />
-              <Button type="primary" icon={<SearchOutlined />} onClick={() => setCustSearchModalOpen(true)} title="Search Customer" />
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, opacity: !buName ? 0.5 : 1, pointerEvents: !buName ? 'none' : 'auto' }}>
+              <Input placeholder={buName ? "Select a customer..." : "Select BU first"} value={form.getFieldValue('customerName')} readOnly style={{ flex: 1, fontSize: '14px', fontWeight: '500' }} disabled={!buName} />
+              <Button type="primary" icon={<SearchOutlined />} onClick={() => setCustSearchModalOpen(true)} disabled={!buName} title={buName ? "Search Customer" : "Select BU first"} />
             </div>
           </Form.Item></Col>
           <Col xs={24} md={4}><Form.Item label="Account #" name="accountNumber" style={{ marginBottom: 8 }}><Input placeholder="—" readOnly size="small" /></Form.Item></Col>
