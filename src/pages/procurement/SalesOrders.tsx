@@ -5131,7 +5131,6 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       SourceTransactionId: srcId,
       ...(revision != null ? { SourceTransactionRevisionNumber: revision } : {}),
       TransactionalCurrencyCode: hdr.txnCurrency,
-      AppliedCurrencyCode: hdr.txnCurrency,
       ...(hdr.rate != null ? { CurrencyConversionRate: Number(hdr.rate) } : {}),
       ...(hdr.currencyRateType ? { CurrencyConversionType: hdr.currencyRateType } : {}),
       ...(hdr.currencyDate ? { CurrencyConversionDate: hdr.currencyDate.format('YYYY-MM-DD') } : {}),
