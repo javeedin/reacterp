@@ -4149,6 +4149,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [resvReloadKey, setResvReloadKey] = useState(0);
   const [autoShipOpen, setAutoShipOpen] = useState(false);
   const [autoInvoiceOpen, setAutoInvoiceOpen] = useState(false);
+  const [branchSalesModalOpen, setBranchSalesModalOpen] = useState(false);
+  const [branchSalesForm] = Form.useForm();
+  const [savedOrderNumber, setSavedOrderNumber] = useState<string | null>(null);
+  const [creatingBranchPO, setCreatingBranchPO] = useState(false);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   // Edit mode: the raw Fusion order lines (with child links) for the Billing /
   // Actual Costing tabs (the grid uses a simplified NewLine shape).
@@ -5305,6 +5309,14 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         message.success(`Sales order ${data.OrderNumber} saved as draft`);
         if (effSkipped) message.warning('Additional Information (EFF) was skipped — Fusion rejected the flexfield category. Open an existing order\'s Additional Info once (so the correct category code is learned), then use “Save Additional Info” to add it.', 8);
         if (orderKey != null) refreshLineStatuses(String(orderKey));
+
+        // Check if this is a branch sales order type
+        if (hdr.orderType && orderTypeLookup.get(hdr.orderType)?.Tag === 'BRANCH SALES' && !editMode) {
+          setSavedOrderNumber(String(data.OrderNumber));
+          branchSalesForm.resetFields();
+          branchSalesForm.setFieldsValue({ currency: hdr.txnCurrency });
+          setBranchSalesModalOpen(true);
+        }
       } else {
         // Failure — map errors onto lines + Errors tab, write the log, show the dialog.
         applyErrors(data, text, true);
@@ -5407,6 +5419,72 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       message.error(`${failed} change(s) failed`);
     }
     setPosting(false);
+  };
+
+  // Create a Purchase Order from the Branch Sales order
+  const createBranchPO = async () => {
+    if (!savedOrderNumber) return;
+    const branchBU = branchSalesForm.getFieldValue('branchBusinessUnit');
+    const branchSupplier = branchSalesForm.getFieldValue('branchSupplierName');
+    const shipToLoc = branchSalesForm.getFieldValue('shipToLocation');
+    const currency = branchSalesForm.getFieldValue('currency');
+
+    if (!branchBU || !branchSupplier || !shipToLoc) {
+      message.error('Please fill in all Branch Sales fields');
+      return;
+    }
+
+    setCreatingBranchPO(true);
+    try {
+      // Build PO line items from SO lines
+      const poLines = lines
+        .filter(l => l.itemNumber && num(l.qty) > 0)
+        .map((l, idx) => ({
+          LineNumber: idx + 1,
+          ItemNumber: l.itemNumber,
+          Quantity: num(l.qty),
+          UnitOfMeasure: l.uom || 'EA',
+          UnitPrice: num(l.unitPrice),
+          Description: l.description,
+        }));
+
+      // Build PO header payload
+      const poPayload = {
+        OrderNumber: `BRNS-${savedOrderNumber}`,
+        OrderType: 'Standard',
+        BusinessUnit: branchBU,
+        SupplierName: branchSupplier,
+        ReceivingLocationCode: shipToLoc,
+        TransactionalCurrencyCode: currency,
+        Lines: poLines,
+      };
+
+      // POST to purchase order creation endpoint
+      const url = `${FUSION_BASE}/purchaseOrders`;
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
+        body: JSON.stringify(poPayload),
+      });
+
+      const text = await r.text();
+      let data: any = null;
+      try { data = JSON.parse(text); } catch { /* raw */ }
+
+      if (r.ok && data) {
+        message.success(`Branch Purchase Order ${data.OrderNumber || `BRNS-${savedOrderNumber}`} created successfully`);
+        setBranchSalesModalOpen(false);
+        branchSalesForm.resetFields();
+        setSavedOrderNumber(null);
+      } else {
+        const err = collectOrderErrors(data, text, true) || [`HTTP ${r.status}`];
+        message.error(`Failed to create Branch PO: ${err.join(', ')}`);
+      }
+    } catch (e: any) {
+      message.error(`Network error: ${e?.message || 'Failed to create Branch PO'}`);
+    } finally {
+      setCreatingBranchPO(false);
+    }
   };
 
   // ── Draft workflow: Confirm (submit the draft), Reserve / Unreserve stock ──
@@ -6673,6 +6751,45 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           </Modal>
         );
       })()}
+
+      {/* Branch Sales Modal — capture branch details and create PO */}
+      <Modal open={branchSalesModalOpen} onCancel={() => { setBranchSalesModalOpen(false); branchSalesForm.resetFields(); setSavedOrderNumber(null); }}
+        maskClosable={false} width={600} title={<Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /> Create Branch Purchase Order (BRNS)</Space>}
+        footer={<Space>
+          <Button onClick={() => { setBranchSalesModalOpen(false); branchSalesForm.resetFields(); setSavedOrderNumber(null); }}>Cancel</Button>
+          <Button type="primary" loading={creatingBranchPO} onClick={createBranchPO} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
+            Create Branch PO
+          </Button>
+        </Space>}>
+        <div style={{ marginBottom: 16, padding: '12px 16px', background: '#E6F7FF', borderRadius: 6, border: `1px solid ${REDWOOD.info}` }}>
+          <Text style={{ fontSize: 12, color: REDWOOD.info }}>
+            Sales Order <Text code strong>{savedOrderNumber}</Text> is a Branch Sales order. Auto-create a Purchase Order with the BRNS prefix below.
+          </Text>
+        </div>
+        <Form form={branchSalesForm} layout="vertical" size="middle">
+          <Form.Item label="Branch Business Unit" name="branchBusinessUnit" rules={[{ required: true, message: 'Select a business unit' }]}>
+            <Select showSearch placeholder="Select Branch Business Unit" optionFilterProp="label"
+              options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} />
+          </Form.Item>
+          <Form.Item label="Branch Supplier Name" name="branchSupplierName" rules={[{ required: true, message: 'Enter supplier name' }]}>
+            <Input placeholder="Enter supplier name" />
+          </Form.Item>
+          <Form.Item label="Ship-To Location (Inventory Org)" name="shipToLocation" rules={[{ required: true, message: 'Select a location' }]}>
+            <Select showSearch placeholder="Select Ship-To Location" optionFilterProp="label"
+              options={orgRows.map((o: any) => ({ value: pf(o, ['OrganizationCode']), label: `${pf(o, ['OrganizationCode'])}${pf(o, ['OrganizationName']) ? ' — ' + pf(o, ['OrganizationName']) : ''}` }))} />
+          </Form.Item>
+          <Form.Item label="Currency" name="currency">
+            <Input readOnly />
+          </Form.Item>
+          <Form.Item>
+            <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 12 }}>
+              <Text type="secondary">
+                The Purchase Order will include {lines.filter(l => l.itemNumber && num(l.qty) > 0).length} line item{lines.filter(l => l.itemNumber && num(l.qty) > 0).length !== 1 ? 's' : ''} with the same codes, quantities, and prices from this Sales Order.
+              </Text>
+            </div>
+          </Form.Item>
+        </Form>
+      </Modal>
 
     </div>
   );
