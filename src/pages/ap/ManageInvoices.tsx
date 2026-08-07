@@ -1998,20 +1998,20 @@ const ManageInvoices: React.FC = () => {
           lines.forEach((line: any) => {
             glBatchId = line.je_batch_id || line.jeBatchId || line.batchId || glBatchId;
             glHeaderId = line.je_header_id || line.jeHeaderId || line.headerId || glHeaderId;
-            glStatus = line.status || glStatus;
+            glStatus = line.journal_status || line.batch_status || line.status || glStatus;
 
-            const dr = Number(line.enteredDr || line.accountedDr || 0);
-            const cr = Number(line.enteredCr || line.accountedCr || 0);
+            const dr = Number(line.entered_dr || line.enteredDr || line.accounted_dr || line.accountedDr || 0);
+            const cr = Number(line.entered_cr || line.enteredCr || line.accounted_cr || line.accountedCr || 0);
             totalDebits += dr;
             totalCredits += cr;
 
             // Extract debit account (first DR line)
             if (dr > 0 && !debitAccount) {
-              debitAccount = line.accountCombination || '';
+              debitAccount = line.account || line.accountCombination || '';
             }
             // Extract credit account (first CR line)
             if (cr > 0 && !creditAccount) {
-              creditAccount = line.accountCombination || '';
+              creditAccount = line.account || line.accountCombination || '';
             }
           });
 
@@ -2095,8 +2095,8 @@ const ManageInvoices: React.FC = () => {
       if (lines.length > 0) {
         headerId = lines[0].je_header_id || lines[0].jeHeaderId || lines[0].headerId;
         batchId = lines[0].je_batch_id || lines[0].jeBatchId || lines[0].batchId;
-        accountingStatus = lines[0].status || 'N/A';
-        accountingDate = lines[0].defaultEffectiveDate || lines[0].createdDate || record.invoiceDate;
+        accountingStatus = lines[0].journal_status || lines[0].batch_status || lines[0].status || 'N/A';
+        accountingDate = lines[0].accounting_date || lines[0].defaultEffectiveDate || lines[0].createdDate || record.invoiceDate;
       }
 
       setAccountingSingleData({
