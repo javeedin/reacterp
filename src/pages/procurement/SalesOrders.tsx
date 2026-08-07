@@ -3407,14 +3407,14 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
               options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Base Ccy" name="baseCurrency" rules={req('Base currency')} style={{ marginBottom: 8 }}><Input placeholder="AED" readOnly size="small" /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Txn Ccy" name="txnCurrency" rules={req('Currency')} style={{ marginBottom: 8 }}>
-            <Select showSearch placeholder="Currency" size="small" onChange={() => onTxnCurrencyChange(form)} options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Rate" name="rate" style={{ marginBottom: 8 }}><InputNumber style={{ width: '100%' }} size="small" min={0} placeholder="Auto-populated" /></Form.Item></Col>
+            <Select showSearch disabled={!buName} placeholder="Currency" size="small" onChange={() => onTxnCurrencyChange(form)} options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Rate" name="rate" style={{ marginBottom: 8 }}><InputNumber disabled={!buName} style={{ width: '100%' }} size="small" min={0} placeholder="Auto-populated" /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Rate Type" name="currencyRateType" style={{ marginBottom: 8 }}>
-            <Select placeholder="Rate type" size="small" options={[{ value: 'Corporate', label: 'Corporate' }, { value: 'Spot', label: 'Spot' }, { value: 'User', label: 'User' }]} /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Currency Date" name="currencyDate" style={{ marginBottom: 8 }}><DatePicker style={{ width: '100%' }} size="small" /></Form.Item></Col>
+            <Select disabled={!buName} placeholder="Rate type" size="small" options={[{ value: 'Corporate', label: 'Corporate' }, { value: 'Spot', label: 'Spot' }, { value: 'User', label: 'User' }]} /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Currency Date" name="currencyDate" style={{ marginBottom: 8 }}><DatePicker disabled={!buName} style={{ width: '100%' }} size="small" /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Order Type" name="orderType" rules={req('Order type')} style={{ marginBottom: 8 }}>
-            <Select showSearch placeholder="Select order type" size="small" loading={orderTypeOpts.length === 0} options={orderTypeOpts} /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')} style={{ marginBottom: 0 }}><DatePicker style={{ width: '100%' }} size="small" /></Form.Item></Col>
+            <Select showSearch disabled={!buName} placeholder="Select order type" size="small" loading={orderTypeOpts.length === 0} options={orderTypeOpts} /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')} style={{ marginBottom: 0 }}><DatePicker disabled={!buName} style={{ width: '100%' }} size="small" /></Form.Item></Col>
         </Section>
 
         <Section icon={<ProfileOutlined />} title="Customer" color={REDWOOD.info}>
@@ -3433,14 +3433,14 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
 
         <Section icon={<ShoppingOutlined />} title="Terms & Fulfillment" color={REDWOOD.purple}>
           <Col xs={12} md={6}><Form.Item label="Payment Terms" name="paymentTerms" rules={req('Payment terms')} style={{ marginBottom: 8 }}>
-            <Select showSearch placeholder="Terms" size="small" optionFilterProp="label" options={payTermOpts} /></Form.Item></Col>
+            <Select showSearch disabled={!buName} placeholder="Terms" size="small" optionFilterProp="label" options={payTermOpts} /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Sales Rep" name="salesRep" style={{ marginBottom: 8 }}>
-            <Select showSearch allowClear placeholder="Salesperson" size="small" optionFilterProp="label" options={salesRepOpts} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
+            <Select showSearch disabled={!buName} allowClear placeholder="Salesperson" size="small" optionFilterProp="label" options={salesRepOpts} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label={<WarehouseLabel />} name="warehouse" rules={req('Warehouse')} style={{ marginBottom: 8 }}>
-            <Select showSearch placeholder={buName ? 'Organization' : 'Select BU first'} size="small" onChange={onWarehouse} options={whOptions} optionFilterProp="label" /></Form.Item></Col>
+            <Select showSearch disabled={!buName} placeholder={buName ? 'Organization' : 'Select BU first'} size="small" onChange={onWarehouse} options={whOptions} optionFilterProp="label" /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Sub Inventory" name="subinventory" style={{ marginBottom: 8 }}>
-            <Select showSearch placeholder="Subinventory" size="small" notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item></Col>
-          <Col xs={24}><Form.Item label="Remarks" name="remarks" style={{ marginBottom: 0 }}><Input.TextArea rows={1} placeholder="Optional notes…" size="small" /></Form.Item></Col>
+            <Select showSearch disabled={!buName} placeholder="Subinventory" size="small" notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item></Col>
+          <Col xs={24}><Form.Item label="Remarks" name="remarks" style={{ marginBottom: 0 }}><Input.TextArea disabled={!buName} rows={1} placeholder="Optional notes…" size="small" /></Form.Item></Col>
         </Section>
       </Form>
     </Modal>
