@@ -547,6 +547,7 @@ const ManageInvoices: React.FC = () => {
   const [executingStepIdx, setExecutingStepIdx] = useState<number | null>(null);
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
+  const [accountingAllSelectedKeys, setAccountingAllSelectedKeys] = useState<React.Key[]>([]);
 
 
   const openMpaModal = async (record: InvoiceRecord) => {
@@ -2625,14 +2626,14 @@ const ManageInvoices: React.FC = () => {
     }
   };
 
-  // Batch run all steps for multiple selected invoices
+  // Batch run all steps for multiple selected invoices from accounting all modal
   const runBatchReCreateAccounting = async () => {
-    if (selectedRowKeys.length === 0) {
+    if (accountingAllSelectedKeys.length === 0) {
       message.warning('Select at least one invoice');
       return;
     }
 
-    const selectedInvoices = invoices.filter(inv => selectedRowKeys.includes(inv.key));
+    const selectedInvoices = accountingAllData.filter(acc => accountingAllSelectedKeys.includes(acc.invoiceId));
 
     if (selectedInvoices.length === 0) {
       message.warning('No valid invoices selected');
@@ -2646,16 +2647,27 @@ const ManageInvoices: React.FC = () => {
 
     try {
       for (let idx = 0; idx < selectedInvoices.length; idx++) {
-        const invoice = selectedInvoices[idx];
+        const accRecord = selectedInvoices[idx];
+        const invoice = invoices.find(i => i.invoiceId === accRecord.invoiceId);
+
         setBatchProgress({ current: idx + 1, total: selectedInvoices.length });
 
         try {
-          console.log(`Processing invoice ${invoice.invoiceNumber}...`);
+          if (!invoice) {
+            results.push({
+              invoiceNumber: accRecord.invoiceNumber,
+              status: 'failed',
+              message: 'Invoice not found in records',
+            });
+            continue;
+          }
+
+          console.log(`Processing invoice ${accRecord.invoiceNumber}...`);
 
           // Build payload for this invoice
           if (!previewPayload) {
             results.push({
-              invoiceNumber: invoice.invoiceNumber,
+              invoiceNumber: accRecord.invoiceNumber,
               status: 'failed',
               message: 'No accounting payload available',
             });
@@ -2683,7 +2695,7 @@ const ManageInvoices: React.FC = () => {
           }
 
           results.push({
-            invoiceNumber: invoice.invoiceNumber,
+            invoiceNumber: accRecord.invoiceNumber,
             status: 'success',
             message: 'All steps completed',
           });
@@ -2694,7 +2706,7 @@ const ManageInvoices: React.FC = () => {
           }
         } catch (error: any) {
           results.push({
-            invoiceNumber: invoice.invoiceNumber,
+            invoiceNumber: accRecord.invoiceNumber,
             status: 'failed',
             message: error.message,
           });
@@ -2710,6 +2722,7 @@ const ManageInvoices: React.FC = () => {
       );
 
       console.log('Batch Results:', results);
+      setAccountingAllSelectedKeys([]);
     } catch (error: any) {
       message.error(`Batch processing error: ${error.message}`);
     } finally {
@@ -3752,28 +3765,6 @@ const ManageInvoices: React.FC = () => {
                     Show Accounting for All Invoices
                   </Button>
                 </Tooltip>
-                <Tooltip title={
-                  selectedRowKeys.length === 0
-                    ? 'Select one or more invoices to batch run Re-Create Accounting'
-                    : `Run Re-Create Accounting for ${selectedRowKeys.length} selected invoice(s)`
-                }>
-                  <Button
-                    size="small"
-                    icon={<ApiOutlined />}
-                    style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
-                    disabled={selectedRowKeys.length === 0}
-                    loading={batchProcessing}
-                    onClick={runBatchReCreateAccounting}
-                  >
-                    Batch Run Re-Create A/C ({selectedRowKeys.length})
-                  </Button>
-                </Tooltip>
-                {batchProcessing && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Progress type="circle" percent={Math.round((batchProgress.current / batchProgress.total) * 100)} width={40} />
-                    <Text>{batchProgress.current} of {batchProgress.total}</Text>
-                  </div>
-                )}
                 <Tooltip title={
                   selectedRowKeys.length === 0
                     ? 'Select one or more invoices to fetch applied prepayments from Oracle Fusion'
@@ -5369,8 +5360,33 @@ const ManageInvoices: React.FC = () => {
           </Space>
         }
         open={accountingAllModalOpen}
-        onCancel={() => setAccountingAllModalOpen(false)}
-        footer={<Button onClick={() => setAccountingAllModalOpen(false)}>Close</Button>}
+        onCancel={() => { setAccountingAllModalOpen(false); setAccountingAllSelectedKeys([]); }}
+        footer={
+          <Space>
+            <Tooltip title={
+              accountingAllSelectedKeys.length === 0
+                ? 'Select invoices in the table above to run batch accounting'
+                : `Run Re-Create Accounting for ${accountingAllSelectedKeys.length} selected invoice(s)`
+            }>
+              <Button
+                icon={<ApiOutlined />}
+                type="primary"
+                style={{ color: 'white', background: REDWOOD.success, borderColor: REDWOOD.success }}
+                disabled={accountingAllSelectedKeys.length === 0}
+                loading={batchProcessing}
+                onClick={runBatchReCreateAccounting}
+              >
+                Batch Run Re-Create A/C ({accountingAllSelectedKeys.length})
+              </Button>
+            </Tooltip>
+            {accountingAllSelectedKeys.length > 0 && (
+              <Button onClick={() => setAccountingAllSelectedKeys([])}>
+                Clear Selection ({accountingAllSelectedKeys.length})
+              </Button>
+            )}
+            <Button onClick={() => { setAccountingAllModalOpen(false); setAccountingAllSelectedKeys([]); }}>Close</Button>
+          </Space>
+        }
         width="90vw"
         styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
         destroyOnClose
@@ -5430,6 +5446,10 @@ const ManageInvoices: React.FC = () => {
 
               {/* Data Table */}
               <Table
+                rowSelection={{
+                  selectedRowKeys: accountingAllSelectedKeys,
+                  onChange: (keys: React.Key[]) => setAccountingAllSelectedKeys(keys),
+                }}
             columns={[
               {
                 title: 'GL Status',
