@@ -2647,41 +2647,61 @@ const ManageInvoices: React.FC = () => {
     setLoading(true);
 
     try {
-      // Conditional checks before creating SLA and GL
-      // Step 4 (Create SLA) - check if Step 0 (Check SLA) allows creation
+      // Auto-run check steps before creation if not already run
+      // Step 4 (Create SLA) - auto-run Step 0 (Check SLA) if needed
       if (stepIdx === 4) {
         if (!previewSlaCheckResponse) {
-          message.error('❌ Must run Step 0 (Check SLA) first before creating');
+          message.info('🔍 Running Step 0 (Check SLA) first...');
           setExecutingStepIdx(null);
           setLoading(false);
-          return;
+          // Auto-run Step 0, then Step 4
+          await runPreviewDebugStep(0);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          // Now check the response
+          if (previewSlaCheckResponse && previewSlaCheckResponse.canCreate === false) {
+            message.warning(`⏭️ Skipping SLA creation: ${previewSlaCheckResponse.message}`);
+            return;
+          }
+          message.info(`✓ Check approved: ${previewSlaCheckResponse?.message || 'Safe to create'}`);
+          // Continue with Step 4
+        } else {
+          // Check already ran, verify response
+          if (previewSlaCheckResponse.canCreate === false) {
+            message.warning(`⏭️ Skipping SLA creation: ${previewSlaCheckResponse.message}`);
+            setExecutingStepIdx(null);
+            setLoading(false);
+            return;
+          }
         }
-        const canCreate = previewSlaCheckResponse.canCreate !== false;
-        if (!canCreate) {
-          message.warning('⏭️ Cannot create SLA - Check response indicates it already exists or is in an invalid state');
-          setExecutingStepIdx(null);
-          setLoading(false);
-          return;
-        }
-        message.info(`✓ Check approved creation: ${previewSlaCheckResponse.message}`);
       }
 
-      // Step 5 (Create GL) - check if Step 2 (Check GL) allows creation
+      // Step 5 (Create GL) - auto-run Step 2 (Check GL) if needed
       if (stepIdx === 5) {
         if (!previewGlCheckResponse) {
-          message.error('❌ Must run Step 1 (Check GL) first before creating');
+          message.info('🔍 Running Step 1 (Check GL) first...');
           setExecutingStepIdx(null);
           setLoading(false);
-          return;
+          // Auto-run Step 2, then Step 5
+          await runPreviewDebugStep(2);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          // Now check the response
+          const exists = previewGlCheckResponse?.exists || previewGlCheckResponse?.journal_exists || false;
+          if (exists) {
+            message.warning('⏭️ Skipping GL creation: GL Journal already exists');
+            return;
+          }
+          message.info('✓ Check approved: Safe to create GL');
+          // Continue with Step 5
+        } else {
+          // Check already ran, verify response
+          const exists = previewGlCheckResponse.exists || previewGlCheckResponse.journal_exists || false;
+          if (exists) {
+            message.warning('⏭️ Skipping GL creation: GL Journal already exists');
+            setExecutingStepIdx(null);
+            setLoading(false);
+            return;
+          }
         }
-        const exists = previewGlCheckResponse.exists || previewGlCheckResponse.journal_exists || false;
-        if (exists) {
-          message.warning('⏭️ Cannot create GL - Check response indicates GL Journal already exists');
-          setExecutingStepIdx(null);
-          setLoading(false);
-          return;
-        }
-        message.info('✓ Check approved creation: No GL exists, safe to create');
       }
 
       const step = previewDebugSteps[stepIdx];
