@@ -2344,6 +2344,8 @@ const ManageInvoices: React.FC = () => {
           ledgerId: ledgerInfo?.ledgerId || 300000003259529,
           ledgerName: ledgerInfo?.ledgerName || 'BCL DIFC',
           conversionRate: inv.conversionRate || 1,
+          reference3: inv.accountingClass || inv.expenseClass || 'EXPENSE',
+          reference4: inv.businessUnit || inv.buCode || '',
         },
         lines: slaLines,
       };
@@ -2466,6 +2468,8 @@ const ManageInvoices: React.FC = () => {
         accountCombination: l.accountCombination || '',
         reference1: invoiceNumber,
         reference2: String(invoiceId),
+        reference3: l.reference3 || previewPayload.header?.reference3 || '',
+        reference4: l.reference4 || previewPayload.header?.reference4 || '',
         reference5: 'AP-INVOICE-CREATION',
         reconciledFlag: 'N',
         createdBy: 'user',
