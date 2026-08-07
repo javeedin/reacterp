@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import dayjs from 'dayjs';
 import {
   Layout,
@@ -32,6 +32,7 @@ import {
   Space as AntSpace,
   Descriptions,
   Radio,
+  Drawer,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -77,6 +78,7 @@ import {
   SyncOutlined,
   CalendarOutlined,
   AccountBookOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -88,7 +90,9 @@ import CreateInvoice from './CreateInvoice';
 import type { InvoiceInitialData } from './CreateInvoice';
 import { APEX_DB_CONFIG, ORACLE_FUSION_CONFIG } from '../../config/api.config';
 import { getApprovalRules, sendInvoiceApproval, type ApprovalUser, type ApprovalDebugStep } from '../../services/approvals.service';
-import { getAccounting } from '../../services/sla.service';
+import { getAccounting, buildApInvoiceSlaPayload, fetchLedgerByBusinessUnit, checkGLJournalExists, deleteSlaAccounting, deleteGlJournal } from '../../services/sla.service';
+import { getGlJournalLines } from '../../services/glPosting.service';
+import { validateAccountCode } from '../../components/AccountSelector';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -494,19 +498,51 @@ const ManageInvoices: React.FC = () => {
 
   // Accounting features state
   const [accountingAllModalOpen, setAccountingAllModalOpen] = useState(false);
-  const [accountingAllData, setAccountingAllData] = useState<Array<{invoiceNumber: string; invoiceId: number; debits: number; credits: number; debitAccount: string; creditAccount: string; lines: any[]}>>([]);
+  const [accountingAllData, setAccountingAllData] = useState<Array<{
+    invoiceNumber: string;
+    invoiceId: number;
+    invoiceDate: string;
+    debits: number;
+    credits: number;
+    debitAccount: string;
+    creditAccount: string;
+    lines: any[];
+    glBatchId?: number | null;
+    glHeaderId?: number | null;
+    reference1?: string;
+    reference2?: string;
+    reference3?: string;
+    reference4?: string;
+    reference5?: string;
+    glLines?: any[];
+  }>>([]);
   const [accountingAllLoading, setAccountingAllLoading] = useState(false);
   const [accountingApiDebugOpen, setAccountingApiDebugOpen] = useState(false);
+  const [apiTestInvoiceId, setApiTestInvoiceId] = useState('');
+  const [apiTestLoading, setApiTestLoading] = useState(false);
+  const [apiTestResponse, setApiTestResponse] = useState<any>(null);
+  const [apiTestError, setApiTestError] = useState('');
   const [accountingSingleModalOpen, setAccountingSingleModalOpen] = useState(false);
   const [accountingSingleInvoice, setAccountingSingleInvoice] = useState<InvoiceRecord | null>(null);
   const [accountingSingleData, setAccountingSingleData] = useState<any>(null);
   const [accountingSingleLoading, setAccountingSingleLoading] = useState(false);
 
-  // Re-Create Accounting preview modal state
+  // Preview modal state for Re-Create Accounting
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewPayload, setPreviewPayload] = useState<any>(null);
   const [previewConfirming, setPreviewConfirming] = useState(false);
-  const [previewCreationSteps, setPreviewCreationSteps] = useState<string[]>([]);
+  const [previewCreationSteps, setPreviewCreationSteps] = useState<Array<{ step: string; status: 'pending' | 'in-progress' | 'completed' | 'error'; message?: string }>>([]);
+  const [previewDebugSteps, setPreviewDebugSteps] = useState<Array<{ step: string; method: string; url: string; requestBody?: any; status?: number; response?: any; loading?: boolean }>>([]);
+  const [previewDebugOpen, setPreviewDebugOpen] = useState(false);
+  const [previewSlaHeaderId, setPreviewSlaHeaderId] = useState<number | null>(null);
+  const [previewGlBatchId, setPreviewGlBatchId] = useState<number | null>(null);
+  const [previewGlHeaderId, setPreviewGlHeaderId] = useState<number | null>(null);
+  const [previewGlBatchName, setPreviewGlBatchName] = useState<string>('');
+  const [manualSlaDeleteId, setManualSlaDeleteId] = useState<string>('');
+  const [manualGlDeleteId, setManualGlDeleteId] = useState<string>('');
+  const [slaDuplicateExists, setSlaDuplicateExists] = useState(false);
+  const [glDuplicateExists, setGlDuplicateExists] = useState(false);
+  const [executingStepIdx, setExecutingStepIdx] = useState<number | null>(null);
 
   const openMpaModal = async (record: InvoiceRecord) => {
     setMpaModalRecord(record);
@@ -1947,8 +1983,15 @@ const ManageInvoices: React.FC = () => {
           let totalCredits = 0;
           let debitAccount = '';
           let creditAccount = '';
+          let glBatchId: number | null = null;
+          let glHeaderId: number | null = null;
+          let glStatus = '';
 
           glLinesData.forEach((line: any) => {
+            glBatchId = line.je_batch_id || line.jeBatchId || line.batchId || glBatchId;
+            glHeaderId = line.je_header_id || line.jeHeaderId || line.headerId || glHeaderId;
+            glStatus = line.status || glStatus;
+
             const dr = Number(line.enteredDr || line.accountedDr || 0);
             const cr = Number(line.enteredCr || line.accountedCr || 0);
             totalDebits += dr;
@@ -1966,14 +2009,24 @@ const ManageInvoices: React.FC = () => {
 
           // Only add if there are journal lines
           if (totalDebits > 0 || totalCredits > 0) {
+            // Extract reference fields from first GL journal line
+            const firstLine = glLinesData[0] || {};
             data.push({
               invoiceNumber: invoice.invoiceNumber,
               invoiceId: invoice.invoiceId,
+              invoiceDate: invoice.invoiceDate,
               debits: totalDebits,
               credits: totalCredits,
               debitAccount,
               creditAccount,
-              lines: glLinesData,
+              glBatchId,
+              glHeaderId,
+              glStatus,
+              reference1: firstLine.reference1 || invoice.invoiceNumber,
+              reference2: firstLine.reference2 || String(invoice.invoiceId),
+              reference3: firstLine.reference3 || '',
+              reference4: firstLine.reference4 || '',
+              reference5: firstLine.reference5 || '',
             });
           }
         } catch (e) {
@@ -2034,7 +2087,6 @@ const ManageInvoices: React.FC = () => {
       }
 
       setAccountingSingleData({
-        found: true,
         headerId,
         batchId,
         accountingStatus,
@@ -2049,151 +2101,730 @@ const ManageInvoices: React.FC = () => {
     }
   };
 
-  // Handle Re-Create Accounting Preview
-  const handleRecreateAccountingPreview = async (record: InvoiceRecord) => {
-    setPreviewModalOpen(true);
-    setPreviewPayload(null);
-    setPreviewCreationSteps(['Fetching invoice data...']);
+  // Test GL Journal Lines API endpoint
+  const handleTestGlJournalLinesApi = async (invoiceId: string) => {
+    if (!invoiceId.trim()) {
+      message.warning('Please enter an invoice ID');
+      return;
+    }
+
+    setApiTestLoading(true);
+    setApiTestError('');
+    setApiTestResponse(null);
 
     try {
-      const { validateAccountCode } = await import('../../components/AccountSelector');
+      const glLinesUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${invoiceId}&reference5=AP-INVOICE-CREATION`;
+      console.log('🧪 Testing GL Journal Lines API:', glLinesUrl);
 
-      // Fetch invoice lines
-      setPreviewCreationSteps(prev => [...prev, 'Fetching invoice lines...']);
-      const linesRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines?P_INVOICE_ID=${record.invoiceId}`);
-      const linesData = await linesRes.json();
-      const rawLines = linesData.items || (Array.isArray(linesData) ? linesData : []);
+      const res = await fetch(glLinesUrl, {
+        headers: { Accept: 'application/json' }
+      });
 
-      // Fetch tax codes for the business unit
-      setPreviewCreationSteps(prev => [...prev, 'Fetching tax configuration...']);
-      const taxRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/tax/taxes/bybu?business_unit=${record.businessUnit}`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+
+      const data = await res.json();
+      setApiTestResponse(data);
+      message.success('API call successful!');
+    } catch (error: any) {
+      const errorMsg = error.message || 'Unknown error';
+      setApiTestError(errorMsg);
+      message.error(`API call failed: ${errorMsg}`);
+    } finally {
+      setApiTestLoading(false);
+    }
+  };
+
+  // Fetch account description for a given account combination
+  const fetchAccountDescription = async (accountCode: string): Promise<string> => {
+    if (!accountCode) return '';
+    try {
+      const res = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/accounts?account_code=${encodeURIComponent(accountCode)}`,
+        { headers: { Accept: 'application/json' } });
+      if (res.ok) {
+        const data = await res.json();
+        const accounts = data.items || (Array.isArray(data) ? data : []);
+        if (accounts.length > 0) {
+          return accounts[0].description || accounts[0].account_description || '';
+        }
+      }
+    } catch (err) {
+      console.warn(`Failed to fetch account description for ${accountCode}:`, err);
+    }
+    return '';
+  };
+
+  const handleRecreateAccountingPreview = async (record: InvoiceRecord) => {
+    const inv = invoices.find(i => i.invoiceId === record.invoiceId);
+    if (!inv) {
+      message.error('Invoice data not found');
+      return;
+    }
+
+    try {
+      // Fetch invoice lines (which includes both item lines and tax lines)
+      const linesRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines?P_INVOICE_ID=${inv.invoiceId}`, { headers: { Accept: 'application/json' } });
+      const linesData = linesRes.ok ? await linesRes.json().catch(() => ({})) : {};
+
+      console.log('Invoice lines data:', linesData);
+
+      // Parse lines and separate into item lines and tax lines
+      const allItems: any[] = linesData.items || (Array.isArray(linesData) ? linesData : []);
+      const rawLines: any[] = allItems.filter((item: any) => item.line_type !== 'Tax' && item.line_type !== 'TAX');
+      const rawTaxLines: any[] = allItems.filter((item: any) => item.line_type === 'Tax' || item.line_type === 'TAX');
+
+      console.log('All items:', allItems);
+      console.log('Parsed rawLines:', rawLines);
+      console.log('Parsed rawTaxLines:', rawTaxLines);
+
+      // Debug: Log all field names from first line
+      if (allItems.length > 0) {
+        console.log('First item all fields:', Object.keys(allItems[0]));
+        console.log('First item data:', allItems[0]);
+      }
+
+      if (rawLines.length === 0) {
+        message.warning('No invoice lines loaded. Cannot create accounting.');
+        return;
+      }
+
+      // Get first line's expense account as fallback
+      const expenseAccountFallback = rawLines[0]?.distribution_combination || rawLines[0]?.dist_code_combination || '';
+
+      // Fetch ledger info
+      const ledgerInfo = await fetchLedgerByBusinessUnit(inv.businessUnit ?? '');
+
+      // Fetch tax codes for the business unit to map tax classifications to accounts
+      const taxRes = await fetch(`${APEX_DB_CONFIG.baseUrl}/tax/taxes/bybu?business_unit=${inv.businessUnit}`);
       const taxData = await taxRes.json();
       const taxCodes: any[] = taxData.items || [];
       const taxAccountMap: Record<string, string> = {};
       const taxRateMap: Record<string, number> = {};
 
-      // Map both taxCode and taxName to account for naming variations
       taxCodes.forEach((t: any) => {
         const code = t.taxCode || '';
         const name = t.taxName || '';
         const account = t.taxAccount || '';
-        taxAccountMap[code] = account;
-        taxAccountMap[name] = account;
-        taxRateMap[code] = Number(t.taxRate) || 0;
-        taxRateMap[name] = Number(t.taxRate) || 0;
+        if (code) taxAccountMap[code] = account;
+        if (name) taxAccountMap[name] = account;
+        if (code) taxRateMap[code] = Number(t.taxRate) || 0;
+        if (name) taxRateMap[name] = Number(t.taxRate) || 0;
       });
 
-      // Log tax codes for debugging
-      console.log('Tax codes loaded:', taxCodes.map((t: any) => ({ taxCode: t.taxCode, taxName: t.taxName, taxAccount: t.taxAccount })));
+      console.log('Tax codes configuration:', taxCodes.map((t: any) => ({ taxCode: t.taxCode, taxName: t.taxName, taxAccount: t.taxAccount })));
 
-      // Build accounting lines
-      setPreviewCreationSteps(prev => [...prev, 'Building accounting entries...']);
-      const accountingLines: any[] = [];
+      // Build invoice lines with tax embedded in each line
+      // Each line has: line_amount, tax_control_amount (tax), tax_classification
+      const invoiceLines = rawLines.map((l: any) => {
+        const taxClassification = l.tax_classification || '';
+        let taxAccount = taxAccountMap[taxClassification] || '';
+
+        // Fallback to default VAT account if not found in config
+        if (!taxAccount && taxClassification && taxClassification.toUpperCase().includes('VAT')) {
+          taxAccount = '01-00-00-1223104-0000-000-00-000-000';
+        }
+
+        return {
+          lineNumber:    l.line_number,
+          amount:        Number(l.line_amount || 0),
+          description:   l.description || `Line ${l.line_number}`,
+          accrualAccount: l.distribution_combination || l.dist_code_combination || undefined,
+          lineId:        l.line_id || undefined,
+          // Tax embedded in line
+          taxAmount:     Number(l.tax_control_amount || 0),
+          taxAccount:    taxAccount,
+          taxClassification: taxClassification,
+          taxRateCode:   taxClassification || 'VAT',
+          taxRate:       taxRateMap[taxClassification] || 0,
+        };
+      });
+
+      console.log('Invoice lines (with embedded tax):', invoiceLines);
+
+      // Build accounting lines following the pattern from CreateInvoice.tsx
+      // Structure: Line DR + Tax DR (if exists) + Liability CR
+      const slaLines: any[] = [];
       let lineNum = 1;
-      const allAccounts = new Set<string>();
+      let totalTaxAmount = 0;
 
-      // Add line and tax entries
-      rawLines.forEach((line: any) => {
-        const amount = Number(line.line_amount) || 0;
-        if (amount === 0) return;
+      // For each invoice line, create:
+      // 1. DR for the line amount (expense account)
+      // 2. If tax > 0: separate DR for tax (tax account)
+      for (const line of invoiceLines) {
+        const lineAmount = line.amount || 0;
+        const lineAccount = line.accrualAccount || expenseAccountFallback;
 
-        const distribution = line.distribution_combination || '';
-        const taxClassification = line.tax_classification || '';
-        const taxAmount = Number(line.tax_control_amount) || 0;
-
-        // Log first line details for debugging
-        if (lineNum === 1) {
-          console.log('First line details:', {
-            line_amount: line.line_amount,
-            tax_control_amount: line.tax_control_amount,
-            tax_classification: line.tax_classification,
-            distribution_combination: line.distribution_combination,
-            all_fields: line,
-          });
-        }
-
-        // DR for line amount
-        accountingLines.push({
-          lineNumber: lineNum++,
-          lineType: 'DR',
-          accountCombination: distribution,
-          amount: amount,
-          description: line.description || `Line ${line.line_number}`,
+        // Line DR
+        slaLines.push({
+          lineNumber:      lineNum++,
+          lineType:        'DR',
+          accountingClass: 'EXPENSE',
+          accountCombination: lineAccount,
+          enteredDr:       lineAmount,
+          enteredCr:       0,
+          accountedDr:     lineAmount,
+          accountedCr:     0,
+          currencyCode:    inv.invoiceCurrency,
+          exchangeRate:    1,
+          description:     line.description || `Line ${line.lineNumber}`,
+          sourceLineNumber: line.lineNumber,
         });
-        allAccounts.add(distribution);
 
-        // DR for tax if present
+        // Tax DR (if tax exists on this line)
+        const taxAmount = line.taxAmount || 0;
         if (taxAmount > 0) {
-          let taxAccount = taxAccountMap[taxClassification] || '';
-
-          // Fallback: if not found in map, use a common tax account
-          if (!taxAccount && taxClassification && taxClassification.toUpperCase().includes('VAT')) {
-            taxAccount = '01-00-00-1223104-0000-000-00-000-000'; // Default VAT tax account
-          }
-
-          if (taxAccount) {
-            accountingLines.push({
-              lineNumber: lineNum++,
-              lineType: 'DR',
-              accountCombination: taxAccount,
-              amount: taxAmount,
-              description: `Input VAT – ${taxClassification}`,
-            });
-            allAccounts.add(taxAccount);
-            console.log('Tax line created:', { taxClassification, taxAccount, taxAmount });
-          }
+          const taxAccount = line.taxAccount || expenseAccountFallback;
+          slaLines.push({
+            lineNumber:      lineNum++,
+            lineType:        'DR',
+            accountingClass: 'TAX',
+            accountCombination: taxAccount,
+            enteredDr:       taxAmount,
+            enteredCr:       0,
+            accountedDr:     taxAmount,
+            accountedCr:     0,
+            currencyCode:    inv.invoiceCurrency,
+            exchangeRate:    1,
+            description:     `${line.taxRateCode || 'VAT'} – ${line.description || `Line ${line.lineNumber}`}`,
+            sourceLineNumber: line.lineNumber,
+          });
+          totalTaxAmount += taxAmount;
+          console.log(`Tax line: ${taxAmount} (${line.taxRate}%) from line ${line.lineNumber}`);
         }
-      });
-
-      // CR for liability
-      const totalLiability = rawLines.reduce((sum: number, l: any) => sum + (Number(l.line_amount) || 0) + (Number(l.tax_control_amount) || 0), 0);
-      if (totalLiability > 0) {
-        const liabilityAccount = record.liabilityDistribution || '';
-        accountingLines.push({
-          lineNumber: lineNum++,
-          lineType: 'CR',
-          accountCombination: liabilityAccount,
-          amount: totalLiability,
-          description: 'AP Liability',
-        });
-        allAccounts.add(liabilityAccount);
       }
 
-      // Fetch account descriptions
-      setPreviewCreationSteps(prev => [...prev, 'Fetching account descriptions...']);
-      const accountDescs: Record<string, any> = {};
-      for (const acct of Array.from(allAccounts)) {
+      // Single CR line for total AP Liability (including tax)
+      const totalAmount = inv.invoiceAmount; // This already includes tax
+      slaLines.push({
+        lineNumber:      lineNum++,
+        lineType:        'CR',
+        accountingClass: 'LIABILITY',
+        accountCombination: inv.liabilityDistribution || '',
+        enteredDr:       0,
+        enteredCr:       totalAmount,
+        accountedDr:     0,
+        accountedCr:     totalAmount,
+        currencyCode:    inv.invoiceCurrency,
+        exchangeRate:    1,
+        description:     `AP Liability – Invoice ${inv.invoiceNumber}`,
+      });
+
+      console.log('Built SLA lines:', slaLines);
+      console.log(`Total: DR ${slaLines.reduce((s, l) => s + (l.enteredDr || 0), 0)} = CR ${slaLines.reduce((s, l) => s + (l.enteredCr || 0), 0)}`);
+
+      // Build payload with header info
+      const today = new Date();
+      const periodName = `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][today.getMonth()]}-${String(today.getFullYear()).slice(-2)}`;
+
+      let payload: any = {
+        header: {
+          sourceId: inv.invoiceId,
+          sourceNumber: inv.invoiceNumber,
+          sourceTable: 'AP_INVOICES',
+          sourceType: 'INVOICE',
+          eventTypeCode: 'AP_INVOICE_CREATION',
+          currencyCode: inv.invoiceCurrency,
+          description: `AP Liability – Invoice ${inv.invoiceNumber}`,
+          invoiceDate: inv.invoiceDate,
+          periodName: `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][today.getMonth()]}-${String(today.getFullYear()).slice(-2)}`,
+          ledgerId: ledgerInfo?.ledgerId || 300000003259529,
+          ledgerName: ledgerInfo?.ledgerName || 'BCL DIFC',
+          conversionRate: inv.conversionRate || 1,
+        },
+        lines: slaLines,
+      };
+
+      // Fetch segment descriptions for all accounts in the payload
+      if (payload.lines && payload.lines.length > 0) {
+        for (const line of payload.lines) {
+          if (line.accountCombination) {
+            try {
+              const validation = await validateAccountCode(line.accountCombination);
+              // Add segment details to the line for display
+              line.segmentDetails = validation.segmentDetails;
+              line.accountDescription = Object.values(validation.segmentDetails)
+                .map((seg: any) => seg.description)
+                .filter(Boolean)
+                .join(' | ') || line.accountCombination;
+            } catch (e) {
+              console.warn(`Failed to validate account ${line.accountCombination}:`, e);
+              line.accountDescription = line.accountCombination;
+            }
+          }
+        }
+      }
+
+      console.log('Final payload with descriptions:', payload);
+      setPreviewPayload(payload);
+      setPreviewModalOpen(true);
+    } catch (err: any) {
+      message.error(`Failed to build accounting: ${err.message}`);
+      console.error('Full error:', err);
+    }
+  };
+
+  // Build debug steps for Create Accounting (without running them)
+  const buildPreviewDebugSteps = () => {
+    if (!previewPayload) return [];
+
+    const invoiceId = previewPayload.header?.sourceId;
+    const invoiceNumber = previewPayload.header?.sourceNumber;
+
+    // Get invoice data - use previewPayload.header first, then fall back to invoices array
+    const inv = invoices.find(i => i.invoiceId === invoiceId) || {};
+
+    const invoiceDate = dayjs(previewPayload.header?.invoiceDate || inv.invoiceDate || new Date());
+    const acctDate = invoiceDate.format('YYYY-MM-DD');
+    const periodName = previewPayload.header?.periodName || `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][invoiceDate.month()]}-${invoiceDate.format('YY')}`;
+    const conversionRate = previewPayload.header?.conversionRate || inv.conversionRate || 1;
+    const currency = previewPayload.header?.currencyCode || inv.invoiceCurrency || 'AED';
+
+    const totalDr = previewPayload.lines.filter((l: any) => l.lineType === 'DR').reduce((s: number, l: any) => s + (l.enteredDr || 0), 0);
+    const totalCr = previewPayload.lines.filter((l: any) => l.lineType === 'CR').reduce((s: number, l: any) => s + (l.enteredCr || 0), 0);
+    const batchName = `AP-${invoiceNumber}-${dayjs().format('YYYYMMDD-HHmmss')}`;
+
+    // Build SLA payload with correct field names (accountCombo, not accountCombination)
+    const slaPayload = {
+      moduleName: 'AP', // Required by API
+      header: previewPayload.header,
+      lines: previewPayload.lines.map((l: any) => ({
+        lineNumber: l.lineNumber,
+        lineType: l.lineType,
+        accountingClass: l.accountingClass,
+        accountCombo: l.accountCombination, // Note: renamed field
+        enteredDr: l.enteredDr,
+        enteredCr: l.enteredCr,
+        accountedDr: l.accountedDr,
+        accountedCr: l.accountedCr,
+        currencyCode: l.currencyCode,
+        description: l.description,
+        sourceLineId: previewPayload.header.sourceId,
+        sourceLineNum: l.lineNumber,
+      })),
+    };
+
+    // Build GL journal payload with correct field names
+    const ledgerName = previewPayload.header?.ledgerName || inv.ledgerName || 'BCL DIFC';
+    const ledgerId = previewPayload.header?.ledgerId || inv.ledgerId || 300000003259529;
+
+    const journalPayload = {
+      batch: {
+        batchName,
+        batchDescription: `AP Invoice ${invoiceNumber} – Posted from SLA`,
+        ledgerName,
+        ledgerId,
+        status: 'NEW',
+        accountingPeriod: periodName,
+        controlTotal: totalDr,
+        runningTotalDr: totalDr,
+        runningTotalCr: totalCr,
+        batchSource: 'Payables',
+        createdBy: 'user',
+      },
+      header: {
+        ledgerId,
+        ledgerName,
+        jeCategory: 'Purchase Invoices',
+        jeSource: 'Payables',
+        periodName,
+        journalName: `AP Invoice ${invoiceNumber}`,
+        description: `Subledger accounting – Invoice ${invoiceNumber}`,
+        currencyCode: currency,
+        currencyConversionType: 'User',
+        currencyConversionDate: acctDate,
+        currencyConversionRate: conversionRate,
+        defaultEffectiveDate: acctDate,
+        status: 'NEW',
+        runningTotalDr: totalDr,
+        runningTotalCr: totalCr,
+        createdBy: 'user',
+      },
+      lines: previewPayload.lines.map((l: any) => ({
+        enteredDr: l.lineType === 'DR' ? (l.enteredDr || null) : null,
+        enteredCr: l.lineType === 'CR' ? (l.enteredCr || null) : null,
+        accountedDr: l.lineType === 'DR' ? (l.enteredDr || 0) * conversionRate : null,
+        accountedCr: l.lineType === 'CR' ? (l.enteredCr || 0) * conversionRate : null,
+        description: l.description || '',
+        currencyCode: l.currencyCode || currency,
+        currencyConversionDate: l.accountingDate || acctDate,
+        currencyConversionRate: conversionRate,
+        userCurrencyConversionType: 'User',
+        accountCombination: l.accountCombination || '',
+        reference1: invoiceNumber,
+        reference2: String(invoiceId),
+        reference5: 'AP-INVOICE-CREATION',
+        reconciledFlag: 'N',
+        createdBy: 'user',
+      })),
+    };
+
+    return [
+      {
+        step: '0 — Check for Duplicate SLA Accounting',
+        method: 'GET',
+        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${invoiceId}&eventType=AP_INVOICE_CREATION`,
+        requestBody: null,
+        status: undefined,
+        response: undefined,
+      },
+      {
+        step: '1 — Check for Duplicate GL Journal',
+        method: 'GET',
+        url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/check?reference1=${invoiceNumber}&reference2=${invoiceId}&reference5=AP-INVOICE-CREATION`,
+        requestBody: null,
+        status: undefined,
+        response: undefined,
+      },
+      {
+        step: '2 — Create SLA Accounting',
+        method: 'POST',
+        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/create`,
+        requestBody: slaPayload,
+        status: undefined,
+        response: undefined,
+      },
+      {
+        step: '3 — Create Journal in GL',
+        method: 'POST',
+        url: `${APEX_DB_CONFIG.baseUrl}/journals/create`,
+        requestBody: journalPayload,
+        status: undefined,
+        response: undefined,
+      },
+      {
+        step: '4 — Post Journal to GL',
+        method: 'PUT',
+        url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/{glBatchId}/post`,
+        requestBody: null,
+        status: undefined,
+        response: undefined,
+      },
+      {
+        step: '5 — Stamp GL IDs on SLA Header',
+        method: 'POST',
+        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/post`,
+        requestBody: { headerId: '{slaHeaderId}', glBatchId: '{glBatchId}', glBatchName: '{glBatchName}', glHeaderId: '{glHeaderId}', postedBy: 'user' },
+        status: undefined,
+        response: undefined,
+      },
+    ];
+  };
+
+  // Handle Create Accounting - Show debug drawer without running
+  const handleCreateAccounting = () => {
+    if (!previewPayload) return;
+    const steps = buildPreviewDebugSteps();
+    setPreviewDebugSteps(steps);
+    setPreviewDebugOpen(true);
+    // Reset duplicate flags and IDs for new flow
+    setSlaDuplicateExists(false);
+    setGlDuplicateExists(false);
+    setPreviewSlaHeaderId(null);
+    setPreviewGlBatchId(null);
+    setPreviewGlHeaderId(null);
+    setPreviewGlBatchName('');
+  };
+
+  // Run individual debug step
+  const runPreviewDebugStep = async (stepIdx: number) => {
+    if (!previewPayload || !previewDebugSteps[stepIdx]) return;
+
+    // Prevent concurrent execution of the same step
+    if (executingStepIdx === stepIdx) {
+      message.warning('⏳ This step is already running...');
+      return;
+    }
+
+    // Skip Step 2 (Create SLA) if duplicate exists
+    if (stepIdx === 2 && slaDuplicateExists) {
+      message.warning('⏭️ Skipping Step 2: SLA Accounting already exists, will not create duplicate.');
+      return;
+    }
+
+    // Skip Step 3 (Create GL Journal) if duplicate exists
+    if (stepIdx === 3 && glDuplicateExists) {
+      message.warning('⏭️ Skipping Step 3: GL Journal already exists, will not create duplicate.');
+      return;
+    }
+
+    // Set loading state
+    const setLoading = (isLoading: boolean) => {
+      setPreviewDebugSteps(prev => {
+        const updated = [...prev];
+        updated[stepIdx] = { ...updated[stepIdx], loading: isLoading };
+        return updated;
+      });
+    };
+
+    // Mark this step as executing
+    setExecutingStepIdx(stepIdx);
+    setLoading(true);
+
+    try {
+      const step = previewDebugSteps[stepIdx];
+      const opts: RequestInit = {
+        method: step.method,
+        headers: { Accept: 'application/json' },
+      };
+
+      // Replace URL placeholders with actual captured IDs
+      const glBatchNameValue = previewGlBatchName || 'AP-BATCH';
+      let url = step.url
+        .replace('{glBatchId}', String(previewGlBatchId || 'placeholder'))
+        .replace('{slaHeaderId}', String(previewSlaHeaderId || 'placeholder'))
+        .replace('{glBatchName}', glBatchNameValue)
+        .replace('{glHeaderId}', String(previewGlHeaderId || 'placeholder'));
+
+      // Handle request body with placeholder replacements
+      let requestBody = step.requestBody;
+      if (requestBody && typeof requestBody === 'object') {
+        // Create a copy and replace placeholders in the body
+        const bodyStr = JSON.stringify(requestBody);
+        const replacedBodyStr = bodyStr
+          .replace(/{slaHeaderId}/g, String(previewSlaHeaderId || '0'))
+          .replace(/{glBatchId}/g, String(previewGlBatchId || '0'))
+          .replace(/{glHeaderId}/g, String(previewGlHeaderId || '0'))
+          .replace(/{glBatchName}/g, glBatchNameValue);
+
         try {
-          const desc = await validateAccountCode(acct);
-          if (desc?.segmentDetails) {
-            accountDescs[acct] = desc.segmentDetails;
-          }
-        } catch {
-          // Silent fail for account descriptions
+          requestBody = JSON.parse(replacedBodyStr);
+        } catch (e) {
+          console.error('Failed to parse replaced body:', replacedBodyStr);
+        }
+
+        opts.headers = { ...opts.headers, 'Content-Type': 'application/json' };
+        opts.body = JSON.stringify(requestBody);
+      }
+
+      console.log('🔌 Running step:', {
+        stepIdx,
+        method: step.method,
+        url,
+        body: requestBody
+      });
+
+      const res = await fetch(url, opts);
+      const text = await res.text();
+      let data: any = {};
+
+      // Try to parse response as JSON
+      if (text && text.trim()) {
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          data = { message: text };
         }
       }
 
-      // Calculate totals
-      const invoiceTotal = rawLines.reduce((sum: number, l: any) => sum + (Number(l.line_amount) || 0), 0);
-      const taxTotal = rawLines.reduce((sum: number, l: any) => sum + (Number(l.tax_control_amount) || 0), 0);
-      const grandTotal = invoiceTotal + taxTotal;
-
-      setPreviewPayload({
-        invoiceId: record.invoiceId,
-        invoiceNumber: record.invoiceNumber,
-        accountingLines,
-        accountDescs,
-        invoiceTotal,
-        taxTotal,
-        grandTotal,
-        isBalanced: Math.abs(accountingLines.filter((l: any) => l.lineType === 'DR').reduce((sum: number, l: any) => sum + l.amount, 0) - accountingLines.filter((l: any) => l.lineType === 'CR').reduce((sum: number, l: any) => sum + l.amount, 0)) < 0.01,
+      // Update response and clear loading
+      setPreviewDebugSteps(prev => {
+        const updated = [...prev];
+        updated[stepIdx] = { ...updated[stepIdx], status: res.status, response: data, loading: false };
+        return updated;
       });
 
-      setPreviewCreationSteps(prev => [...prev, 'Ready to create accounting']);
-    } catch (error) {
-      console.error('Error building accounting preview:', error);
-      message.error('Failed to build accounting preview');
-      setPreviewModalOpen(false);
+      // Clear execution state
+      setExecutingStepIdx(null);
+      setLoading(false);
+
+      if (res.ok) {
+        if (stepIdx === 0) {
+          // SLA duplicate check step
+          const exists = data.exists || data.header_exists || false;
+          setSlaDuplicateExists(exists);
+
+          // Capture IDs from check response if available (existing accounting)
+          const existingHeaderId = data.headerId || data.header_id;
+          if (existingHeaderId && exists) {
+            setPreviewSlaHeaderId(existingHeaderId);
+            console.log('Existing SLA found:', existingHeaderId);
+          }
+          if (exists) {
+            message.warning('⚠️ SLA Accounting already exists (ID: ' + existingHeaderId + '). Step 2 will be skipped to prevent duplicate creation.');
+          } else {
+            message.success('✓ No duplicate SLA accounting found. Safe to create.');
+          }
+        } else if (stepIdx === 1) {
+          // GL Journal duplicate check step
+          const journalExists = data.exists || data.journal_exists || data.items?.length > 0 || false;
+          setGlDuplicateExists(journalExists);
+
+          // Capture IDs from check response if available (existing journal)
+          const existingBatchId = data.batchId || data.batch_id || data.jeBatchId || data.je_batch_id;
+          if (existingBatchId && journalExists) {
+            setPreviewGlBatchId(existingBatchId);
+            console.log('Existing GL journal found:', existingBatchId);
+          }
+          if (journalExists) {
+            message.warning('⚠️ GL Journal already exists (ID: ' + existingBatchId + '). Step 3 will be skipped to prevent duplicate creation.');
+          } else {
+            message.success('✓ No duplicate GL journal found. Safe to create.');
+          }
+        } else if (stepIdx === 2) {
+          // SLA creation - extract and save SLA header ID
+          const slaId = data.headerId || data.header_id;
+          if (slaId) {
+            setPreviewSlaHeaderId(slaId);
+            console.log('SLA created:', slaId);
+            message.success(`✓ SLA Accounting created (ID: ${slaId})`);
+          } else {
+            message.success(`Step ${stepIdx + 1} completed successfully`);
+          }
+        } else if (stepIdx === 3) {
+          // GL journal creation - extract and save batch ID
+          console.log('Step 3 full response:', data);
+
+          // Try multiple field names for batchId
+          let batchId = data.jeBatchId || data.je_batch_id || data.batchId || data.batch_id;
+
+          // If not found, try nested properties
+          if (!batchId && data.batch?.id) batchId = data.batch.id;
+          if (!batchId && data.batch?.batchId) batchId = data.batch.batchId;
+          if (!batchId && data.header?.id) batchId = data.header.id;
+          if (!batchId && data.header?.batchId) batchId = data.header.batchId;
+
+          // Try to extract from headers array if it exists
+          if (!batchId && data.headers?.length > 0) {
+            batchId = data.headers[0].batchId || data.headers[0].id;
+          }
+
+          const headerId = data.jeHeaderId || data.je_header_id || data.headerId || data.header_id;
+
+          if (batchId) {
+            setPreviewGlBatchId(batchId);
+            console.log('✓ GL journal created with Batch ID:', batchId);
+            message.success(`✓ GL Journal created (Batch ID: ${batchId})`);
+          } else {
+            console.warn('⚠️ Batch ID not found in response. Available fields:', Object.keys(data));
+            message.warning('⚠️ Step completed but Batch ID not found in response. Check console logs.');
+          }
+          if (headerId) {
+            setPreviewGlHeaderId(headerId);
+          }
+
+          // Capture batch name if available
+          const batchName = data.batchName || data.batch_name || data.batch?.batchName || 'AP-BATCH';
+          setPreviewGlBatchName(batchName);
+          console.log('Batch name:', batchName);
+        } else {
+          message.success(`Step ${stepIdx} completed successfully`);
+        }
+      }
+    } catch (error: any) {
+      console.error('Step execution error:', error);
+      setPreviewDebugSteps(prev => {
+        const updated = [...prev];
+        updated[stepIdx] = { ...updated[stepIdx], response: { error: error.message }, loading: false };
+        return updated;
+      });
+      setExecutingStepIdx(null);
+      setLoading(false);
+      message.error(`Step ${stepIdx + 1} failed: ${error.message}`);
+    }
+  };
+
+  // Delete SLA accounting entry
+  const handleDeleteSla = async () => {
+    if (!previewSlaHeaderId) {
+      message.error('No SLA header ID available. Run Step 2 first.');
+      return;
+    }
+
+    try {
+      const result = await deleteSlaAccounting(previewSlaHeaderId);
+      if (result.success) {
+        message.success(`✓ SLA accounting (ID: ${previewSlaHeaderId}) deleted successfully`);
+        setPreviewSlaHeaderId(null);
+      } else {
+        message.error(`Failed to delete SLA: ${result.error || result.message}`);
+      }
+    } catch (err: any) {
+      message.error(`Error deleting SLA: ${err.message}`);
+    }
+  };
+
+  // Delete GL journal batch
+  const handleDeleteGlJournal = async () => {
+    if (!previewGlBatchId) {
+      message.error('No GL batch ID available. Run Step 3 first.');
+      return;
+    }
+
+    try {
+      const result = await deleteGlJournal(previewGlBatchId);
+      if (result.success) {
+        message.success(`✓ GL journal batch (ID: ${previewGlBatchId}) deleted successfully`);
+        setPreviewGlBatchId(null);
+      } else {
+        message.error(`Failed to delete GL journal: ${result.error || result.message}`);
+      }
+    } catch (err: any) {
+      message.error(`Error deleting GL journal: ${err.message}`);
+    }
+  };
+
+  // Manual delete SLA by entered ID or auto-captured ID
+  const handleManualDeleteSla = async () => {
+    const idToDelete = manualSlaDeleteId.trim() ? Number(manualSlaDeleteId) : previewSlaHeaderId;
+
+    if (!idToDelete) {
+      message.error('No SLA Header ID available. Run Step 2 first or enter an ID manually.');
+      return;
+    }
+
+    try {
+      console.log('🔌 Deleting SLA:', {
+        endpoint: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete`,
+        method: 'POST',
+        body: { headerId: idToDelete },
+      });
+
+      const result = await deleteSlaAccounting(idToDelete);
+      console.log('📥 SLA Delete Response:', result);
+
+      if (result.success) {
+        message.success(`✓ SLA (ID: ${idToDelete}) deleted successfully`);
+        setManualSlaDeleteId('');
+        setPreviewSlaHeaderId(null);
+      } else {
+        message.error(`Failed to delete SLA: ${result.error || result.message}`);
+      }
+    } catch (err: any) {
+      console.error('❌ SLA Delete Error:', err);
+      message.error(`Error: ${err.message}`);
+    }
+  };
+
+  // Manual delete GL journal by entered ID or auto-captured ID
+  const handleManualDeleteGlJournal = async () => {
+    const idToDelete = manualGlDeleteId.trim() ? manualGlDeleteId : (previewGlBatchId ? String(previewGlBatchId) : null);
+
+    if (!idToDelete) {
+      message.error('No GL Batch ID available. Run Step 3 first or enter an ID manually.');
+      return;
+    }
+
+    try {
+      console.log('🔌 Deleting GL Journal:', {
+        endpoint: `${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${idToDelete}`,
+        method: 'DELETE',
+        body: 'No body (DELETE request)',
+      });
+
+      const result = await deleteGlJournal(idToDelete);
+      console.log('📥 GL Delete Response:', result);
+
+      if (result.success) {
+        message.success(`✓ GL Journal (ID: ${idToDelete}) deleted successfully`);
+        setManualGlDeleteId('');
+        setPreviewGlBatchId(null);
+      } else {
+        message.error(`Failed to delete GL journal: ${result.error || result.message}`);
+      }
+    } catch (err: any) {
+      console.error('❌ GL Delete Error:', err);
+      message.error(`Error: ${err.message}`);
     }
   };
 
@@ -2523,24 +3154,6 @@ const ManageInvoices: React.FC = () => {
       key: 'createdBy',
       width: 130,
       ellipsis: true,
-    },
-    {
-      title: 'Action',
-      key: 'action',
-      width: 100,
-      fixed: 'right' as const,
-      render: (_: any, record: InvoiceRecord) => (
-        <Tooltip title="Re-Create Accounting Preview">
-          <Button
-            size="small"
-            type="default"
-            onClick={() => handleRecreateAccountingPreview(record)}
-            style={{ color: REDWOOD.info }}
-          >
-            Re-Create
-          </Button>
-        </Tooltip>
-      ),
     },
   ];
 
@@ -4454,7 +5067,7 @@ const ManageInvoices: React.FC = () => {
         open={accountingAllModalOpen}
         onCancel={() => setAccountingAllModalOpen(false)}
         footer={<Button onClick={() => setAccountingAllModalOpen(false)}>Close</Button>}
-        width={1200}
+        width="90vw"
         styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
         destroyOnClose
       >
@@ -4465,9 +5078,117 @@ const ManageInvoices: React.FC = () => {
           </div>
         ) : accountingAllData.length === 0 ? (
           <Alert type="info" message="No accounting data found for displayed invoices" showIcon />
-        ) : (
-          <Table
+        ) : (() => {
+          const stats = {
+            total: accountingAllData.length,
+            good: accountingAllData.filter(inv => {
+              const hasIssue = inv.debitAccount && inv.creditAccount && inv.debitAccount === inv.creditAccount;
+              const isPosted = inv.glStatus === 'POSTED' || inv.glStatus === 'SUBMITTED';
+              return isPosted && !hasIssue;
+            }).length,
+            issues: accountingAllData.filter(inv =>
+              inv.debitAccount && inv.creditAccount && inv.debitAccount === inv.creditAccount
+            ).length,
+            notPosted: accountingAllData.filter(inv =>
+              !inv.glStatus || (inv.glStatus !== 'POSTED' && inv.glStatus !== 'SUBMITTED')
+            ).length,
+          };
+          const successRate = stats.total > 0 ? Math.round((stats.good / stats.total) * 100) : 0;
+
+          return (
+            <>
+              {/* KPI Summary */}
+              <Card style={{ marginBottom: 16, background: '#fafafa' }}>
+                <Row gutter={24}>
+                  <Col span={6}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.success }}>
+                        {stats.good}
+                      </div>
+                      <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 4 }}>
+                        ✓ Good
+                      </div>
+                      <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+                        GL Posted & Balanced
+                      </div>
+                    </div>
+                  </Col>
+                  <Col span={6}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.error }}>
+                        {stats.issues}
+                      </div>
+                      <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 4 }}>
+                        ✕ Issues
+                      </div>
+                      <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+                        Same Debit/Credit Account
+                      </div>
+                    </div>
+                  </Col>
+                  <Col span={6}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.warning }}>
+                        {stats.notPosted}
+                      </div>
+                      <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 4 }}>
+                        ⚠ Not Posted
+                      </div>
+                      <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+                        Missing GL Entry
+                      </div>
+                    </div>
+                  </Col>
+                  <Col span={6}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.success }}>
+                        {successRate}%
+                      </div>
+                      <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 4 }}>
+                        Success Rate
+                      </div>
+                      <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
+                        {stats.total} Total Invoices
+                      </div>
+                    </div>
+                  </Col>
+                </Row>
+              </Card>
+
+              {/* Data Table */}
+              <Table
             columns={[
+              {
+                title: 'GL Status',
+                key: 'status',
+                width: 80,
+                align: 'center',
+                render: (_: any, record: any) => {
+                  const hasIssue = record.debitAccount && record.creditAccount && record.debitAccount === record.creditAccount;
+                  const isPosted = record.glStatus === 'POSTED' || record.glStatus === 'SUBMITTED';
+                  const statusText = record.glStatus || 'N/A';
+
+                  let icon = <CloseCircleOutlined style={{ fontSize: 14, color: REDWOOD.warning }} />;
+                  let title = 'Not Posted to GL';
+
+                  if (hasIssue) {
+                    icon = <ExclamationCircleOutlined style={{ fontSize: 14, color: REDWOOD.error }} />;
+                    title = 'ERROR: Debit and Credit to same account';
+                  } else if (isPosted) {
+                    icon = <CheckCircleOutlined style={{ fontSize: 14, color: REDWOOD.success }} />;
+                    title = `GL ${statusText}`;
+                  }
+
+                  return (
+                    <Tooltip title={title}>
+                      <Space size={4}>
+                        {icon}
+                        <span style={{ fontSize: 11 }}>{statusText}</span>
+                      </Space>
+                    </Tooltip>
+                  );
+                },
+              },
               {
                 title: 'Invoice Number',
                 dataIndex: 'invoiceNumber',
@@ -4483,71 +5204,168 @@ const ManageInvoices: React.FC = () => {
                 ),
               },
               {
-                title: 'Debit Account',
-                dataIndex: 'debitAccount',
-                key: 'debitAccount',
-                width: 180,
+                title: 'Invoice Date',
+                dataIndex: 'invoiceDate',
+                key: 'invoiceDate',
+                width: 110,
+                render: (value: string) => (
+                  <span style={{ fontSize: 11 }}>{value || '—'}</span>
+                ),
+              },
+              {
+                title: 'Ref1 (Invoice#)',
+                dataIndex: 'reference1',
+                key: 'reference1',
+                width: 120,
                 ellipsis: true,
                 render: (value: string) => (
                   <Tooltip title={value}>
-                    <span style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.success }}>{value || '—'}</span>
+                    <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{value || '—'}</span>
                   </Tooltip>
                 ),
+              },
+              {
+                title: 'Ref2 (ID)',
+                dataIndex: 'reference2',
+                key: 'reference2',
+                width: 100,
+                render: (value: string) => (
+                  <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{value || '—'}</span>
+                ),
+              },
+              {
+                title: 'Ref3 (Class)',
+                dataIndex: 'reference3',
+                key: 'reference3',
+                width: 100,
+                render: (value: string) => (
+                  <Tooltip title={value || 'Accounting Class'}>
+                    <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{value || '—'}</span>
+                  </Tooltip>
+                ),
+              },
+              {
+                title: 'Ref4 (BU)',
+                dataIndex: 'reference4',
+                key: 'reference4',
+                width: 100,
+                render: (value: string) => (
+                  <Tooltip title={value || 'Business Unit'}>
+                    <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{value || '—'}</span>
+                  </Tooltip>
+                ),
+              },
+              {
+                title: 'Ref5 (Event)',
+                dataIndex: 'reference5',
+                key: 'reference5',
+                width: 140,
+                render: (value: string) => (
+                  <Tooltip title={value}>
+                    <span style={{ fontFamily: 'monospace', fontSize: 10, color: REDWOOD.info }}>{value || '—'}</span>
+                  </Tooltip>
+                ),
+              },
+              {
+                title: 'Batch ID',
+                dataIndex: 'glBatchId',
+                key: 'glBatchId',
+                width: 100,
+                render: (value: number | null) => (
+                  <Tooltip title={value ? `Batch ID: ${value}` : 'Not posted to GL'}>
+                    <span style={{ fontFamily: 'monospace', fontSize: 11, color: value ? REDWOOD.success : REDWOOD.warning }}>
+                      {value ? value : '—'}
+                    </span>
+                  </Tooltip>
+                ),
+              },
+              {
+                title: 'Debit Account',
+                dataIndex: 'debitAccount',
+                key: 'debitAccount',
+                width: 150,
+                ellipsis: true,
+                render: (value: string, record: any) => {
+                  const isIssue = record.debitAccount && record.creditAccount && record.debitAccount === record.creditAccount;
+                  return (
+                    <Tooltip title={value}>
+                      <span style={{
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        color: isIssue ? REDWOOD.error : REDWOOD.success,
+                        fontWeight: isIssue ? 600 : 'normal'
+                      }}>
+                        {value || '—'}
+                      </span>
+                    </Tooltip>
+                  );
+                },
               },
               {
                 title: 'Total Debits',
                 dataIndex: 'debits',
                 key: 'debits',
-                width: 130,
+                width: 120,
                 align: 'right',
-                render: (value: number) => <Text strong style={{ color: REDWOOD.success }}>{formatCurrency(value)}</Text>,
+                render: (value: number) => <Text style={{ fontSize: 11, color: REDWOOD.success }}>{formatCurrency(value)}</Text>,
               },
               {
                 title: 'Credit Account',
                 dataIndex: 'creditAccount',
                 key: 'creditAccount',
-                width: 180,
+                width: 150,
                 ellipsis: true,
-                render: (value: string) => (
-                  <Tooltip title={value}>
-                    <span style={{ fontFamily: 'monospace', fontSize: 11, color: REDWOOD.error }}>{value || '—'}</span>
-                  </Tooltip>
-                ),
+                render: (value: string, record: any) => {
+                  const isIssue = record.debitAccount && record.creditAccount && record.debitAccount === record.creditAccount;
+                  return (
+                    <Tooltip title={value}>
+                      <span style={{
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        color: isIssue ? REDWOOD.error : REDWOOD.error,
+                        fontWeight: isIssue ? 600 : 'normal'
+                      }}>
+                        {value || '—'}
+                      </span>
+                    </Tooltip>
+                  );
+                },
               },
               {
                 title: 'Total Credits',
                 dataIndex: 'credits',
                 key: 'credits',
-                width: 130,
+                width: 120,
                 align: 'right',
-                render: (value: number) => <Text strong style={{ color: REDWOOD.error }}>{formatCurrency(value)}</Text>,
-              },
-              {
-                title: 'Net',
-                key: 'net',
-                width: 130,
-                align: 'right',
-                render: (_: any, record: any) => {
-                  const net = record.debits - record.credits;
-                  return <Text strong style={{ color: net >= 0 ? REDWOOD.success : REDWOOD.error }}>{formatCurrency(net)}</Text>;
-                },
+                render: (value: number) => <Text style={{ fontSize: 11, color: REDWOOD.error }}>{formatCurrency(value)}</Text>,
               },
               {
                 title: 'Action',
                 key: 'action',
-                width: 120,
+                width: 140,
+                fixed: 'right',
                 render: (_: any, record: any) => (
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={() => {
-                      const inv = invoices.find(i => i.invoiceId === record.invoiceId);
-                      if (inv) openAccountingForSingle(inv);
-                    }}
-                    style={{ color: REDWOOD.info }}
-                  >
-                    View Details
-                  </Button>
+                  <Space size="small">
+                    <Button
+                      type="link"
+                      size="small"
+                      onClick={() => handleRecreateAccountingPreview(record)}
+                      style={{ color: REDWOOD.info, padding: '0 4px' }}
+                    >
+                      Re-Create
+                    </Button>
+                    <Button
+                      type="link"
+                      size="small"
+                      onClick={() => {
+                        const inv = invoices.find(i => i.invoiceId === record.invoiceId);
+                        if (inv) openAccountingForSingle(inv);
+                      }}
+                      style={{ color: REDWOOD.info, padding: '0 4px' }}
+                    >
+                      Details
+                    </Button>
+                  </Space>
                 ),
               },
             ]}
@@ -4555,9 +5373,11 @@ const ManageInvoices: React.FC = () => {
             rowKey="invoiceId"
             pagination={{ pageSize: 20 }}
             size="small"
-            scroll={{ x: 1100 }}
-          />
-        )}
+              scroll={{ x: 2100 }}
+              />
+            </>
+          );
+        })()}
       </Modal>
 
       {/* Accounting for Single Invoice Modal */}
@@ -4566,6 +5386,15 @@ const ManageInvoices: React.FC = () => {
           <Space>
             <AccountBookOutlined style={{ color: REDWOOD.info }} />
             <span>Accounting Details — {accountingSingleInvoice?.invoiceNumber}</span>
+            <Tooltip title="View API Endpoint">
+              <Button
+                type="text"
+                size="small"
+                icon={<ApiOutlined style={{ color: REDWOOD.info }} />}
+                onClick={() => setAccountingApiDebugOpen(true)}
+                style={{ padding: '0 4px', marginLeft: 'auto' }}
+              />
+            </Tooltip>
           </Space>
         }
         open={accountingSingleModalOpen}
@@ -4615,21 +5444,521 @@ const ManageInvoices: React.FC = () => {
               </Row>
             </Card>
 
-            {/* Lines Table */}
+            {/* Tabs for SLA vs GL Lines */}
+            <Tabs
+              defaultActiveKey="sla"
+              items={[
+                {
+                  key: 'sla',
+                  label: (
+                    <span>
+                      SLA Lines ({accountingSingleData.lines?.length || 0})
+                    </span>
+                  ),
+                  children: (
+                    <Table
+                      columns={[
+                        {
+                          title: 'Line #',
+                          dataIndex: 'lineNumber',
+                          key: 'lineNumber',
+                          width: 60,
+                        },
+                        {
+                          title: 'Account',
+                          dataIndex: 'accountCombination',
+                          key: 'accountCombination',
+                          width: 200,
+                          ellipsis: true,
+                        },
+                        {
+                          title: 'Description',
+                          dataIndex: 'description',
+                          key: 'description',
+                          width: 200,
+                          ellipsis: true,
+                        },
+                        {
+                          title: 'Debit',
+                          dataIndex: 'enteredDr',
+                          key: 'enteredDr',
+                          width: 120,
+                          align: 'right',
+                          render: (value: number) => value ? <Text style={{ color: REDWOOD.success }}>{formatCurrency(value)}</Text> : '—',
+                        },
+                        {
+                          title: 'Credit',
+                          dataIndex: 'enteredCr',
+                          key: 'enteredCr',
+                          width: 120,
+                          align: 'right',
+                          render: (value: number) => value ? <Text style={{ color: REDWOOD.error }}>{formatCurrency(value)}</Text> : '—',
+                        },
+                      ]}
+                      dataSource={accountingSingleData.lines}
+                      rowKey={(_, i) => i}
+                      pagination={false}
+                      size="small"
+                      summary={() => {
+                        const totalDebits = (accountingSingleData.lines || []).reduce((sum: number, item: any) => sum + (Number(item.enteredDr) || 0), 0);
+                        const totalCredits = (accountingSingleData.lines || []).reduce((sum: number, item: any) => sum + (Number(item.enteredCr) || 0), 0);
+                        return (
+                          <Table.Summary fixed>
+                            <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                              <Table.Summary.Cell index={0} colSpan={3}>
+                                <Text strong>TOTAL</Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={3} align="right">
+                                <Text strong style={{ color: REDWOOD.success }}>{formatCurrency(totalDebits)}</Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={4} align="right">
+                                <Text strong style={{ color: REDWOOD.error }}>{formatCurrency(totalCredits)}</Text>
+                              </Table.Summary.Cell>
+                            </Table.Summary.Row>
+                          </Table.Summary>
+                        );
+                      }}
+                    />
+                  ),
+                },
+                {
+                  key: 'gl',
+                  label: (
+                    <span>
+                      GL Lines ({accountingSingleData.glLines?.length || 0})
+                      {accountingSingleData.glLines && accountingSingleData.glLines.length === 0 && (
+                        <Tooltip title="No GL journal lines found for this invoice"><WarningOutlined style={{ marginLeft: 6, color: REDWOOD.warning }} /></Tooltip>
+                      )}
+                    </span>
+                  ),
+                  children: !accountingSingleData.glLines || accountingSingleData.glLines.length === 0 ? (
+                    <Alert
+                      type="warning"
+                      message="No GL journal lines found"
+                      description="This invoice has not been posted to GL yet, or GL lines could not be retrieved by reference2 (Invoice ID) + reference5 (AP-INVOICE-CREATION)."
+                      showIcon
+                    />
+                  ) : (
+                    <Table
+                      columns={[
+                        {
+                          title: 'Line #',
+                          dataIndex: 'line_num',
+                          key: 'line_num',
+                          width: 60,
+                        },
+                        {
+                          title: 'Account',
+                          dataIndex: 'account',
+                          key: 'account',
+                          width: 180,
+                          ellipsis: true,
+                          render: (value: string) => (
+                            <Tooltip title={value}>
+                              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{value || '—'}</span>
+                            </Tooltip>
+                          ),
+                        },
+                        {
+                          title: 'Description',
+                          dataIndex: 'description',
+                          key: 'description',
+                          width: 200,
+                          ellipsis: true,
+                        },
+                        {
+                          title: 'Ref1',
+                          dataIndex: 'reference1',
+                          key: 'reference1',
+                          width: 110,
+                          render: (value: string) => (
+                            <Tooltip title={value || 'Invoice Number'}>
+                              <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{value || '—'}</span>
+                            </Tooltip>
+                          ),
+                        },
+                        {
+                          title: 'Ref2',
+                          dataIndex: 'reference2',
+                          key: 'reference2',
+                          width: 90,
+                          render: (value: string) => (
+                            <Tooltip title={value || 'Invoice ID'}>
+                              <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{value || '—'}</span>
+                            </Tooltip>
+                          ),
+                        },
+                        {
+                          title: 'Ref3',
+                          dataIndex: 'reference3',
+                          key: 'reference3',
+                          width: 90,
+                          render: (value: string) => (
+                            <Tooltip title={value || 'Accounting Class'}>
+                              <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{value || '—'}</span>
+                            </Tooltip>
+                          ),
+                        },
+                        {
+                          title: 'Ref4',
+                          dataIndex: 'reference4',
+                          key: 'reference4',
+                          width: 90,
+                          render: (value: string) => (
+                            <Tooltip title={value || 'Business Unit'}>
+                              <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{value || '—'}</span>
+                            </Tooltip>
+                          ),
+                        },
+                        {
+                          title: 'Ref5',
+                          dataIndex: 'reference5',
+                          key: 'reference5',
+                          width: 140,
+                          render: (value: string) => (
+                            <Tooltip title={value || 'Event Type'}>
+                              <span style={{ fontFamily: 'monospace', fontSize: 10, color: REDWOOD.info }}>{value || '—'}</span>
+                            </Tooltip>
+                          ),
+                        },
+                        {
+                          title: 'Debit',
+                          dataIndex: 'entered_dr',
+                          key: 'entered_dr',
+                          width: 120,
+                          align: 'right',
+                          render: (value: number) => value ? <Text style={{ color: REDWOOD.success }}>{formatCurrency(value)}</Text> : '—',
+                        },
+                        {
+                          title: 'Credit',
+                          dataIndex: 'entered_cr',
+                          key: 'entered_cr',
+                          width: 120,
+                          align: 'right',
+                          render: (value: number) => value ? <Text style={{ color: REDWOOD.error }}>{formatCurrency(value)}</Text> : '—',
+                        },
+                      ]}
+                      dataSource={accountingSingleData.glLines}
+                      rowKey={(_, i) => i}
+                      pagination={false}
+                      size="small"
+                      scroll={{ x: 1400 }}
+                      summary={() => {
+                        const totalDebits = (accountingSingleData.glLines || []).reduce((sum: number, item: any) => sum + (Number(item.entered_dr) || 0), 0);
+                        const totalCredits = (accountingSingleData.glLines || []).reduce((sum: number, item: any) => sum + (Number(item.entered_cr) || 0), 0);
+                        return (
+                          <Table.Summary fixed>
+                            <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
+                              <Table.Summary.Cell index={0} colSpan={8}>
+                                <Text strong>TOTAL</Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={8} align="right">
+                                <Text strong style={{ color: REDWOOD.success }}>{formatCurrency(totalDebits)}</Text>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={9} align="right">
+                                <Text strong style={{ color: REDWOOD.error }}>{formatCurrency(totalCredits)}</Text>
+                              </Table.Summary.Cell>
+                            </Table.Summary.Row>
+                          </Table.Summary>
+                        );
+                      }}
+                    />
+                  ),
+                },
+              ]}
+            />
+          </>
+        )}
+      </Modal>
+
+      {/* Accounting API Debug Modal */}
+      <Modal
+        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> GL Journal Lines API Test</Space>}
+        open={accountingApiDebugOpen}
+        onCancel={() => setAccountingApiDebugOpen(false)}
+        footer={<Button onClick={() => setAccountingApiDebugOpen(false)}>Close</Button>}
+        width={900}
+        styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size={16}>
+          <div>
+            <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 6, fontWeight: 600 }}>
+              GL Journal Lines Endpoint:
+            </div>
+            <div style={{
+              background: REDWOOD.neutral100,
+              border: `1px solid ${REDWOOD.neutral200}`,
+              borderRadius: 6,
+              padding: '12px',
+              fontFamily: 'monospace',
+              fontSize: 11,
+              wordBreak: 'break-all',
+              color: REDWOOD.neutral900,
+            }}>
+              GET {`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=[INVOICE_ID]&reference5=AP-INVOICE-CREATION`}
+            </div>
+            <Button
+              size="small"
+              icon={<CopyOutlined />}
+              style={{ marginTop: 8 }}
+              onClick={() => {
+                const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=[INVOICE_ID]&reference5=AP-INVOICE-CREATION`;
+                navigator.clipboard.writeText(url);
+                message.success('URL copied to clipboard!');
+              }}
+            >
+              Copy URL
+            </Button>
+          </div>
+
+          <div style={{ borderTop: `1px solid ${REDWOOD.neutral200}`, paddingTop: 12 }}>
+            <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 8, fontWeight: 600 }}>
+              Test with Invoice ID:
+            </div>
+            <Space.Compact style={{ width: '100%' }}>
+              <Input
+                placeholder="Enter Invoice ID (e.g., 900283)"
+                value={apiTestInvoiceId}
+                onChange={(e) => setApiTestInvoiceId(e.target.value)}
+                onPressEnter={() => handleTestGlJournalLinesApi(apiTestInvoiceId)}
+              />
+              <Button
+                type="primary"
+                icon={<ApiOutlined />}
+                onClick={() => handleTestGlJournalLinesApi(apiTestInvoiceId)}
+                loading={apiTestLoading}
+              >
+                Test API
+              </Button>
+            </Space.Compact>
+          </div>
+
+          {apiTestResponse && (
+            <div style={{ borderTop: `1px solid ${REDWOOD.neutral200}`, paddingTop: 12 }}>
+              <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 6, fontWeight: 600 }}>
+                Response:
+              </div>
+              <pre style={{
+                background: REDWOOD.neutral100,
+                border: `1px solid ${REDWOOD.neutral200}`,
+                borderRadius: 6,
+                padding: '12px',
+                fontSize: 10,
+                maxHeight: 400,
+                overflowY: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                margin: 0,
+              }}>
+                {JSON.stringify(apiTestResponse, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {apiTestError && (
+            <div style={{
+              background: '#fff2f0',
+              border: `1px solid ${REDWOOD.error}`,
+              borderRadius: 6,
+              padding: '10px 12px',
+              fontSize: 12,
+            }}>
+              <div style={{ fontWeight: 600, color: REDWOOD.error, marginBottom: 6 }}>Error:</div>
+              <pre style={{ margin: 0, color: REDWOOD.error, fontSize: 11 }}>
+                {apiTestError}
+              </pre>
+            </div>
+          )}
+
+          <div style={{
+            background: '#f0f7ff',
+            border: `1px solid ${REDWOOD.info}`,
+            borderRadius: 6,
+            padding: '10px 12px',
+            fontSize: 12,
+          }}>
+            <div style={{ fontWeight: 600, color: REDWOOD.info, marginBottom: 6 }}>ℹ️ Expected Response Structure:</div>
+            <pre style={{
+              background: '#e6f7ff',
+              padding: '8px',
+              borderRadius: 4,
+              fontSize: 10,
+              margin: 0,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}>
+{`[
+  {
+    "je_header_id": number,
+    "je_batch_id": number,
+    "reference1": "INVOICE_NUMBER",
+    "reference2": "INVOICE_ID",
+    "reference5": "AP-INVOICE-CREATION",
+    "accountCombination": "GL account code",
+    "description": "Line description",
+    "enteredDr": number,
+    "enteredCr": number,
+    "status": "POSTED|DRAFT"
+  }
+]`}
+            </pre>
+          </div>
+        </Space>
+      </Modal>
+
+      {/* Re-Create Accounting Modal - Shows What WILL Be Created */}
+      <Modal
+        title={`Re-Create Accounting — ${previewPayload?.header?.sourceNumber || ''}`}
+        open={previewModalOpen}
+        onCancel={() => {
+          setPreviewModalOpen(false);
+          setPreviewPayload(null);
+        }}
+        footer={[
+          <Button key="close" onClick={() => setPreviewModalOpen(false)}>
+            Close
+          </Button>,
+          <Button
+            key="create"
+            type="primary"
+            onClick={handleCreateAccounting}
+            style={{ background: REDWOOD.success }}
+          >
+            Create Accounting & Post to GL
+          </Button>,
+        ]}
+        width={1200}
+        destroyOnClose
+      >
+        {previewPayload && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* API Endpoint Info */}
+            <div style={{
+              background: '#f6ffed',
+              border: `1px solid #b7eb8f`,
+              borderRadius: 6,
+              padding: '10px 12px',
+              fontSize: 11,
+            }}>
+              <div style={{ color: '#52c41a', fontWeight: 600, marginBottom: 6 }}>
+                <ApiOutlined /> API Endpoint:
+              </div>
+              <div style={{ fontFamily: 'monospace', color: REDWOOD.neutral600, wordBreak: 'break-all', fontSize: 10 }}>
+                GET {APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines?P_INVOICE_ID=[INVOICE_ID]
+              </div>
+            </div>
+
+            {/* Invoice Summary - Invoice Amount | Tax | Total */}
+            <Row gutter={16}>
+              <Col span={8}>
+                <Card size="small" style={{ background: '#fafafa' }}>
+                  <Statistic
+                    title="Invoice Amount"
+                    value={previewPayload.lines?.filter((l: any) => l.lineType === 'DR' && l.accountingClass !== 'TAX').reduce((s: number, l: any) => s + (l.enteredDr || 0), 0)}
+                    precision={2}
+                    prefix="AED "
+                    valueStyle={{ color: REDWOOD.primary, fontSize: 14 }}
+                  />
+                </Card>
+              </Col>
+              <Col span={8}>
+                <Card size="small" style={{ background: '#fafafa' }}>
+                  <Statistic
+                    title="Tax Amount"
+                    value={previewPayload.lines?.filter((l: any) => l.lineType === 'DR' && l.accountingClass === 'TAX').reduce((s: number, l: any) => s + (l.enteredDr || 0), 0)}
+                    precision={2}
+                    prefix="AED "
+                    valueStyle={{ color: REDWOOD.warning, fontSize: 14 }}
+                  />
+                </Card>
+              </Col>
+              <Col span={8}>
+                <Card size="small" style={{ background: '#fafafa' }}>
+                  <Statistic
+                    title="Total (Invoice + Tax)"
+                    value={previewPayload.lines?.filter((l: any) => l.lineType === 'CR').reduce((s: number, l: any) => s + (l.enteredCr || 0), 0)}
+                    precision={2}
+                    prefix="AED "
+                    valueStyle={{ color: REDWOOD.success, fontSize: 14 }}
+                  />
+                </Card>
+              </Col>
+            </Row>
+
+            {/* Preview Info */}
+            <div style={{
+              background: '#f0f7ff',
+              border: `1px solid ${REDWOOD.info}`,
+              borderRadius: 6,
+              padding: '10px 12px',
+              fontSize: 12,
+            }}>
+              <div style={{ color: REDWOOD.info, fontWeight: 600, marginBottom: 6 }}>
+                Accounting entries that WILL BE created:
+              </div>
+              <div style={{ color: REDWOOD.neutral600, fontSize: 11 }}>
+                Invoice: {previewPayload.header?.sourceNumber} | Lines: {previewPayload.lines?.length || 0}
+              </div>
+            </div>
+
+            {/* Accounting Lines Table */}
             <Table
               columns={[
                 {
                   title: 'Line #',
                   dataIndex: 'lineNumber',
                   key: 'lineNumber',
-                  width: 60,
+                  width: 70,
+                  align: 'center' as const,
                 },
                 {
-                  title: 'Account',
-                  dataIndex: 'accountCombination',
-                  key: 'accountCombination',
-                  width: 200,
-                  ellipsis: true,
+                  title: 'Type',
+                  dataIndex: 'lineType',
+                  key: 'lineType',
+                  width: 50,
+                  align: 'center' as const,
+                  render: (type: string) => (
+                    <Tag color={type === 'DR' ? REDWOOD.success : REDWOOD.error} style={{ fontSize: 11 }}>
+                      {type}
+                    </Tag>
+                  ),
+                },
+                {
+                  title: 'Account Combination',
+                  key: 'accountCombo',
+                  width: 350,
+                  ellipsis: false,
+                  render: (_: any, record: any) => {
+                    const text = record.accountCombination;
+                    const desc = record.accountDescription;
+                    if (!text) return '—';
+                    const segments = text.split('-');
+                    const accountSegment = segments[3] || ''; // 4th segment (index 3)
+                    const tooltipText = desc ? `${desc}\n\nFull Code: ${text}\n\nSegments: ${segments.map((seg, i) => `[${i}]${seg}`).join(', ')}` : `Full Code: ${text}\n\nSegments: ${segments.map((seg, i) => `[${i}]${seg}`).join(', ')}`;
+                    return (
+                      <Tooltip title={tooltipText}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {desc && <span style={{ fontSize: 11, color: REDWOOD.primary, fontWeight: 500 }}>{desc}</span>}
+                          <span style={{
+                            fontFamily: 'monospace',
+                            fontSize: 9,
+                            color: REDWOOD.info,
+                            fontWeight: 600
+                          }}>
+                            {accountSegment}
+                          </span>
+                          <span style={{
+                            fontFamily: 'monospace',
+                            fontSize: 8,
+                            color: REDWOOD.neutral600,
+                            wordBreak: 'break-all'
+                          }}>
+                            {text}
+                          </span>
+                        </div>
+                      </Tooltip>
+                    );
+                  },
                 },
                 {
                   title: 'Description',
@@ -4643,386 +5972,404 @@ const ManageInvoices: React.FC = () => {
                   dataIndex: 'enteredDr',
                   key: 'enteredDr',
                   width: 120,
-                  align: 'right',
-                  render: (value: number) => value ? <Text style={{ color: REDWOOD.success }}>{formatCurrency(value)}</Text> : '—',
+                  align: 'right' as const,
+                  render: (value: number) => value ? <Text style={{ color: REDWOOD.success }}>{value.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : '—',
                 },
                 {
                   title: 'Credit',
                   dataIndex: 'enteredCr',
                   key: 'enteredCr',
                   width: 120,
-                  align: 'right',
-                  render: (value: number) => value ? <Text style={{ color: REDWOOD.error }}>{formatCurrency(value)}</Text> : '—',
+                  align: 'right' as const,
+                  render: (value: number) => value ? <Text style={{ color: REDWOOD.error }}>{value.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text> : '—',
                 },
               ]}
-              dataSource={accountingSingleData.lines}
-              rowKey={(_, i) => i}
-              pagination={{ pageSize: 20 }}
+              dataSource={previewPayload.lines.map((line: any, idx: number) => ({
+                ...line,
+                key: idx,
+              }))}
+              pagination={false}
               size="small"
-              summary={() => {
-                const totalDebits = (accountingSingleData.lines || []).reduce((sum: number, item: any) => sum + (Number(item.enteredDr) || 0), 0);
-                const totalCredits = (accountingSingleData.lines || []).reduce((sum: number, item: any) => sum + (Number(item.enteredCr) || 0), 0);
+              bordered
+              summary={(rows) => {
+                const totalDr = rows.reduce((sum, r: any) => sum + (r.enteredDr || 0), 0);
+                const totalCr = rows.reduce((sum, r: any) => sum + (r.enteredCr || 0), 0);
                 return (
                   <Table.Summary fixed>
-                    <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                      <Table.Summary.Cell index={0} colSpan={3}>
-                        <Text strong>TOTAL</Text>
+                    <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 600 }}>
+                      <Table.Summary.Cell index={0} colSpan={4} align="right">
+                        <Text strong>Total</Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={3} align="right">
-                        <Text strong style={{ color: REDWOOD.success }}>{formatCurrency(totalDebits)}</Text>
+                      <Table.Summary.Cell index={1} align="right">
+                        <Text strong style={{ color: totalDr > 0 ? REDWOOD.primary : 'inherit' }}>
+                          {totalDr.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </Text>
                       </Table.Summary.Cell>
-                      <Table.Summary.Cell index={4} align="right">
-                        <Text strong style={{ color: REDWOOD.error }}>{formatCurrency(totalCredits)}</Text>
+                      <Table.Summary.Cell index={2} align="right">
+                        <Text strong style={{ color: totalCr > 0 ? REDWOOD.success : 'inherit' }}>
+                          {totalCr.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </Text>
                       </Table.Summary.Cell>
                     </Table.Summary.Row>
                   </Table.Summary>
                 );
               }}
             />
-          </>
-        )}
-      </Modal>
-
-      {/* Accounting API Debug Modal */}
-      <Modal
-        title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> Accounting API Endpoint</Space>}
-        open={accountingApiDebugOpen}
-        onCancel={() => setAccountingApiDebugOpen(false)}
-        footer={<Button onClick={() => setAccountingApiDebugOpen(false)}>Close</Button>}
-        width={800}
-      >
-        <Space direction="vertical" style={{ width: '100%' }} size={16}>
-          <div>
-            <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 6, fontWeight: 600 }}>
-              Endpoint for fetching accounting data (called for each invoice):
-            </div>
-            <div style={{
-              background: REDWOOD.neutral100,
-              border: `1px solid ${REDWOOD.neutral200}`,
-              borderRadius: 6,
-              padding: '12px',
-              fontFamily: 'monospace',
-              fontSize: 11,
-              wordBreak: 'break-all',
-              color: REDWOOD.neutral900,
-              maxHeight: 200,
-              overflowY: 'auto',
-            }}>
-              GET {`${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.slaAccounting}?sourceTable=AP_INVOICES&sourceId=[INVOICE_ID]`}
-            </div>
-            <Button
-              size="small"
-              icon={<CopyOutlined />}
-              style={{ marginTop: 8 }}
-              onClick={() => {
-                const url = `${APEX_DB_CONFIG.baseUrl}/${APEX_DB_CONFIG.endpoints.slaAccounting}?sourceTable=AP_INVOICES&sourceId=[INVOICE_ID]`;
-                navigator.clipboard.writeText(url);
-                message.success('URL copied to clipboard!');
-              }}
-            >
-              Copy URL
-            </Button>
-          </div>
-
-          <div>
-            <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 6, fontWeight: 600 }}>
-              Response Structure:
-            </div>
-            <pre style={{
-              background: REDWOOD.neutral100,
-              border: `1px solid ${REDWOOD.neutral200}`,
-              borderRadius: 6,
-              padding: '12px',
-              fontSize: 10,
-              maxHeight: 300,
-              overflowY: 'auto',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              margin: 0,
-            }}>
-{`{
-  "found": boolean,
-  "headerId": number,
-  "accountingStatus": "DRAFT|FINAL|POSTED|ERROR",
-  "lines": [
-    {
-      "lineId": number,
-      "lineNumber": number,
-      "lineType": "DR|CR",
-      "accountCombination": "GL account",
-      "enteredDr": number,
-      "enteredCr": number,
-      "description": "Line description"
-    }
-  ]
-}`}
-            </pre>
-          </div>
-
-          <div style={{
-            background: '#f0f7ff',
-            border: `1px solid ${REDWOOD.info}`,
-            borderRadius: 6,
-            padding: '10px 12px',
-            fontSize: 12,
-          }}>
-            <div style={{ fontWeight: 600, color: REDWOOD.info, marginBottom: 6 }}>ℹ️ How the data is extracted:</div>
-            <ul style={{ margin: '0 0 0 20px', paddingLeft: 0 }}>
-              <li>For each invoice in the table, this endpoint is called</li>
-              <li><strong>Debit Account:</strong> The accountCombination from the first line with enteredDr &gt; 0</li>
-              <li><strong>Credit Account:</strong> The accountCombination from the first line with enteredCr &gt; 0</li>
-              <li><strong>Total Debits:</strong> Sum of all enteredDr values</li>
-              <li><strong>Total Credits:</strong> Sum of all enteredCr values</li>
-            </ul>
-          </div>
-        </Space>
-      </Modal>
-
-      {/* Re-Create Accounting Preview Modal */}
-      <Modal
-        title={
-          <Space>
-            <CalculatorOutlined style={{ color: REDWOOD.info }} />
-            <span>Re-Create Accounting Preview</span>
-            {previewPayload && previewPayload.invoiceNumber && (
-              <Tag color="blue">{previewPayload.invoiceNumber}</Tag>
-            )}
-          </Space>
-        }
-        open={previewModalOpen}
-        onCancel={() => setPreviewModalOpen(false)}
-        width={1200}
-        styles={{ body: { maxHeight: '80vh', overflowY: 'auto' } }}
-        footer={[
-          <Button key="close" onClick={() => setPreviewModalOpen(false)}>
-            Close
-          </Button>,
-          <Button
-            key="create"
-            type="primary"
-            loading={previewConfirming}
-            onClick={() => {
-              message.info('Create accounting feature coming soon');
-            }}
-          >
-            Create Accounting
-          </Button>,
-        ]}
-        destroyOnClose
-      >
-        {!previewPayload ? (
-          <div style={{ textAlign: 'center', padding: '40px 0' }}>
-            <Spin size="large" />
-            <div style={{ marginTop: 16, color: REDWOOD.neutral600 }}>
-              {previewCreationSteps.length > 0 ? previewCreationSteps[previewCreationSteps.length - 1] : 'Loading...'}
-            </div>
-          </div>
-        ) : (
-          <Space direction="vertical" style={{ width: '100%' }} size="large">
-            {/* API Endpoint */}
-            <Card size="small" style={{ background: '#f5f5f5', border: `1px solid ${REDWOOD.neutral300}` }}>
-              <Space>
-                <ApiOutlined style={{ color: REDWOOD.info, fontSize: 16 }} />
-                <code style={{ fontSize: 12 }}>GET /ap/createinvoiceslines?P_INVOICE_ID={previewPayload.invoiceId}</code>
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<CopyOutlined />}
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${APEX_DB_CONFIG.baseUrl}/ap/createinvoiceslines?P_INVOICE_ID=${previewPayload.invoiceId}`);
-                    message.success('API URL copied to clipboard');
-                  }}
-                />
-              </Space>
-            </Card>
-
-            {/* Summary Cards */}
-            <Row gutter={16}>
-              <Col span={8}>
-                <Card size="small">
-                  <Statistic
-                    title="Invoice Amount"
-                    value={previewPayload.invoiceTotal}
-                    precision={2}
-                    suffix={<span style={{ fontSize: 12 }}>{previewPayload.invoiceNumber?.split('-')[0] || 'AED'}</span>}
-                    valueStyle={{ color: REDWOOD.info }}
-                  />
-                </Card>
-              </Col>
-              <Col span={8}>
-                <Card size="small">
-                  <Statistic
-                    title="Tax Amount"
-                    value={previewPayload.taxTotal}
-                    precision={2}
-                    suffix={<span style={{ fontSize: 12 }}>{previewPayload.invoiceNumber?.split('-')[0] || 'AED'}</span>}
-                    valueStyle={{ color: REDWOOD.warning }}
-                  />
-                </Card>
-              </Col>
-              <Col span={8}>
-                <Card size="small">
-                  <Statistic
-                    title="Total"
-                    value={previewPayload.grandTotal}
-                    precision={2}
-                    suffix={<span style={{ fontSize: 12 }}>{previewPayload.invoiceNumber?.split('-')[0] || 'AED'}</span>}
-                    valueStyle={{ color: REDWOOD.success, fontWeight: 600 }}
-                  />
-                </Card>
-              </Col>
-            </Row>
-
-            {/* Accounting Lines Table */}
-            <Card size="small" title="Accounting Entries to be Created">
-              <Table
-                dataSource={previewPayload.accountingLines.map((line: any, idx: number) => ({
-                  ...line,
-                  key: idx,
-                  debit: line.lineType === 'DR' ? line.amount : 0,
-                  credit: line.lineType === 'CR' ? line.amount : 0,
-                }))}
-                columns={[
-                  {
-                    title: 'Line #',
-                    dataIndex: 'lineNumber',
-                    key: 'lineNumber',
-                    width: 60,
-                    align: 'center',
-                  },
-                  {
-                    title: 'Type',
-                    dataIndex: 'lineType',
-                    key: 'lineType',
-                    width: 70,
-                    render: (type: string) => (
-                      <Tag color={type === 'DR' ? 'red' : 'green'} style={{ fontSize: 11 }}>
-                        {type}
-                      </Tag>
-                    ),
-                  },
-                  {
-                    title: 'Account Combination',
-                    dataIndex: 'accountCombination',
-                    key: 'accountCombination',
-                    render: (acct: string, record: any) => {
-                      const desc = previewPayload.accountDescs[acct];
-                      const segments = acct.split('-');
-                      const fourthSegment = segments[3] || '';
-                      return (
-                        <Tooltip title={acct}>
-                          <div style={{ fontSize: 12 }}>
-                            <div style={{ fontWeight: 600, color: REDWOOD.info }}>{acct}</div>
-                            {desc && (
-                              <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 4 }}>
-                                {desc.map((seg: any, idx: number) => (
-                                  <div key={idx} style={{
-                                    padding: '2px 4px',
-                                    background: idx === 3 ? '#fff3cd' : 'transparent',
-                                    borderRadius: 2,
-                                  }}>
-                                    <span style={{ fontWeight: 600 }}>{seg.name || `Seg ${idx + 1}`}</span>
-                                    {': '}
-                                    <span>{seg.value || '—'}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </Tooltip>
-                      );
-                    },
-                  },
-                  {
-                    title: 'Description',
-                    dataIndex: 'description',
-                    key: 'description',
-                    width: 150,
-                  },
-                  {
-                    title: 'Debit',
-                    dataIndex: 'debit',
-                    key: 'debit',
-                    width: 100,
-                    align: 'right',
-                    render: (value: number) => value > 0 ? `${value.toFixed(2)}` : '—',
-                  },
-                  {
-                    title: 'Credit',
-                    dataIndex: 'credit',
-                    key: 'credit',
-                    width: 100,
-                    align: 'right',
-                    render: (value: number) => value > 0 ? `${value.toFixed(2)}` : '—',
-                  },
-                ]}
-                size="small"
-                pagination={false}
-                summary={() => {
-                  const totalDr = previewPayload.accountingLines
-                    .filter((l: any) => l.lineType === 'DR')
-                    .reduce((sum: number, l: any) => sum + l.amount, 0);
-                  const totalCr = previewPayload.accountingLines
-                    .filter((l: any) => l.lineType === 'CR')
-                    .reduce((sum: number, l: any) => sum + l.amount, 0);
-
-                  return (
-                    <Table.Summary.Row style={{ fontWeight: 600, background: '#f5f5f5' }}>
-                      <Table.Summary.Cell colSpan={4} align="right">
-                        <strong>TOTAL</strong>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell align="right">
-                        <strong>{totalDr.toFixed(2)}</strong>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell align="right">
-                        <strong>{totalCr.toFixed(2)}</strong>
-                      </Table.Summary.Cell>
-                    </Table.Summary.Row>
-                  );
-                }}
-              />
-            </Card>
 
             {/* Balance Check */}
-            <Card
-              size="small"
-              style={{
-                background: previewPayload.isBalanced ? '#f6ffed' : '#fff1f0',
-                border: `1px solid ${previewPayload.isBalanced ? '#b7eb8f' : '#ffa39e'}`,
-              }}
-            >
-              <Space>
-                {previewPayload.isBalanced ? (
-                  <>
-                    <CheckCircleOutlined style={{ color: REDWOOD.success, fontSize: 18 }} />
-                    <span style={{ color: REDWOOD.success, fontWeight: 600 }}>Balanced ✓</span>
-                    <span style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
-                      Debits = Credits: {previewPayload.accountingLines
-                        .filter((l: any) => l.lineType === 'DR')
-                        .reduce((sum: number, l: any) => sum + l.amount, 0)
-                        .toFixed(2)}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <CloseCircleOutlined style={{ color: REDWOOD.error, fontSize: 18 }} />
-                    <span style={{ color: REDWOOD.error, fontWeight: 600 }}>Not Balanced</span>
-                    <span style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
-                      DR: {previewPayload.accountingLines
-                        .filter((l: any) => l.lineType === 'DR')
-                        .reduce((sum: number, l: any) => sum + l.amount, 0)
-                        .toFixed(2)}, CR: {previewPayload.accountingLines
-                        .filter((l: any) => l.lineType === 'CR')
-                        .reduce((sum: number, l: any) => sum + l.amount, 0)
-                        .toFixed(2)}
-                    </span>
-                  </>
-                )}
-              </Space>
-            </Card>
-          </Space>
+            {previewPayload.lines && (() => {
+              const totalDr = previewPayload.lines.reduce((sum: number, l: any) => sum + (l.enteredDr || 0), 0);
+              const totalCr = previewPayload.lines.reduce((sum: number, l: any) => sum + (l.enteredCr || 0), 0);
+              const balanced = Math.abs(totalDr - totalCr) < 0.01;
+              return (
+                <div style={{
+                  background: balanced ? '#f6ffed' : '#fff1f0',
+                  border: `1px solid ${balanced ? '#b7eb8f' : '#ffccc7'}`,
+                  borderRadius: 6,
+                  padding: '10px 12px',
+                  fontSize: 12,
+                }}>
+                  <div style={{ color: balanced ? REDWOOD.success : REDWOOD.error, fontWeight: 600 }}>
+                    {balanced ? '✓ Balanced' : '✗ Not Balanced'}
+                  </div>
+                  <div style={{ color: REDWOOD.neutral600, fontSize: 11, marginTop: 4 }}>
+                    Total Debits: {totalDr.toLocaleString('en-US', { minimumFractionDigits: 2 })} {previewPayload.header?.currencyCode}
+                    {' | '}
+                    Total Credits: {totalCr.toLocaleString('en-US', { minimumFractionDigits: 2 })} {previewPayload.header?.currencyCode}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
         )}
       </Modal>
+
+      {/* Debug Drawer - Shows API endpoints, payloads, and responses */}
+      <Drawer
+        title="API Debug - Create Accounting Flow"
+        placement="right"
+        onClose={() => setPreviewDebugOpen(false)}
+        open={previewDebugOpen}
+        width={900}
+        styles={{ body: { padding: 0 } }}
+      >
+        <div style={{ maxHeight: '100vh', overflowY: 'auto' }}>
+          {previewDebugSteps.length === 0 ? (
+            <div style={{ padding: 16, textAlign: 'center', color: REDWOOD.neutral600 }}>
+              No debug steps available. Click "Create Accounting & Post to GL" button to generate steps.
+            </div>
+          ) : (
+            <div style={{ padding: 0 }}>
+              {previewDebugSteps.map((step: any, idx: number) => (
+                <Card
+                  key={idx}
+                  size="small"
+                  style={{ margin: 0, borderRadius: 0, borderBottom: `1px solid ${REDWOOD.neutral200}` }}
+                >
+                  <Collapse
+                    items={[
+                      {
+                        key: idx,
+                        label: (
+                          <Space>
+                            <span style={{ fontWeight: 600, color: REDWOOD.primary }}>{step.step}</span>
+                            <Tag color="blue">{step.method}</Tag>
+                            {step.status ? (
+                              <Tag color={step.status < 400 ? 'green' : 'red'}>HTTP {step.status}</Tag>
+                            ) : (
+                              <Tag>Not executed yet</Tag>
+                            )}
+                          </Space>
+                        ),
+                        children: (
+                          <Space direction="vertical" style={{ width: '100%' }} size="large">
+                            {/* Run and Delete Buttons */}
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                              <Button
+                                type="primary"
+                                loading={step.loading}
+                                onClick={() => runPreviewDebugStep(idx)}
+                                icon={<SendOutlined />}
+                              >
+                                {step.loading ? 'Running...' : `Run Step ${idx + 1}`}
+                              </Button>
+                              {idx === 2 && (
+                                <Button
+                                  danger
+                                  type="primary"
+                                  onClick={handleDeleteSla}
+                                  disabled={!previewSlaHeaderId}
+                                  icon={<DeleteOutlined />}
+                                  title={previewSlaHeaderId ? `Delete SLA ${previewSlaHeaderId}` : 'Run Step 2 to capture SLA ID'}
+                                >
+                                  Delete SLA {previewSlaHeaderId && `(${previewSlaHeaderId})`}
+                                </Button>
+                              )}
+                              {idx === 3 && (
+                                <Button
+                                  danger
+                                  type="primary"
+                                  onClick={handleDeleteGlJournal}
+                                  disabled={!previewGlBatchId}
+                                  icon={<DeleteOutlined />}
+                                  title={previewGlBatchId ? `Delete Journal ${previewGlBatchId}` : 'Run Step 3 to capture GL Batch ID'}
+                                >
+                                  Delete Journal {previewGlBatchId && `(${previewGlBatchId})`}
+                                </Button>
+                              )}
+                            </div>
+
+                            {/* URL Section */}
+                            <div>
+                              <div style={{ fontWeight: 600, marginBottom: 8, color: REDWOOD.info }}>
+                                📍 Endpoint URL:
+                              </div>
+                              <div
+                                style={{
+                                  background: '#f5f5f5',
+                                  padding: 12,
+                                  borderRadius: 4,
+                                  fontFamily: 'monospace',
+                                  fontSize: 11,
+                                  wordBreak: 'break-all',
+                                  border: `1px solid ${REDWOOD.neutral300}`,
+                                }}
+                              >
+                                <strong>{step.method}</strong> {step.url}
+                              </div>
+                              <Button
+                                size="small"
+                                type="text"
+                                icon={<CopyOutlined />}
+                                onClick={() => {
+                                  navigator.clipboard.writeText(`${step.method} ${step.url}`);
+                                  message.success('URL copied!');
+                                }}
+                                style={{ marginTop: 8 }}
+                              >
+                                Copy URL
+                              </Button>
+                            </div>
+
+                            {/* Request Body */}
+                            {step.requestBody && (
+                              <div>
+                                <div style={{ fontWeight: 600, marginBottom: 8, color: REDWOOD.primary }}>
+                                  📤 Request Payload (JSON):
+                                </div>
+                                <div
+                                  style={{
+                                    background: '#f5f5f5',
+                                    padding: 12,
+                                    borderRadius: 4,
+                                    fontFamily: 'monospace',
+                                    fontSize: 10,
+                                    maxHeight: 300,
+                                    overflowY: 'auto',
+                                    border: `1px solid ${REDWOOD.neutral300}`,
+                                    whiteSpace: 'pre-wrap',
+                                    wordWrap: 'break-word',
+                                  }}
+                                >
+                                  {JSON.stringify(step.requestBody, null, 2)}
+                                </div>
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  icon={<CopyOutlined />}
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(JSON.stringify(step.requestBody, null, 2));
+                                    message.success('Payload copied!');
+                                  }}
+                                  style={{ marginTop: 8 }}
+                                >
+                                  Copy Payload
+                                </Button>
+                              </div>
+                            )}
+
+                            {/* Response */}
+                            {step.response && (
+                              <div>
+                                <div style={{ fontWeight: 600, marginBottom: 8, color: REDWOOD.primary }}>
+                                  📥 Response:
+                                </div>
+                                <div
+                                  style={{
+                                    background: step.status && step.status < 400 ? '#f6ffed' : '#fff1f0',
+                                    padding: 12,
+                                    borderRadius: 4,
+                                    fontFamily: 'monospace',
+                                    fontSize: 10,
+                                    maxHeight: 300,
+                                    overflowY: 'auto',
+                                    border: `1px solid ${step.status && step.status < 400 ? '#b7eb8f' : '#ffa39e'}`,
+                                    whiteSpace: 'pre-wrap',
+                                    wordWrap: 'break-word',
+                                  }}
+                                >
+                                  {JSON.stringify(step.response, null, 2)}
+                                </div>
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  icon={<CopyOutlined />}
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(JSON.stringify(step.response, null, 2));
+                                    message.success('Response copied!');
+                                  }}
+                                  style={{ marginTop: 8 }}
+                                >
+                                  Copy Response
+                                </Button>
+                              </div>
+                            )}
+                          </Space>
+                        ),
+                      },
+                    ]}
+                  />
+                </Card>
+              ))}
+
+              {/* Manual Delete Section */}
+              <Card
+                size="small"
+                style={{ margin: 0, borderRadius: 0, borderTop: `2px solid ${REDWOOD.error}` }}
+                title={<span style={{ color: REDWOOD.error, fontWeight: 600 }}>🗑️ Manual Delete (Test Cleanup)</span>}
+              >
+                <Space direction="vertical" style={{ width: '100%' }} size="large">
+                  {/* Delete SLA Section */}
+                  <div style={{ border: `1px solid ${REDWOOD.error}`, borderRadius: 4, padding: 12, backgroundColor: '#fef0f0' }}>
+                    <div style={{ fontWeight: 600, marginBottom: 12, color: REDWOOD.error, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      🔌 Delete SLA Entry
+                      {previewSlaHeaderId && <Tag color="green">Auto-captured: {previewSlaHeaderId}</Tag>}
+                    </div>
+
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, color: '#666', marginBottom: 4, fontWeight: 500 }}>
+                        📤 POST Endpoint:
+                      </div>
+                      <div
+                        style={{
+                          background: '#fff',
+                          padding: 8,
+                          borderRadius: 4,
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                          border: `1px solid ${REDWOOD.error}`,
+                          overflow: 'auto',
+                          maxHeight: 60,
+                        }}
+                      >
+                        {`${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete`}
+                      </div>
+                    </div>
+
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, color: '#666', marginBottom: 4, fontWeight: 500 }}>
+                        📋 Request Body:
+                      </div>
+                      <div
+                        style={{
+                          background: '#fff',
+                          padding: 8,
+                          borderRadius: 4,
+                          fontFamily: 'monospace',
+                          fontSize: 10,
+                          border: `1px solid ${REDWOOD.error}`,
+                          overflow: 'auto',
+                          maxHeight: 100,
+                          whiteSpace: 'pre-wrap',
+                          wordWrap: 'break-word',
+                        }}
+                      >
+                        {JSON.stringify(
+                          { headerId: manualSlaDeleteId || previewSlaHeaderId },
+                          null,
+                          2
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <Input
+                        placeholder="Enter SLA Header ID (e.g., 845)"
+                        value={manualSlaDeleteId || (previewSlaHeaderId ? String(previewSlaHeaderId) : '')}
+                        onChange={(e) => setManualSlaDeleteId(e.target.value)}
+                        type="number"
+                        style={{ flex: 1 }}
+                      />
+                      <Button
+                        danger
+                        type="primary"
+                        onClick={handleManualDeleteSla}
+                        icon={<DeleteOutlined />}
+                        disabled={!manualSlaDeleteId && !previewSlaHeaderId}
+                      >
+                        Delete SLA
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Delete GL Journal Section */}
+                  <div style={{ border: `1px solid ${REDWOOD.error}`, borderRadius: 4, padding: 12, backgroundColor: '#fef0f0' }}>
+                    <div style={{ fontWeight: 600, marginBottom: 12, color: REDWOOD.error, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      🔌 Delete GL Journal
+                      {previewGlBatchId && <Tag color="green">Auto-captured: {previewGlBatchId}</Tag>}
+                    </div>
+
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, color: '#666', marginBottom: 4, fontWeight: 500 }}>
+                        📤 DELETE Endpoint:
+                      </div>
+                      <div
+                        style={{
+                          background: '#fff',
+                          padding: 8,
+                          borderRadius: 4,
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                          border: `1px solid ${REDWOOD.error}`,
+                          overflow: 'auto',
+                          maxHeight: 60,
+                        }}
+                      >
+                        {`${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${manualGlDeleteId || previewGlBatchId || '{batchId}'}`}
+                      </div>
+                    </div>
+
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, color: '#666', marginBottom: 4, fontWeight: 500 }}>
+                        ℹ️ Note: DELETE request has no body
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <Input
+                        placeholder="Enter GL Batch ID (e.g., 12345)"
+                        value={manualGlDeleteId || (previewGlBatchId ? String(previewGlBatchId) : '')}
+                        onChange={(e) => setManualGlDeleteId(e.target.value)}
+                        type="number"
+                        style={{ flex: 1 }}
+                      />
+                      <Button
+                        danger
+                        type="primary"
+                        onClick={handleManualDeleteGlJournal}
+                        icon={<DeleteOutlined />}
+                        disabled={!manualGlDeleteId && !previewGlBatchId}
+                      >
+                        Delete Journal
+                      </Button>
+                    </div>
+                  </div>
+                </Space>
+              </Card>
+            </div>
+          )}
+        </div>
+      </Drawer>
 
       </Content>
 
