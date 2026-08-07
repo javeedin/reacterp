@@ -2399,23 +2399,43 @@ const ManageInvoices: React.FC = () => {
     const totalCr = previewPayload.lines.filter((l: any) => l.lineType === 'CR').reduce((s: number, l: any) => s + (l.enteredCr || 0), 0);
     const batchName = `AP-${invoiceNumber}-${dayjs().format('YYYYMMDD-HHmmss')}`;
 
-    // Build SLA payload with correct field names (accountCombo, not accountCombination)
+    // Build SLA payload with correct structure
     const slaPayload = {
-      moduleName: 'AP', // Required by API
-      header: previewPayload.header,
+      header: {
+        moduleName: 'AP',
+        sourceTable: previewPayload.header.sourceTable,
+        sourceId: previewPayload.header.sourceId,
+        sourceNumber: previewPayload.header.sourceNumber,
+        sourceType: previewPayload.header.sourceType,
+        eventTypeCode: previewPayload.header.eventTypeCode,
+        eventDate: acctDate,
+        accountingDate: acctDate,
+        periodName: periodName,
+        ledgerId: previewPayload.header.ledgerId,
+        ledgerName: previewPayload.header.ledgerName,
+        ledgerCurrency: currency,
+        businessUnit: previewPayload.header.reference4 || '',
+        currencyCode: currency,
+        exchangeRate: conversionRate,
+        exchangeRateType: 'User',
+        description: previewPayload.header.description,
+        createdBy: 'user',
+      },
       lines: previewPayload.lines.map((l: any) => ({
         lineNumber: l.lineNumber,
         lineType: l.lineType,
         accountingClass: l.accountingClass,
-        accountCombo: l.accountCombination, // Note: renamed field
+        accountCombination: l.accountCombination,
         enteredDr: l.enteredDr,
         enteredCr: l.enteredCr,
         accountedDr: l.accountedDr,
         accountedCr: l.accountedCr,
-        currencyCode: l.currencyCode,
+        currencyCode: currency,
+        exchangeRate: conversionRate,
+        exchangeRateType: 'User',
         description: l.description,
         sourceLineId: previewPayload.header.sourceId,
-        sourceLineNum: l.lineNumber,
+        sourceLineNumber: l.lineNumber,
       })),
     };
 
