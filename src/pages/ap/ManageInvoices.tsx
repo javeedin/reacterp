@@ -5713,8 +5713,15 @@ const ManageInvoices: React.FC = () => {
             rowKey="invoiceId"
             pagination={{ pageSize: 20 }}
             size="small"
-              scroll={{ x: 2100 }}
-              />
+            scroll={{ x: 2100 }}
+            rowClassName={(record: any) => {
+              const hasIssue = record.debitAccount && record.creditAccount && record.debitAccount === record.creditAccount;
+              return hasIssue ? 'row-issue' : 'row-good';
+            }}
+            style={{
+              backgroundColor: 'transparent',
+            }}
+            />
             </>
           );
         })()}
@@ -6705,6 +6712,23 @@ const ManageInvoices: React.FC = () => {
       </Content>
 
       <FloatingMenu />
+
+      <style>{`
+        .row-good {
+          background-color: #f6ffed !important;
+        }
+        .row-good td {
+          background-color: #f6ffed !important;
+          color: #1D7B4D !important;
+        }
+        .row-issue {
+          background-color: #fff1f0 !important;
+        }
+        .row-issue td {
+          background-color: #fff1f0 !important;
+          color: #D93025 !important;
+        }
+      `}</style>
     </Layout>
   );
 };
