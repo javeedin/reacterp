@@ -2650,24 +2650,38 @@ const ManageInvoices: React.FC = () => {
       // Conditional checks before creating SLA and GL
       // Step 4 (Create SLA) - check if Step 0 (Check SLA) allows creation
       if (stepIdx === 4) {
-        const canCreate = previewSlaCheckResponse?.canCreate !== false;
+        if (!previewSlaCheckResponse) {
+          message.error('❌ Must run Step 0 (Check SLA) first before creating');
+          setExecutingStepIdx(null);
+          setLoading(false);
+          return;
+        }
+        const canCreate = previewSlaCheckResponse.canCreate !== false;
         if (!canCreate) {
           message.warning('⏭️ Cannot create SLA - Check response indicates it already exists or is in an invalid state');
           setExecutingStepIdx(null);
           setLoading(false);
           return;
         }
+        message.info(`✓ Check approved creation: ${previewSlaCheckResponse.message}`);
       }
 
       // Step 5 (Create GL) - check if Step 2 (Check GL) allows creation
       if (stepIdx === 5) {
-        const exists = previewGlCheckResponse?.exists || previewGlCheckResponse?.journal_exists || false;
+        if (!previewGlCheckResponse) {
+          message.error('❌ Must run Step 1 (Check GL) first before creating');
+          setExecutingStepIdx(null);
+          setLoading(false);
+          return;
+        }
+        const exists = previewGlCheckResponse.exists || previewGlCheckResponse.journal_exists || false;
         if (exists) {
           message.warning('⏭️ Cannot create GL - Check response indicates GL Journal already exists');
           setExecutingStepIdx(null);
           setLoading(false);
           return;
         }
+        message.info('✓ Check approved creation: No GL exists, safe to create');
       }
 
       const step = previewDebugSteps[stepIdx];
