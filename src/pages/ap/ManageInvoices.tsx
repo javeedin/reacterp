@@ -2525,10 +2525,26 @@ const ManageInvoices: React.FC = () => {
         response: undefined,
       },
       {
+        step: '0.1 — Delete SLA',
+        method: 'POST',
+        url: `${APEX_DB_CONFIG.baseUrl}/sla/accounting/delete?sourceTable=AP_INVOICES&sourceId=${invoiceId}&eventType=AP_INVOICE_CREATION`,
+        requestBody: { sourceTable: 'AP_INVOICES', sourceId: invoiceId, eventType: 'AP_INVOICE_CREATION' },
+        status: undefined,
+        response: undefined,
+      },
+      {
         step: '1 — Check if GL Exists',
         method: 'GET',
         url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/check?reference1=${invoiceNumber}&reference2=${invoiceId}&reference5=AP-INVOICE-CREATION`,
         requestBody: null,
+        status: undefined,
+        response: undefined,
+      },
+      {
+        step: '1.1 — Delete GL',
+        method: 'POST',
+        url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/delete?reference1=${invoiceNumber}&reference2=${invoiceId}&reference5=AP-INVOICE-CREATION`,
+        requestBody: { reference1: invoiceNumber, reference2: invoiceId, reference5: 'AP-INVOICE-CREATION' },
         status: undefined,
         response: undefined,
       },
@@ -2699,12 +2715,18 @@ const ManageInvoices: React.FC = () => {
         if (stepIdx === 0) {
           // SLA check - show if exists
           const exists = data.exists || data.header_exists || false;
-          message.success(exists ? '⚠️ SLA exists - please delete manually first' : '✓ No SLA found - safe to create');
+          message.success(exists ? '⚠️ SLA exists - Step 0.1 will delete it' : '✓ No SLA found');
         } else if (stepIdx === 1) {
+          // SLA delete
+          message.success('✓ SLA deleted successfully');
+        } else if (stepIdx === 2) {
           // GL check - show if exists
           const exists = data.exists || data.journal_exists || data.items?.length > 0 || false;
-          message.success(exists ? '⚠️ GL exists - please delete manually first' : '✓ No GL found - safe to create');
-        } else if (stepIdx === 2) {
+          message.success(exists ? '⚠️ GL exists - Step 1.1 will delete it' : '✓ No GL found');
+        } else if (stepIdx === 3) {
+          // GL delete
+          message.success('✓ GL deleted successfully');
+        } else if (stepIdx === 4) {
           // SLA creation - extract and save SLA header ID
           const slaId = data.headerId || data.header_id;
           if (slaId) {
@@ -2714,9 +2736,9 @@ const ManageInvoices: React.FC = () => {
           } else {
             message.success(`Step ${stepIdx + 1} completed successfully`);
           }
-        } else if (stepIdx === 3) {
+        } else if (stepIdx === 5) {
           // GL journal creation - extract and save batch ID
-          console.log('Step 3 full response:', data);
+          console.log('Step 5 full response:', data);
 
           // Try multiple field names for batchId
           let batchId = data.jeBatchId || data.je_batch_id || data.batchId || data.batch_id;
