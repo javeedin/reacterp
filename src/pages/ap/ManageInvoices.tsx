@@ -5120,24 +5120,19 @@ const ManageInvoices: React.FC = () => {
             total: accountingAllData.length,
             good: accountingAllData.filter(inv => {
               const hasIssue = inv.debitAccount && inv.creditAccount && inv.debitAccount === inv.creditAccount;
-              const isPosted = inv.glStatus === 'POSTED' || inv.glStatus === 'SUBMITTED';
-              return isPosted && !hasIssue;
+              return !hasIssue;
             }).length,
             issues: accountingAllData.filter(inv =>
               inv.debitAccount && inv.creditAccount && inv.debitAccount === inv.creditAccount
             ).length,
-            notPosted: accountingAllData.filter(inv =>
-              !inv.glStatus || (inv.glStatus !== 'POSTED' && inv.glStatus !== 'SUBMITTED')
-            ).length,
           };
-          const successRate = stats.total > 0 ? Math.round((stats.good / stats.total) * 100) : 0;
 
           return (
             <>
               {/* KPI Summary */}
               <Card style={{ marginBottom: 16, background: '#fafafa' }}>
                 <Row gutter={24}>
-                  <Col span={6}>
+                  <Col span={12}>
                     <div style={{ textAlign: 'center' }}>
                       <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.success }}>
                         {stats.good}
@@ -5146,11 +5141,11 @@ const ManageInvoices: React.FC = () => {
                         ✓ Good
                       </div>
                       <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
-                        GL Posted & Balanced
+                        No Accounting Issues
                       </div>
                     </div>
                   </Col>
-                  <Col span={6}>
+                  <Col span={12}>
                     <div style={{ textAlign: 'center' }}>
                       <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.error }}>
                         {stats.issues}
@@ -5160,32 +5155,6 @@ const ManageInvoices: React.FC = () => {
                       </div>
                       <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
                         Same Debit/Credit Account
-                      </div>
-                    </div>
-                  </Col>
-                  <Col span={6}>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.warning }}>
-                        {stats.notPosted}
-                      </div>
-                      <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 4 }}>
-                        ⚠ Not Posted
-                      </div>
-                      <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
-                        Missing GL Entry
-                      </div>
-                    </div>
-                  </Col>
-                  <Col span={6}>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: 28, fontWeight: 600, color: REDWOOD.success }}>
-                        {successRate}%
-                      </div>
-                      <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 4 }}>
-                        Success Rate
-                      </div>
-                      <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
-                        {stats.total} Total Invoices
                       </div>
                     </div>
                   </Col>
