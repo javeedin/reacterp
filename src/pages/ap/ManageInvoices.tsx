@@ -2742,7 +2742,7 @@ const ManageInvoices: React.FC = () => {
             // Update Step 1.1 URL with the captured batchId
             setPreviewDebugSteps(prev => {
               const updated = [...prev];
-              updated[3] = { ...updated[3], url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/${batchId}/delete` };
+              updated[3] = { ...updated[3], url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/batches/${batchId}` };
               return updated;
             });
             console.log('GL found with Batch ID:', batchId);
