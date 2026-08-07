@@ -5431,7 +5431,7 @@ const ManageInvoices: React.FC = () => {
               <Row gutter={32}>
                 <Col span={6}>
                   <Statistic
-                    title="Accounting Status"
+                    title="Journal Status"
                     value={accountingSingleData.accountingStatus || 'N/A'}
                     valueStyle={{ color: accountingSingleData.accountingStatus === 'POSTED' ? REDWOOD.success : REDWOOD.warning, fontSize: 14 }}
                   />
@@ -5444,8 +5444,8 @@ const ManageInvoices: React.FC = () => {
                 </Col>
                 <Col span={6}>
                   <Statistic
-                    title="Accounting Date"
-                    value={accountingSingleData.accountingDate || 'N/A'}
+                    title="Batch ID"
+                    value={accountingSingleData.batchId || 'N/A'}
                   />
                 </Col>
                 <Col span={6}>
@@ -5457,228 +5457,80 @@ const ManageInvoices: React.FC = () => {
               </Row>
             </Card>
 
-            {/* Tabs for SLA vs GL Lines */}
-            <Tabs
-              defaultActiveKey="sla"
-              items={[
+            {/* GL Journal Lines Table */}
+            <Table
+              columns={[
                 {
-                  key: 'sla',
-                  label: (
-                    <span>
-                      SLA Lines ({accountingSingleData.lines?.length || 0})
-                    </span>
-                  ),
-                  children: (
-                    <Table
-                      columns={[
-                        {
-                          title: 'Line #',
-                          dataIndex: 'lineNumber',
-                          key: 'lineNumber',
-                          width: 60,
-                        },
-                        {
-                          title: 'Account',
-                          dataIndex: 'accountCombination',
-                          key: 'accountCombination',
-                          width: 200,
-                          ellipsis: true,
-                        },
-                        {
-                          title: 'Description',
-                          dataIndex: 'description',
-                          key: 'description',
-                          width: 200,
-                          ellipsis: true,
-                        },
-                        {
-                          title: 'Debit',
-                          dataIndex: 'enteredDr',
-                          key: 'enteredDr',
-                          width: 120,
-                          align: 'right',
-                          render: (value: number) => value ? <Text style={{ color: REDWOOD.success }}>{formatCurrency(value)}</Text> : '—',
-                        },
-                        {
-                          title: 'Credit',
-                          dataIndex: 'enteredCr',
-                          key: 'enteredCr',
-                          width: 120,
-                          align: 'right',
-                          render: (value: number) => value ? <Text style={{ color: REDWOOD.error }}>{formatCurrency(value)}</Text> : '—',
-                        },
-                      ]}
-                      dataSource={accountingSingleData.lines}
-                      rowKey={(_, i) => i}
-                      pagination={false}
-                      size="small"
-                      summary={() => {
-                        const totalDebits = (accountingSingleData.lines || []).reduce((sum: number, item: any) => sum + (Number(item.enteredDr) || 0), 0);
-                        const totalCredits = (accountingSingleData.lines || []).reduce((sum: number, item: any) => sum + (Number(item.enteredCr) || 0), 0);
-                        return (
-                          <Table.Summary fixed>
-                            <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                              <Table.Summary.Cell index={0} colSpan={3}>
-                                <Text strong>TOTAL</Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={3} align="right">
-                                <Text strong style={{ color: REDWOOD.success }}>{formatCurrency(totalDebits)}</Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={4} align="right">
-                                <Text strong style={{ color: REDWOOD.error }}>{formatCurrency(totalCredits)}</Text>
-                              </Table.Summary.Cell>
-                            </Table.Summary.Row>
-                          </Table.Summary>
-                        );
-                      }}
-                    />
+                  title: 'Line #',
+                  dataIndex: 'line_num',
+                  key: 'line_num',
+                  width: 60,
+                },
+                {
+                  title: 'Account',
+                  dataIndex: 'account',
+                  key: 'account',
+                  width: 200,
+                  ellipsis: true,
+                  render: (value: string) => (
+                    <Tooltip title={value}>
+                      <span style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 500 }}>{value || '—'}</span>
+                    </Tooltip>
                   ),
                 },
                 {
-                  key: 'gl',
-                  label: (
-                    <span>
-                      GL Lines ({accountingSingleData.glLines?.length || 0})
-                      {accountingSingleData.glLines && accountingSingleData.glLines.length === 0 && (
-                        <Tooltip title="No GL journal lines found for this invoice"><WarningOutlined style={{ marginLeft: 6, color: REDWOOD.warning }} /></Tooltip>
-                      )}
-                    </span>
+                  title: 'Description',
+                  dataIndex: 'description',
+                  key: 'description',
+                  width: 280,
+                  ellipsis: true,
+                  render: (value: string) => (
+                    <Tooltip title={value}>
+                      <span>{value || '—'}</span>
+                    </Tooltip>
                   ),
-                  children: !accountingSingleData.glLines || accountingSingleData.glLines.length === 0 ? (
-                    <Alert
-                      type="warning"
-                      message="No GL journal lines found"
-                      description="This invoice has not been posted to GL yet, or GL lines could not be retrieved by reference2 (Invoice ID) + reference5 (AP-INVOICE-CREATION)."
-                      showIcon
-                    />
-                  ) : (
-                    <Table
-                      columns={[
-                        {
-                          title: 'Line #',
-                          dataIndex: 'line_num',
-                          key: 'line_num',
-                          width: 60,
-                        },
-                        {
-                          title: 'Account',
-                          dataIndex: 'account',
-                          key: 'account',
-                          width: 180,
-                          ellipsis: true,
-                          render: (value: string) => (
-                            <Tooltip title={value}>
-                              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{value || '—'}</span>
-                            </Tooltip>
-                          ),
-                        },
-                        {
-                          title: 'Description',
-                          dataIndex: 'description',
-                          key: 'description',
-                          width: 200,
-                          ellipsis: true,
-                        },
-                        {
-                          title: 'Ref1',
-                          dataIndex: 'reference1',
-                          key: 'reference1',
-                          width: 110,
-                          render: (value: string) => (
-                            <Tooltip title={value || 'Invoice Number'}>
-                              <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{value || '—'}</span>
-                            </Tooltip>
-                          ),
-                        },
-                        {
-                          title: 'Ref2',
-                          dataIndex: 'reference2',
-                          key: 'reference2',
-                          width: 90,
-                          render: (value: string) => (
-                            <Tooltip title={value || 'Invoice ID'}>
-                              <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{value || '—'}</span>
-                            </Tooltip>
-                          ),
-                        },
-                        {
-                          title: 'Ref3',
-                          dataIndex: 'reference3',
-                          key: 'reference3',
-                          width: 90,
-                          render: (value: string) => (
-                            <Tooltip title={value || 'Accounting Class'}>
-                              <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{value || '—'}</span>
-                            </Tooltip>
-                          ),
-                        },
-                        {
-                          title: 'Ref4',
-                          dataIndex: 'reference4',
-                          key: 'reference4',
-                          width: 90,
-                          render: (value: string) => (
-                            <Tooltip title={value || 'Business Unit'}>
-                              <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{value || '—'}</span>
-                            </Tooltip>
-                          ),
-                        },
-                        {
-                          title: 'Ref5',
-                          dataIndex: 'reference5',
-                          key: 'reference5',
-                          width: 140,
-                          render: (value: string) => (
-                            <Tooltip title={value || 'Event Type'}>
-                              <span style={{ fontFamily: 'monospace', fontSize: 10, color: REDWOOD.info }}>{value || '—'}</span>
-                            </Tooltip>
-                          ),
-                        },
-                        {
-                          title: 'Debit',
-                          dataIndex: 'entered_dr',
-                          key: 'entered_dr',
-                          width: 120,
-                          align: 'right',
-                          render: (value: number) => value ? <Text style={{ color: REDWOOD.success }}>{formatCurrency(value)}</Text> : '—',
-                        },
-                        {
-                          title: 'Credit',
-                          dataIndex: 'entered_cr',
-                          key: 'entered_cr',
-                          width: 120,
-                          align: 'right',
-                          render: (value: number) => value ? <Text style={{ color: REDWOOD.error }}>{formatCurrency(value)}</Text> : '—',
-                        },
-                      ]}
-                      dataSource={accountingSingleData.glLines}
-                      rowKey={(_, i) => i}
-                      pagination={false}
-                      size="small"
-                      scroll={{ x: 1400 }}
-                      summary={() => {
-                        const totalDebits = (accountingSingleData.glLines || []).reduce((sum: number, item: any) => sum + (Number(item.entered_dr) || 0), 0);
-                        const totalCredits = (accountingSingleData.glLines || []).reduce((sum: number, item: any) => sum + (Number(item.entered_cr) || 0), 0);
-                        return (
-                          <Table.Summary fixed>
-                            <Table.Summary.Row style={{ background: REDWOOD.neutral100 }}>
-                              <Table.Summary.Cell index={0} colSpan={8}>
-                                <Text strong>TOTAL</Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={8} align="right">
-                                <Text strong style={{ color: REDWOOD.success }}>{formatCurrency(totalDebits)}</Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={9} align="right">
-                                <Text strong style={{ color: REDWOOD.error }}>{formatCurrency(totalCredits)}</Text>
-                              </Table.Summary.Cell>
-                            </Table.Summary.Row>
-                          </Table.Summary>
-                        );
-                      }}
-                    />
-                  ),
+                },
+                {
+                  title: 'Debit',
+                  dataIndex: 'entered_dr',
+                  key: 'entered_dr',
+                  width: 120,
+                  align: 'right',
+                  render: (value: number) => value ? <Text style={{ color: REDWOOD.success, fontWeight: 600 }}>{formatCurrency(value)}</Text> : '—',
+                },
+                {
+                  title: 'Credit',
+                  dataIndex: 'entered_cr',
+                  key: 'entered_cr',
+                  width: 120,
+                  align: 'right',
+                  render: (value: number) => value ? <Text style={{ color: REDWOOD.error, fontWeight: 600 }}>{formatCurrency(value)}</Text> : '—',
                 },
               ]}
+              dataSource={accountingSingleData.lines}
+              rowKey={(_, i) => i}
+              pagination={false}
+              size="small"
+              scroll={{ x: 1000 }}
+              summary={() => {
+                const totalDebits = (accountingSingleData.lines || []).reduce((sum: number, item: any) => sum + (Number(item.entered_dr) || 0), 0);
+                const totalCredits = (accountingSingleData.lines || []).reduce((sum: number, item: any) => sum + (Number(item.entered_cr) || 0), 0);
+                return (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row style={{ background: REDWOOD.neutral100, fontWeight: 700 }}>
+                      <Table.Summary.Cell index={0} colSpan={3}>
+                        <Text strong>TOTAL</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={3} align="right">
+                        <Text strong style={{ color: REDWOOD.success, fontSize: 14 }}>{formatCurrency(totalDebits)}</Text>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={4} align="right">
+                        <Text strong style={{ color: REDWOOD.error, fontSize: 14 }}>{formatCurrency(totalCredits)}</Text>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                );
+              }}
             />
           </>
         )}
