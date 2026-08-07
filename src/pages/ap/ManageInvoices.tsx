@@ -2647,33 +2647,48 @@ const ManageInvoices: React.FC = () => {
     setLoading(true);
 
     try {
-      // Auto-run check steps before creation if not already run
-      // Step 4 (Create SLA) - auto-run Step 0 (Check SLA) if needed
+      // Step 4 (Create SLA) - ALWAYS refresh SLA check status before creating
       if (stepIdx === 4) {
-        if (!previewSlaCheckResponse) {
-          message.info('🔍 Running Step 0 (Check SLA) first...');
-          setExecutingStepIdx(null);
-          setLoading(false);
-          // Auto-run Step 0, then Step 4
-          await runPreviewDebugStep(0);
-          await new Promise(resolve => setTimeout(resolve, 500));
-          // Now check the response
-          const exists = previewSlaCheckResponse?.exists || false;
+        message.info('🔍 Refreshing SLA status before creation...');
+
+        try {
+          // Get fresh SLA check data
+          const activePayload = previewPayload;
+          const invoiceId = activePayload?.header?.sourceId;
+
+          const checkUrl = `${APEX_DB_CONFIG.baseUrl}/sla/accounting/exists?sourceTable=AP_INVOICES&sourceId=${invoiceId}&eventType=AP_INVOICE_CREATION`;
+          const checkResponse = await fetch(checkUrl, { method: 'GET', headers: { Accept: 'application/json' } });
+          const checkData = await checkResponse.json();
+
+          console.log('SLA Check response before creation:', checkData);
+
+          // Update the stored SLA check response with fresh data
+          setPreviewSlaCheckResponse(checkData);
+
+          // Update Step 0 response in the steps array
+          setPreviewDebugSteps(prev => {
+            const updated = [...prev];
+            updated[0] = { ...updated[0], response: checkData, status: checkResponse.status };
+            return updated;
+          });
+
+          // Check the fresh response
+          const exists = checkData.exists || checkData.header_exists || false;
+
           if (exists) {
-            message.warning(`⏭️ SLA already exists (ID: ${previewSlaCheckResponse?.headerId}) - Skipping creation`);
-            return;
-          }
-          message.info('✓ No SLA exists - Safe to create');
-          // Continue with Step 4
-        } else {
-          // Check already ran, verify response
-          const exists = previewSlaCheckResponse.exists || false;
-          if (exists) {
-            message.warning(`⏭️ SLA already exists (ID: ${previewSlaCheckResponse.headerId}) - Skipping creation`);
+            message.warning(`⏭️ SLA already exists (exists: ${exists}) - Skipping creation`);
             setExecutingStepIdx(null);
             setLoading(false);
             return;
           }
+
+          message.success(`✓ SLA check passed (exists: false) - Safe to create`);
+        } catch (checkError: any) {
+          console.error('Error refreshing SLA check:', checkError);
+          message.error(`Failed to check SLA status before creation: ${checkError.message}`);
+          setExecutingStepIdx(null);
+          setLoading(false);
+          return;
         }
       }
 
