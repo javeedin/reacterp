@@ -1662,6 +1662,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
   const [apiOpen, setApiOpen] = useState(false);
   const [apiRun, setApiRun] = useState<{ running: boolean; status?: string; body?: string; ok?: boolean } | null>(null);
   const [filterText, setFilterText] = useState('');
+  const [searchTab, setSearchTab] = useState<'orders' | 'lines'>('orders');
 
   // Execute an API URL straight from the dialog — shows HTTP status, timing and
   // the raw response (or the error) so an unreachable POD is easy to diagnose.
@@ -1703,7 +1704,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
   const searchUrl = useMemo(() => {
     const q = buildQ(filters);
     const qs = q ? `q=${encodeURIComponent(q)}&` : '';
-    return `${FUSION_BASE}/salesOrdersForOrderHub?${qs}orderBy=TransactionOn:desc`;
+    return `${FUSION_BASE}/salesOrdersForOrderHub?${qs}orderBy=TransactionOn:desc&expand=lines`;
   }, [filters, buildQ]);
 
   // Fetch one page of 50 at a time (no deep paging) so the search stays fast on
@@ -1784,6 +1785,49 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
       ) },
   ]), [onOpen, onEdit]);
 
+  // Columns for the Search Lines tab
+  const lineColumns = useMemo(() => [
+    { title: 'Customer', dataIndex: ['_headerInfo', 'BuyingPartyName'], width: 220, ellipsis: true, render: (v: any) => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Order #', dataIndex: ['_headerInfo', 'OrderNumber'], width: 100, render: (v: any) => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Source Transaction #', dataIndex: 'SourceTransactionNumber', width: 160, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Product #', dataIndex: 'ProductNumber', width: 120, render: v => v ?? '—' },
+    { title: 'Product Description', dataIndex: 'ProductDescription', width: 250, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Qty', dataIndex: 'OrderedQuantity', width: 80, align: 'right', render: v => typeof v === 'number' ? fmt(v) : v ?? '—' },
+    { title: 'Unit Price', dataIndex: 'UnitSellingPrice', width: 110, align: 'right', render: v => typeof v === 'number' ? fmt(v) : v ?? '—' },
+    { title: 'Extended Amount', dataIndex: 'ExtendedAmount', width: 130, align: 'right', render: v => typeof v === 'number' ? fmt(v) : v ?? '—' },
+    { title: 'Currency', dataIndex: ['_headerInfo', 'TransactionalCurrencyCode'], width: 90, align: 'center', render: (v: any) => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Status', dataIndex: 'Status', width: 140, render: (v: any, r: any) => (
+        <Space size={4} wrap>
+          {statusTag(v, r.StatusCode)}
+          {r.StatusCode && <Tag style={{ fontSize: 10, margin: 0 }}>{r.StatusCode}</Tag>}
+        </Space>
+      ) },
+    { title: 'Org Code', dataIndex: 'RequestedFulfillmentOrganizationCode', width: 120, render: v => v ?? '—' },
+    { title: 'Org Name', dataIndex: 'RequestedFulfillmentOrganizationName', width: 200, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+  ], []);
+
+  // Extract all lines from rows for the Search Lines tab
+  const allLines = useMemo(() => {
+    if (!rows || rows.length === 0) return [];
+    const lines: any[] = [];
+    rows.forEach(order => {
+      if (order.lines && Array.isArray(order.lines)) {
+        order.lines.forEach((line: any) => {
+          lines.push({
+            ...line,
+            _headerInfo: {
+              BuyingPartyName: order.BuyingPartyName,
+              OrderNumber: order.OrderNumber,
+              TransactionalCurrencyCode: order.TransactionalCurrencyCode,
+            },
+            key: `${order.HeaderId}-${line.LineId}`,
+          });
+        });
+      }
+    });
+    return lines;
+  }, [rows]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <Card styles={{ body: { padding: '14px 18px' } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
@@ -1841,42 +1885,62 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
         </Form>
       </Card>
 
-      <Card styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}
-        title={<Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /><Text strong>Sales Orders</Text>
-          {rows.length > 0 && <Tag>{filtered.length}{filtered.length !== rows.length ? ` of ${rows.length}` : ''} order{rows.length !== 1 ? 's' : ''}</Tag>}</Space>}
-        extra={<Space>
-          <Tooltip title="Include reference/skeleton orders with StatusCode DOO_REFERENCE">
-            <Checkbox checked={showDooRef} onChange={e => setShowDooRef(e.target.checked)} style={{ fontSize: 12 }}>DOO_REFERENCE</Checkbox>
-          </Tooltip>
-          <Input placeholder="Filter any column…" allowClear size="small" prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
-            value={filterText} onChange={e => setFilterText(e.target.value)} style={{ width: 220 }} />
-          <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={runSearch}>Refresh</Button>
-        </Space>}>
-        {loading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin size="large" tip="Loading…" /></div>
-        ) : error && rows.length === 0 ? (
-          <div style={{ padding: 24, color: REDWOOD.error, background: REDWOOD.error + '10', margin: 16, borderRadius: 6 }}>
-            <InfoCircleOutlined style={{ marginRight: 8 }} />{error}
-          </div>
-        ) : !searched ? (
-          <Empty description="Run a search" style={{ padding: 60 }} />
-        ) : filtered.length === 0 ? (
-          <Empty description="No sales orders" style={{ padding: 60 }} />
-        ) : (
-          <>
-            <Table columns={columns} dataSource={filtered} rowKey={(r, i) => `${r.HeaderId ?? r.OrderKey ?? i}`} size="small"
-              scroll={{ x: 2249 }} pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} orders` }} />
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, padding: '12px 0 4px' }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>{rows.length} loaded</Text>
-              {hasMore ? (
-                <Button size="small" icon={<ReloadOutlined />} loading={loadingMore} onClick={loadMore}
-                  style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Load next {SEARCH_LIMIT}</Button>
+      <Card styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+        <Tabs activeKey={searchTab} onChange={(key) => setSearchTab(key as 'orders' | 'lines')} style={{ paddingTop: 12 }}>
+          <Tabs.TabPane tab={<Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /><Text strong>Search Orders</Text>
+            {rows.length > 0 && <Tag>{filtered.length}{filtered.length !== rows.length ? ` of ${rows.length}` : ''}</Tag>}</Space>} key="orders">
+            <div style={{ padding: '0 18px 18px' }}>
+              <Space style={{ marginBottom: 12 }}>
+                <Tooltip title="Include reference/skeleton orders with StatusCode DOO_REFERENCE">
+                  <Checkbox checked={showDooRef} onChange={e => setShowDooRef(e.target.checked)} style={{ fontSize: 12 }}>DOO_REFERENCE</Checkbox>
+                </Tooltip>
+                <Input placeholder="Filter any column…" allowClear size="small" prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+                  value={filterText} onChange={e => setFilterText(e.target.value)} style={{ width: 220 }} />
+                <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={runSearch}>Refresh</Button>
+              </Space>
+              {loading ? (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin size="large" tip="Loading…" /></div>
+              ) : error && rows.length === 0 ? (
+                <div style={{ padding: 24, color: REDWOOD.error, background: REDWOOD.error + '10', borderRadius: 6 }}>
+                  <InfoCircleOutlined style={{ marginRight: 8 }} />{error}
+                </div>
+              ) : !searched ? (
+                <Empty description="Run a search" style={{ padding: 60 }} />
+              ) : filtered.length === 0 ? (
+                <Empty description="No sales orders" style={{ padding: 60 }} />
               ) : (
-                <Text type="secondary" style={{ fontSize: 12 }}>— no more —</Text>
+                <>
+                  <Table columns={columns} dataSource={filtered} rowKey={(r, i) => `${r.HeaderId ?? r.OrderKey ?? i}`} size="small"
+                    scroll={{ x: 2249 }} pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} orders` }} />
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, padding: '12px 0 4px' }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>{rows.length} loaded</Text>
+                    {hasMore ? (
+                      <Button size="small" icon={<ReloadOutlined />} loading={loadingMore} onClick={loadMore}
+                        style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Load next {SEARCH_LIMIT}</Button>
+                    ) : (
+                      <Text type="secondary" style={{ fontSize: 12 }}>— no more —</Text>
+                    )}
+                  </div>
+                </>
               )}
             </div>
-          </>
-        )}
+          </Tabs.TabPane>
+          <Tabs.TabPane tab={<Space><FileTextOutlined style={{ color: REDWOOD.primary }} /><Text strong>Search Lines</Text>
+            {allLines.length > 0 && <Tag>{allLines.length}</Tag>}</Space>} key="lines">
+            <div style={{ padding: '0 18px 18px' }}>
+              {loading ? (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin size="large" tip="Loading…" /></div>
+              ) : !searched ? (
+                <Empty description="Run a search" style={{ padding: 60 }} />
+              ) : allLines.length === 0 ? (
+                <Empty description="No lines found" style={{ padding: 60 }} />
+              ) : (
+                <Table columns={lineColumns} dataSource={allLines} rowKey={(r, i) => r.key ?? `${i}`} size="small"
+                  scroll={{ x: 2000 }} pagination={{ pageSize: 50, size: 'small', showSizeChanger: true, showTotal: t => `${t} lines` }} />
+              )}
+            </div>
+          </Tabs.TabPane>
+        </Tabs>
       </Card>
 
       <Modal title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /> Sales Orders API</Space>}
