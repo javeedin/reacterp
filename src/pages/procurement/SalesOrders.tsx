@@ -1834,9 +1834,9 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
         <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}
           title={v ?? r._headerInfo?.OrderNumber} onClick={() => onOpen(r._headerInfo._order)}>{v ?? '—'}</Button>
       ) },
-    { title: 'Transaction Type', dataIndex: ['_headerInfo', 'TransactionTypeCode'], width: 130,
+    { title: 'Transaction Type', dataIndex: ['_headerInfo', 'TransactionTypeCode'], width: 160, ellipsis: true,
       sorter: (a, b) => String(a._headerInfo?.TransactionTypeCode ?? '').localeCompare(String(b._headerInfo?.TransactionTypeCode ?? '')),
-      render: (v: any) => v ? <Tag color="purple" style={{ fontSize: 11 }}>{v}</Tag> : '—' },
+      render: (v: any) => v ? <Tag color="purple" style={{ fontSize: 11, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v}>{v}</Tag> : '—' },
     { title: 'Transaction Date', dataIndex: ['_headerInfo', 'TransactionOn'], width: 130,
       sorter: (a, b) => String(a._headerInfo?.TransactionOn ?? '').localeCompare(String(b._headerInfo?.TransactionOn ?? '')),
       render: fmtDateTime },
@@ -1857,13 +1857,13 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
       render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'Qty', dataIndex: 'OrderedQuantity', width: 80, align: 'right' as const,
       sorter: (a, b) => (a.OrderedQuantity ?? 0) - (b.OrderedQuantity ?? 0),
-      render: v => typeof v === 'number' ? fmt(v) : v ?? '—' },
+      render: v => typeof v === 'number' ? Number(v).toFixed(2) : v ?? '—' },
     { title: 'Unit Price', dataIndex: 'UnitSellingPrice', width: 110, align: 'right' as const,
       sorter: (a, b) => (a.UnitSellingPrice ?? 0) - (b.UnitSellingPrice ?? 0),
-      render: v => typeof v === 'number' ? fmt(v) : v ?? '—' },
+      render: v => typeof v === 'number' ? Number(v).toFixed(2) : v ?? '—' },
     { title: 'Extended Amount', dataIndex: 'ExtendedAmount', width: 130, align: 'right' as const,
       sorter: (a, b) => (a.ExtendedAmount ?? 0) - (b.ExtendedAmount ?? 0),
-      render: v => typeof v === 'number' ? fmt(v) : v ?? '—' },
+      render: v => typeof v === 'number' ? Number(v).toFixed(2) : v ?? '—' },
     { title: 'Currency', dataIndex: ['_headerInfo', 'TransactionalCurrencyCode'], width: 90, align: 'center' as const,
       sorter: (a, b) => String(a._headerInfo?.TransactionalCurrencyCode ?? '').localeCompare(String(b._headerInfo?.TransactionalCurrencyCode ?? '')),
       render: (v: any) => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
@@ -2164,7 +2164,25 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
                 <Empty description="No lines match filter" style={{ padding: 60 }} />
               ) : (
                 <Table columns={lineColumns} dataSource={filteredLines} rowKey={(r, i) => r.key ?? `${i}`} size="small"
-                  scroll={{ x: 2400 }} pagination={{ pageSize: 50, size: 'small', showSizeChanger: true, showTotal: t => `${t} lines` }} />
+                  scroll={{ x: 2400 }} pagination={{ pageSize: 50, size: 'small', showSizeChanger: true, showTotal: t => `${t} lines` }}
+                  summary={() => (
+                    <Table.Summary fixed>
+                      <Table.Summary.Row style={{ background: REDWOOD.neutral100, fontWeight: 'bold' }}>
+                        <Table.Summary.Cell index={0} colSpan={7}>Total</Table.Summary.Cell>
+                        <Table.Summary.Cell index={7} align="right" style={{ fontWeight: 'bold' }}>
+                          {Number(filteredLines.reduce((sum, r) => sum + (r.OrderedQuantity ?? 0), 0)).toFixed(2)}
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={8} align="right" style={{ fontWeight: 'bold' }}>
+                          {Number(filteredLines.reduce((sum, r) => sum + (r.UnitSellingPrice ?? 0), 0)).toFixed(2)}
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={9} align="right" style={{ fontWeight: 'bold' }}>
+                          {Number(filteredLines.reduce((sum, r) => sum + (r.ExtendedAmount ?? 0), 0)).toFixed(2)}
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={10} colSpan={4} />
+                      </Table.Summary.Row>
+                    </Table.Summary>
+                  )}
+                />
               )}
             </div>
           </Tabs.TabPane>
