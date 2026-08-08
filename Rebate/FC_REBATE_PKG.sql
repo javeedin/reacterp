@@ -99,12 +99,12 @@ CREATE OR REPLACE PACKAGE FC_REBATE_PKG IS
     p_profit_yn IN VARCHAR2 DEFAULT 'N',
     p_ven_recv_yn IN VARCHAR2 DEFAULT 'N',
     p_region IN VARCHAR2 DEFAULT NULL,
-    p_jv_yn IN VARCHAR2 DEFAULT NULL,
+    p_jv_yn IN VARCHAR2 DEFAULT 'N',
     p_ref_doc IN VARCHAR2 DEFAULT NULL,
     p_total_amt IN NUMBER DEFAULT NULL,
     p_customer IN VARCHAR2 DEFAULT NULL,
     p_bsns_type IN VARCHAR2 DEFAULT NULL,
-    p_cr_uid IN VARCHAR2,
+    p_cr_uid IN VARCHAR2 DEFAULT NULL,
     p_prdm_sys_id OUT NUMBER
   );
 
@@ -114,26 +114,8 @@ CREATE OR REPLACE PACKAGE FC_REBATE_PKG IS
     p_sm_code IN VARCHAR2 DEFAULT NULL,
     p_dt IN DATE DEFAULT NULL,
     p_rebt_type IN VARCHAR2 DEFAULT NULL,
-    p_choice_list IN VARCHAR2 DEFAULT NULL,
     p_pm_amt IN NUMBER DEFAULT NULL,
-    p_pm_conf_yn IN VARCHAR2 DEFAULT NULL,
-    p_pm_remarks IN VARCHAR2 DEFAULT NULL,
     p_ba_amt IN NUMBER DEFAULT NULL,
-    p_ba_remarks IN VARCHAR2 DEFAULT NULL,
-    p_ba_conf_yn IN VARCHAR2 DEFAULT NULL,
-    p_cr_rcvd_yn IN VARCHAR2 DEFAULT NULL,
-    p_comp_code IN VARCHAR2 DEFAULT NULL,
-    p_ref IN VARCHAR2 DEFAULT NULL,
-    p_rebt_used IN NUMBER DEFAULT NULL,
-    p_ba_rcvd_dt IN DATE DEFAULT NULL,
-    p_profit_yn IN VARCHAR2 DEFAULT NULL,
-    p_ven_recv_yn IN VARCHAR2 DEFAULT NULL,
-    p_region IN VARCHAR2 DEFAULT NULL,
-    p_jv_yn IN VARCHAR2 DEFAULT NULL,
-    p_ref_doc IN VARCHAR2 DEFAULT NULL,
-    p_total_amt IN NUMBER DEFAULT NULL,
-    p_customer IN VARCHAR2 DEFAULT NULL,
-    p_bsns_type IN VARCHAR2 DEFAULT NULL,
     p_upd_uid IN VARCHAR2
   );
 
@@ -155,12 +137,12 @@ CREATE OR REPLACE PACKAGE FC_REBATE_PKG IS
     p_upd_uid IN VARCHAR2
   );
 
-  -- Delete rebate header and all associated lines
+  -- Delete rebate (cascading delete of header and lines)
   PROCEDURE delete_rebate(
     p_prhm_sys_id IN NUMBER
   );
 
-  -- Create rebate with header and lines in single transaction
+  -- Create complete rebate from JSON
   PROCEDURE create_rebate_with_lines(
     p_json_input IN CLOB,
     p_prhm_sys_id OUT NUMBER,
@@ -197,9 +179,8 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
     p_prhm_sys_id IN NUMBER,
     p_json_response OUT CLOB
   ) IS
-    v_header_json JSON_OBJECT_T;
-    v_lines_json JSON_ARRAY_T;
-    v_line_json JSON_OBJECT_T;
+    v_header CLOB;
+    v_lines CLOB;
   BEGIN
     -- Fetch header
     BEGIN
@@ -228,7 +209,7 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
         'prhm_upd_dt' VALUE TO_CHAR(prhm_upd_dt, 'YYYY-MM-DD HH24:MI:SS'),
         'prhm_upd_uid' VALUE prhm_upd_uid
       )
-      INTO p_json_response
+      INTO v_header
       FROM OT_PM_REBATE_HEAD_MIT
       WHERE prhm_sys_id = p_prhm_sys_id;
     EXCEPTION
@@ -273,18 +254,17 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
         )
         ORDER BY prdm_sys_id
       )
-      INTO v_lines_json
+      INTO v_lines
       FROM OT_PM_REBATE_DETAIL_MIT
       WHERE prdm_prhm_sys_id = p_prhm_sys_id;
     EXCEPTION
       WHEN NO_DATA_FOUND THEN
-        v_lines_json := JSON_ARRAY_T();
+        v_lines := '[]';
     END;
 
     -- Combine header and lines
-    v_header_json := JSON_OBJECT_T(p_json_response);
-    v_header_json.PUT('lines', NVL(v_lines_json, JSON_ARRAY_T()));
-    p_json_response := v_header_json.TO_CLOB();
+    p_json_response := SUBSTR(v_header, 1, LENGTH(v_header) - 1) ||
+                      ', "lines": ' || v_lines || '}';
 
   EXCEPTION
     WHEN OTHERS THEN
@@ -312,8 +292,7 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
         'prhm_currency' VALUE prhm_currency,
         'prhm_appr_status' VALUE prhm_appr_status,
         'prhm_submit_status' VALUE prhm_submit_status,
-        'prhm_cr_dt' VALUE TO_CHAR(prhm_cr_dt, 'YYYY-MM-DD HH24:MI:SS'),
-        'prhm_cr_uid' VALUE prhm_cr_uid
+        'prhm_cr_dt' VALUE TO_CHAR(prhm_cr_dt, 'YYYY-MM-DD')
       )
       ORDER BY prhm_sys_id DESC
     )
@@ -323,38 +302,40 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
       AND (p_vendor IS NULL OR prhm_vendor = p_vendor)
       AND (p_period IS NULL OR prhm_period = p_period);
 
-    IF p_json_response IS NULL THEN
-      p_json_response := '[]';
-    END IF;
-
   EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+      p_json_response := '[]';
     WHEN OTHERS THEN
       p_json_response := '{"error":"' || SQLERRM || '"}';
   END get_all_rebates_json;
 
   -- ========================================================================
   -- PROCEDURE: get_rebate_header
-  -- Purpose: Fetch single rebate header record
+  -- Purpose: Fetch rebate header record
   -- ========================================================================
   PROCEDURE get_rebate_header(
     p_prhm_sys_id IN NUMBER,
     p_header OUT rebate_header_type
   ) IS
   BEGIN
-    SELECT prhm_sys_id, prhm_comp_code, prhm_vendor, prhm_group, prhm_sm_code,
-           prhm_period, prhm_dr_main_acnt_code, prhm_dr_sub_acnt_code,
-           prhm_cr_main_acnt_code, prhm_cr_sub_acnt_code, prhm_currency,
-           prhm_annotation, prhm_appr_status, prhm_appr_uid, prhm_appr_dt,
-           prhm_submit_status, prhm_amd_no, prhm_amd_dt, prhm_amd_user_id,
-           prhm_cr_dt, prhm_cr_uid, prhm_upd_dt, prhm_upd_uid
+    SELECT
+      prhm_sys_id, prhm_comp_code, prhm_vendor, prhm_group, prhm_sm_code,
+      prhm_period, prhm_dr_main_acnt_code, prhm_dr_sub_acnt_code,
+      prhm_cr_main_acnt_code, prhm_cr_sub_acnt_code, prhm_currency,
+      prhm_annotation, prhm_appr_status, prhm_appr_uid, prhm_appr_dt,
+      prhm_submit_status, prhm_amd_no, prhm_amd_dt, prhm_amd_user_id,
+      prhm_cr_dt, prhm_cr_uid, prhm_upd_dt, prhm_upd_uid
     INTO p_header
     FROM OT_PM_REBATE_HEAD_MIT
     WHERE prhm_sys_id = p_prhm_sys_id;
+  EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+      NULL;
   END get_rebate_header;
 
   -- ========================================================================
   -- PROCEDURE: get_rebate_lines
-  -- Purpose: Fetch rebate lines for a header as JSON array
+  -- Purpose: Fetch lines for a rebate header as JSON
   -- ========================================================================
   PROCEDURE get_rebate_lines(
     p_prhm_sys_id IN NUMBER,
@@ -364,37 +345,20 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
     SELECT JSON_ARRAYAGG(
       JSON_OBJECT(
         'prdm_sys_id' VALUE prdm_sys_id,
-        'prdm_prhm_sys_id' VALUE prdm_prhm_sys_id,
-        'prdm_sm_code' VALUE prdm_sm_code,
         'prdm_dt' VALUE TO_CHAR(prdm_dt, 'YYYY-MM-DD'),
         'prdm_rebt_type' VALUE prdm_rebt_type,
-        'prdm_choice_list' VALUE prdm_choice_list,
         'prdm_pm_amt' VALUE prdm_pm_amt,
-        'prdm_pm_conf_yn' VALUE prdm_pm_conf_yn,
-        'prdm_pm_remarks' VALUE prdm_pm_remarks,
         'prdm_ba_amt' VALUE prdm_ba_amt,
-        'prdm_ba_remarks' VALUE prdm_ba_remarks,
-        'prdm_ba_conf_yn' VALUE prdm_ba_conf_yn,
-        'prdm_cr_rcvd_yn' VALUE prdm_cr_rcvd_yn,
-        'prdm_comp_code' VALUE prdm_comp_code,
-        'prdm_ref' VALUE prdm_ref,
-        'prdm_total_amt' VALUE prdm_total_amt,
-        'prdm_customer' VALUE prdm_customer,
-        'prdm_bsns_type' VALUE prdm_bsns_type
+        'prdm_total_amt' VALUE prdm_total_amt
       )
       ORDER BY prdm_sys_id
     )
     INTO p_lines_json
     FROM OT_PM_REBATE_DETAIL_MIT
     WHERE prdm_prhm_sys_id = p_prhm_sys_id;
-
-    IF p_lines_json IS NULL THEN
-      p_lines_json := '[]';
-    END IF;
-
   EXCEPTION
-    WHEN OTHERS THEN
-      p_lines_json := '{"error":"' || SQLERRM || '"}';
+    WHEN NO_DATA_FOUND THEN
+      p_lines_json := '[]';
   END get_rebate_lines;
 
   -- ========================================================================
@@ -423,14 +387,12 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
       prhm_sys_id, prhm_comp_code, prhm_vendor, prhm_group, prhm_sm_code,
       prhm_period, prhm_dr_main_acnt_code, prhm_dr_sub_acnt_code,
       prhm_cr_main_acnt_code, prhm_cr_sub_acnt_code, prhm_currency,
-      prhm_annotation, prhm_appr_status, prhm_submit_status, prhm_amd_no,
-      prhm_cr_dt, prhm_cr_uid
+      prhm_annotation, prhm_cr_uid, prhm_cr_dt
     ) VALUES (
       p_prhm_sys_id, p_comp_code, p_vendor, p_group, p_sm_code,
       p_period, p_dr_main_acnt_code, p_dr_sub_acnt_code,
       p_cr_main_acnt_code, p_cr_sub_acnt_code, p_currency,
-      p_annotation, 0, 0, 0,
-      SYSDATE, p_cr_uid
+      p_annotation, p_cr_uid, SYSDATE
     );
 
     COMMIT;
@@ -442,7 +404,7 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
 
   -- ========================================================================
   -- PROCEDURE: add_rebate_line
-  -- Purpose: Add new line to rebate
+  -- Purpose: Add line item to rebate
   -- ========================================================================
   PROCEDURE add_rebate_line(
     p_prhm_sys_id IN NUMBER,
@@ -464,12 +426,12 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
     p_profit_yn IN VARCHAR2 DEFAULT 'N',
     p_ven_recv_yn IN VARCHAR2 DEFAULT 'N',
     p_region IN VARCHAR2 DEFAULT NULL,
-    p_jv_yn IN VARCHAR2 DEFAULT NULL,
+    p_jv_yn IN VARCHAR2 DEFAULT 'N',
     p_ref_doc IN VARCHAR2 DEFAULT NULL,
     p_total_amt IN NUMBER DEFAULT NULL,
     p_customer IN VARCHAR2 DEFAULT NULL,
     p_bsns_type IN VARCHAR2 DEFAULT NULL,
-    p_cr_uid IN VARCHAR2,
+    p_cr_uid IN VARCHAR2 DEFAULT NULL,
     p_prdm_sys_id OUT NUMBER
   ) IS
   BEGIN
@@ -502,62 +464,27 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
 
   -- ========================================================================
   -- PROCEDURE: update_rebate_line
-  -- Purpose: Update existing rebate line
+  -- Purpose: Update line item fields
   -- ========================================================================
   PROCEDURE update_rebate_line(
     p_prdm_sys_id IN NUMBER,
     p_sm_code IN VARCHAR2 DEFAULT NULL,
     p_dt IN DATE DEFAULT NULL,
     p_rebt_type IN VARCHAR2 DEFAULT NULL,
-    p_choice_list IN VARCHAR2 DEFAULT NULL,
     p_pm_amt IN NUMBER DEFAULT NULL,
-    p_pm_conf_yn IN VARCHAR2 DEFAULT NULL,
-    p_pm_remarks IN VARCHAR2 DEFAULT NULL,
     p_ba_amt IN NUMBER DEFAULT NULL,
-    p_ba_remarks IN VARCHAR2 DEFAULT NULL,
-    p_ba_conf_yn IN VARCHAR2 DEFAULT NULL,
-    p_cr_rcvd_yn IN VARCHAR2 DEFAULT NULL,
-    p_comp_code IN VARCHAR2 DEFAULT NULL,
-    p_ref IN VARCHAR2 DEFAULT NULL,
-    p_rebt_used IN NUMBER DEFAULT NULL,
-    p_ba_rcvd_dt IN DATE DEFAULT NULL,
-    p_profit_yn IN VARCHAR2 DEFAULT NULL,
-    p_ven_recv_yn IN VARCHAR2 DEFAULT NULL,
-    p_region IN VARCHAR2 DEFAULT NULL,
-    p_jv_yn IN VARCHAR2 DEFAULT NULL,
-    p_ref_doc IN VARCHAR2 DEFAULT NULL,
-    p_total_amt IN NUMBER DEFAULT NULL,
-    p_customer IN VARCHAR2 DEFAULT NULL,
-    p_bsns_type IN VARCHAR2 DEFAULT NULL,
     p_upd_uid IN VARCHAR2
   ) IS
   BEGIN
     UPDATE OT_PM_REBATE_DETAIL_MIT
-    SET prdm_sm_code = NVL(p_sm_code, prdm_sm_code),
-        prdm_dt = NVL(p_dt, prdm_dt),
-        prdm_rebt_type = NVL(p_rebt_type, prdm_rebt_type),
-        prdm_choice_list = NVL(p_choice_list, prdm_choice_list),
-        prdm_pm_amt = NVL(p_pm_amt, prdm_pm_amt),
-        prdm_pm_conf_yn = NVL(p_pm_conf_yn, prdm_pm_conf_yn),
-        prdm_pm_remarks = NVL(p_pm_remarks, prdm_pm_remarks),
-        prdm_ba_amt = NVL(p_ba_amt, prdm_ba_amt),
-        prdm_ba_remarks = NVL(p_ba_remarks, prdm_ba_remarks),
-        prdm_ba_conf_yn = NVL(p_ba_conf_yn, prdm_ba_conf_yn),
-        prdm_cr_rcvd_yn = NVL(p_cr_rcvd_yn, prdm_cr_rcvd_yn),
-        prdm_comp_code = NVL(p_comp_code, prdm_comp_code),
-        prdm_ref = NVL(p_ref, prdm_ref),
-        prdm_rebt_used = NVL(p_rebt_used, prdm_rebt_used),
-        prdm_ba_rcvd_dt = NVL(p_ba_rcvd_dt, prdm_ba_rcvd_dt),
-        prdm_profit_yn = NVL(p_profit_yn, prdm_profit_yn),
-        prdm_ven_recv_yn = NVL(p_ven_recv_yn, prdm_ven_recv_yn),
-        prdm_region = NVL(p_region, prdm_region),
-        prdm_jv_yn = NVL(p_jv_yn, prdm_jv_yn),
-        prdm_ref_doc = NVL(p_ref_doc, prdm_ref_doc),
-        prdm_total_amt = NVL(p_total_amt, prdm_total_amt),
-        prdm_customer = NVL(p_customer, prdm_customer),
-        prdm_bsns_type = NVL(p_bsns_type, prdm_bsns_type),
-        prdm_upd_dt = SYSDATE,
-        prdm_upd_uid = p_upd_uid
+    SET
+      prdm_sm_code = NVL(p_sm_code, prdm_sm_code),
+      prdm_dt = NVL(p_dt, prdm_dt),
+      prdm_rebt_type = NVL(p_rebt_type, prdm_rebt_type),
+      prdm_pm_amt = NVL(p_pm_amt, prdm_pm_amt),
+      prdm_ba_amt = NVL(p_ba_amt, prdm_ba_amt),
+      prdm_upd_uid = p_upd_uid,
+      prdm_upd_dt = SYSDATE
     WHERE prdm_sys_id = p_prdm_sys_id;
 
     COMMIT;
@@ -569,15 +496,13 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
 
   -- ========================================================================
   -- PROCEDURE: delete_rebate_line
-  -- Purpose: Delete rebate line
+  -- Purpose: Delete single line item
   -- ========================================================================
   PROCEDURE delete_rebate_line(
     p_prdm_sys_id IN NUMBER
   ) IS
   BEGIN
-    DELETE FROM OT_PM_REBATE_DETAIL_MIT
-    WHERE prdm_sys_id = p_prdm_sys_id;
-
+    DELETE FROM OT_PM_REBATE_DETAIL_MIT WHERE prdm_sys_id = p_prdm_sys_id;
     COMMIT;
   EXCEPTION
     WHEN OTHERS THEN
@@ -587,7 +512,7 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
 
   -- ========================================================================
   -- PROCEDURE: update_rebate_header
-  -- Purpose: Update rebate header
+  -- Purpose: Update header fields
   -- ========================================================================
   PROCEDURE update_rebate_header(
     p_prhm_sys_id IN NUMBER,
@@ -602,17 +527,16 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
   ) IS
   BEGIN
     UPDATE OT_PM_REBATE_HEAD_MIT
-    SET prhm_sm_code = NVL(p_sm_code, prhm_sm_code),
-        prhm_annotation = NVL(p_annotation, prhm_annotation),
-        prhm_appr_status = NVL(p_appr_status, prhm_appr_status),
-        prhm_appr_uid = NVL(p_appr_uid, prhm_appr_uid),
-        prhm_appr_dt = CASE WHEN p_appr_status IS NOT NULL THEN SYSDATE ELSE prhm_appr_dt END,
-        prhm_submit_status = NVL(p_submit_status, prhm_submit_status),
-        prhm_amd_no = NVL(p_amd_no, prhm_amd_no),
-        prhm_amd_dt = CASE WHEN p_amd_no IS NOT NULL THEN SYSDATE ELSE prhm_amd_dt END,
-        prhm_amd_user_id = NVL(p_amd_user_id, prhm_amd_user_id),
-        prhm_upd_dt = SYSDATE,
-        prhm_upd_uid = p_upd_uid
+    SET
+      prhm_sm_code = NVL(p_sm_code, prhm_sm_code),
+      prhm_annotation = NVL(p_annotation, prhm_annotation),
+      prhm_appr_status = NVL(p_appr_status, prhm_appr_status),
+      prhm_appr_uid = NVL(p_appr_uid, prhm_appr_uid),
+      prhm_submit_status = NVL(p_submit_status, prhm_submit_status),
+      prhm_amd_no = NVL(p_amd_no, prhm_amd_no),
+      prhm_amd_user_id = NVL(p_amd_user_id, prhm_amd_user_id),
+      prhm_upd_uid = p_upd_uid,
+      prhm_upd_dt = SYSDATE
     WHERE prhm_sys_id = p_prhm_sys_id;
 
     COMMIT;
@@ -624,20 +548,14 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
 
   -- ========================================================================
   -- PROCEDURE: delete_rebate
-  -- Purpose: Delete rebate header and all associated lines
+  -- Purpose: Delete rebate header and all related lines (cascading)
   -- ========================================================================
   PROCEDURE delete_rebate(
     p_prhm_sys_id IN NUMBER
   ) IS
   BEGIN
-    -- Delete all lines first
-    DELETE FROM OT_PM_REBATE_DETAIL_MIT
-    WHERE prdm_prhm_sys_id = p_prhm_sys_id;
-
-    -- Delete header
-    DELETE FROM OT_PM_REBATE_HEAD_MIT
-    WHERE prhm_sys_id = p_prhm_sys_id;
-
+    DELETE FROM OT_PM_REBATE_DETAIL_MIT WHERE prdm_prhm_sys_id = p_prhm_sys_id;
+    DELETE FROM OT_PM_REBATE_HEAD_MIT WHERE prhm_sys_id = p_prhm_sys_id;
     COMMIT;
   EXCEPTION
     WHEN OTHERS THEN
@@ -647,7 +565,7 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
 
   -- ========================================================================
   -- PROCEDURE: create_rebate_with_lines
-  -- Purpose: Create rebate with header and lines in single transaction
+  -- Purpose: Create rebate header and lines from JSON in single transaction
   -- ========================================================================
   PROCEDURE create_rebate_with_lines(
     p_json_input IN CLOB,
@@ -655,88 +573,71 @@ CREATE OR REPLACE PACKAGE BODY FC_REBATE_PKG IS
     p_status OUT VARCHAR2,
     p_message OUT VARCHAR2
   ) IS
-    v_json_obj JSON_OBJECT_T;
-    v_lines_arr JSON_ARRAY_T;
-    v_line_obj JSON_OBJECT_T;
     v_prdm_sys_id NUMBER;
-    i INTEGER;
+    v_line_count INTEGER;
   BEGIN
     p_status := 'ERROR';
     p_message := '';
 
-    -- Parse JSON input
-    v_json_obj := JSON_OBJECT_T(p_json_input);
-
-    -- Create header
+    -- Create header from JSON
     create_rebate_header(
-      p_comp_code => v_json_obj.get_string('prhm_comp_code'),
-      p_vendor => v_json_obj.get_string('prhm_vendor'),
-      p_group => v_json_obj.get_string('prhm_group'),
-      p_sm_code => v_json_obj.get_string('prhm_sm_code'),
-      p_period => v_json_obj.get_string('prhm_period'),
-      p_dr_main_acnt_code => v_json_obj.get_string('prhm_dr_main_acnt_code'),
-      p_dr_sub_acnt_code => v_json_obj.get_string('prhm_dr_sub_acnt_code'),
-      p_cr_main_acnt_code => v_json_obj.get_string('prhm_cr_main_acnt_code'),
-      p_cr_sub_acnt_code => v_json_obj.get_string('prhm_cr_sub_acnt_code'),
-      p_currency => v_json_obj.get_string('prhm_currency'),
-      p_annotation => v_json_obj.get_string('prhm_annotation'),
-      p_cr_uid => v_json_obj.get_string('prhm_cr_uid'),
+      p_comp_code => JSON_VALUE(p_json_input, '$.prhm_comp_code'),
+      p_vendor => JSON_VALUE(p_json_input, '$.prhm_vendor'),
+      p_group => JSON_VALUE(p_json_input, '$.prhm_group'),
+      p_sm_code => JSON_VALUE(p_json_input, '$.prhm_sm_code'),
+      p_period => JSON_VALUE(p_json_input, '$.prhm_period'),
+      p_dr_main_acnt_code => JSON_VALUE(p_json_input, '$.prhm_dr_main_acnt_code'),
+      p_dr_sub_acnt_code => JSON_VALUE(p_json_input, '$.prhm_dr_sub_acnt_code'),
+      p_cr_main_acnt_code => JSON_VALUE(p_json_input, '$.prhm_cr_main_acnt_code'),
+      p_cr_sub_acnt_code => JSON_VALUE(p_json_input, '$.prhm_cr_sub_acnt_code'),
+      p_currency => JSON_VALUE(p_json_input, '$.prhm_currency'),
+      p_annotation => JSON_VALUE(p_json_input, '$.prhm_annotation'),
+      p_cr_uid => JSON_VALUE(p_json_input, '$.prhm_cr_uid'),
       p_prhm_sys_id => p_prhm_sys_id
     );
 
-    -- Add lines
-    IF v_json_obj.has('lines') THEN
-      v_lines_arr := JSON_ARRAY_T(v_json_obj.get('lines'));
-      IF v_lines_arr IS NOT NULL AND v_lines_arr.get_size > 0 THEN
-        FOR i IN 0 .. v_lines_arr.get_size - 1 LOOP
-          v_line_obj := JSON_OBJECT_T(v_lines_arr.get(i));
-
-          add_rebate_line(
-            p_prhm_sys_id => p_prhm_sys_id,
-            p_sm_code => v_line_obj.get_string('prdm_sm_code'),
-            p_dt => TO_DATE(v_line_obj.get_string('prdm_dt'), 'YYYY-MM-DD'),
-            p_rebt_type => v_line_obj.get_string('prdm_rebt_type'),
-            p_choice_list => v_line_obj.get_string('prdm_choice_list'),
-            p_pm_amt => v_line_obj.get_number('prdm_pm_amt'),
-            p_pm_conf_yn => NVL(v_line_obj.get_string('prdm_pm_conf_yn'), 'N'),
-            p_pm_remarks => v_line_obj.get_string('prdm_pm_remarks'),
-            p_ba_amt => v_line_obj.get_number('prdm_ba_amt'),
-            p_ba_remarks => v_line_obj.get_string('prdm_ba_remarks'),
-            p_ba_conf_yn => NVL(v_line_obj.get_string('prdm_ba_conf_yn'), 'N'),
-            p_cr_rcvd_yn => NVL(v_line_obj.get_string('prdm_cr_rcvd_yn'), 'N'),
-            p_comp_code => v_line_obj.get_string('prdm_comp_code'),
-            p_ref => v_line_obj.get_string('prdm_ref'),
-            p_rebt_used => v_line_obj.get_number('prdm_rebt_used'),
-            p_ba_rcvd_dt => CASE WHEN v_line_obj.get_string('prdm_ba_rcvd_dt') IS NOT NULL
-                                 THEN TO_DATE(v_line_obj.get_string('prdm_ba_rcvd_dt'), 'YYYY-MM-DD')
-                                 ELSE NULL END,
-            p_profit_yn => NVL(v_line_obj.get_string('prdm_profit_yn'), 'N'),
-            p_ven_recv_yn => NVL(v_line_obj.get_string('prdm_ven_recv_yn'), 'N'),
-            p_region => v_line_obj.get_string('prdm_region'),
-            p_jv_yn => v_line_obj.get_string('prdm_jv_yn'),
-            p_ref_doc => v_line_obj.get_string('prdm_ref_doc'),
-            p_total_amt => v_line_obj.get_number('prdm_total_amt'),
-            p_customer => v_line_obj.get_string('prdm_customer'),
-            p_bsns_type => v_line_obj.get_string('prdm_bsns_type'),
-            p_cr_uid => v_line_obj.get_string('prdm_cr_uid'),
-            p_prdm_sys_id => v_prdm_sys_id
-          );
-        END LOOP;
-      END IF;
-    END IF;
+    -- Add lines from JSON array
+    FOR rec IN (
+      SELECT
+        JSON_VALUE(line, '$.prdm_sm_code') AS prdm_sm_code,
+        JSON_VALUE(line, '$.prdm_dt') AS prdm_dt,
+        JSON_VALUE(line, '$.prdm_rebt_type') AS prdm_rebt_type,
+        JSON_VALUE(line, '$.prdm_pm_amt' RETURNING NUMBER) AS prdm_pm_amt,
+        JSON_VALUE(line, '$.prdm_ba_amt' RETURNING NUMBER) AS prdm_ba_amt,
+        JSON_VALUE(line, '$.prdm_total_amt' RETURNING NUMBER) AS prdm_total_amt,
+        JSON_VALUE(line, '$.prdm_customer') AS prdm_customer,
+        JSON_VALUE(line, '$.prdm_choice_list') AS prdm_choice_list,
+        JSON_VALUE(line, '$.prdm_cr_uid') AS prdm_cr_uid
+      FROM JSON_TABLE(
+        p_json_input, '$.lines[*]'
+        COLUMNS (line VARCHAR2(4000) FORMAT JSON PATH '$')
+      )
+    ) LOOP
+      add_rebate_line(
+        p_prhm_sys_id => p_prhm_sys_id,
+        p_sm_code => rec.prdm_sm_code,
+        p_dt => TO_DATE(rec.prdm_dt, 'YYYY-MM-DD'),
+        p_rebt_type => rec.prdm_rebt_type,
+        p_pm_amt => rec.prdm_pm_amt,
+        p_ba_amt => rec.prdm_ba_amt,
+        p_total_amt => rec.prdm_total_amt,
+        p_customer => rec.prdm_customer,
+        p_choice_list => rec.prdm_choice_list,
+        p_cr_uid => rec.prdm_cr_uid,
+        p_prdm_sys_id => v_prdm_sys_id
+      );
+      v_line_count := NVL(v_line_count, 0) + 1;
+    END LOOP;
 
     p_status := 'SUCCESS';
-    p_message := 'Rebate created successfully with ID: ' || p_prhm_sys_id;
+    p_message := 'Rebate created with ' || NVL(v_line_count, 0) || ' lines';
 
   EXCEPTION
     WHEN OTHERS THEN
+      ROLLBACK;
       p_status := 'ERROR';
       p_message := SQLERRM;
-      ROLLBACK;
   END create_rebate_with_lines;
 
 END FC_REBATE_PKG;
 /
-
--- Show compilation status
-SHOW ERRORS;
