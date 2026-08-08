@@ -22,6 +22,8 @@ import dayjs, { type Dayjs } from 'dayjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { FUSION_POD_HOST, FUSION_POD_AUTH, getFusionInstance } from '../../config/fusionInstance';
 import CustomerSearchBipModal from '../../components/CustomerSearchBipModal';
 import { convertBipCustomerToFill, type CustomerSearchResult } from '../../services/customerSearchBip.service';
@@ -1662,8 +1664,10 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
   const [apiOpen, setApiOpen] = useState(false);
   const [apiRun, setApiRun] = useState<{ running: boolean; status?: string; body?: string; ok?: boolean } | null>(null);
   const [filterText, setFilterText] = useState('');
-  const [searchTab, setSearchTab] = useState<'orders' | 'lines'>('orders');
+  const [searchTab, setSearchTab] = useState<'orders' | 'lines' | 'analytics'>('orders');
   const [linesFilterText, setLinesFilterText] = useState('');
+  const [analyticsView, setAnalyticsView] = useState<'date' | 'month' | 'item' | 'customer' | 'type'>('month');
+  const [analyticsFilters, setAnalyticsFilters] = useState<{ customer?: string; product?: string; type?: string }>({});
 
   // Execute an API URL straight from the dialog — shows HTTP status, timing and
   // the raw response (or the error) so an unreachable POD is easy to diagnose.
@@ -1889,6 +1893,120 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
     });
   }, [allLines, linesFilterText]);
 
+  // Analytics aggregation functions
+  const getAnalyticsData = useMemo(() => {
+    let data = filteredLines;
+    if (analyticsFilters.customer) data = data.filter(l => String(l._headerInfo?.BuyingPartyName ?? '').includes(analyticsFilters.customer));
+    if (analyticsFilters.product) data = data.filter(l => String(l.ProductNumber ?? '').includes(analyticsFilters.product));
+    if (analyticsFilters.type) data = data.filter(l => String(l._headerInfo?.TransactionTypeCode ?? '') === analyticsFilters.type);
+
+    const result: Record<string, any> = {};
+    data.forEach(line => {
+      let key = '';
+      if (analyticsView === 'date') {
+        key = dayjs(line._headerInfo?.TransactionOn).format('YYYY-MM-DD');
+      } else if (analyticsView === 'month') {
+        key = dayjs(line._headerInfo?.TransactionOn).format('YYYY-MM');
+      } else if (analyticsView === 'item') {
+        key = line.ProductNumber || 'Unknown';
+      } else if (analyticsView === 'customer') {
+        key = line._headerInfo?.BuyingPartyName || 'Unknown';
+      } else if (analyticsView === 'type') {
+        key = line._headerInfo?.TransactionTypeCode || 'Unknown';
+      }
+
+      if (!result[key]) {
+        result[key] = { key, quantity: 0, amount: 0, count: 0, avgPrice: 0, description: line.ProductDescription || line._headerInfo?.BuyingPartyName || '' };
+      }
+      result[key].quantity += line.OrderedQuantity || 0;
+      result[key].amount += line.ExtendedAmount || 0;
+      result[key].count += 1;
+    });
+
+    return Object.values(result).map(r => ({
+      ...r,
+      avgPrice: r.count > 0 ? r.amount / r.quantity : 0,
+    })).sort((a, b) => b.amount - a.amount);
+  }, [filteredLines, analyticsView, analyticsFilters]);
+
+  // Get unique values for analytics filters
+  const analyticsFilterOptions = useMemo(() => {
+    const customers = [...new Set(filteredLines.map(l => l._headerInfo?.BuyingPartyName).filter(Boolean))].sort();
+    const products = [...new Set(filteredLines.map(l => l.ProductNumber).filter(Boolean))].sort();
+    const types = [...new Set(filteredLines.map(l => l._headerInfo?.TransactionTypeCode).filter(Boolean))].sort();
+    return { customers, products, types };
+  }, [filteredLines]);
+
+  // Export analytics to Excel
+  const exportAnalyticsToExcel = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Analytics');
+
+    // Title
+    const titleCell = worksheet.addRow([`Sales Orders Analytics - ${analyticsView.toUpperCase()}`]);
+    titleCell.font = { bold: true, size: 14, color: { argb: 'FF1D7B4D' } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'center' };
+    worksheet.mergeCells('A1:F1');
+    worksheet.getRow(1).height = 24;
+
+    // Summary info
+    worksheet.addRow(['']);
+    const summaryRow = worksheet.addRow([
+      `Date: ${dayjs().format('YYYY-MM-DD HH:mm')}`,
+      `View: ${analyticsView}`,
+      `Total Orders: ${getAnalyticsData.length}`,
+      `Total Quantity: ${getAnalyticsData.reduce((s, r) => s + r.quantity, 0)}`,
+      `Total Amount: $${fmt(getAnalyticsData.reduce((s, r) => s + r.amount, 0))}`,
+    ]);
+    summaryRow.font = { size: 10 };
+    worksheet.addRow(['']);
+
+    // Headers
+    const headers = analyticsView === 'date' || analyticsView === 'month' ? ['Date', 'Quantity', 'Amount', 'Order Count'] :
+                    analyticsView === 'item' ? ['Product #', 'Description', 'Quantity', 'Amount', 'Avg Price', 'Count'] :
+                    analyticsView === 'customer' ? ['Customer', 'Quantity', 'Amount', 'Order Count', 'Avg Price'] :
+                    ['Type', 'Quantity', 'Amount', 'Order Count', 'Avg Price'];
+
+    const headerRow = worksheet.addRow(headers);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D7B4D' } };
+    headerRow.alignment = { horizontal: 'center', vertical: 'center' };
+
+    // Data rows
+    getAnalyticsData.forEach((row: any) => {
+      const cells = analyticsView === 'date' || analyticsView === 'month' ?
+        [row.key, row.quantity, row.amount, row.count] :
+        analyticsView === 'item' ?
+        [row.key, row.description, row.quantity, row.amount, row.avgPrice, row.count] :
+        [row.key, row.quantity, row.amount, row.count, row.avgPrice];
+
+      const dataRow = worksheet.addRow(cells);
+      dataRow.font = { size: 10 };
+      dataRow.alignment = { horizontal: 'right', vertical: 'center' };
+    });
+
+    // Format columns
+    worksheet.columns = [
+      { width: 20 },
+      { width: 30 },
+      { width: 15 },
+      { width: 15 },
+      { width: 15 },
+      { width: 15 },
+    ];
+
+    // Save
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Analytics_${analyticsView}_${dayjs().format('YYYY-MM-DD_HHmmss')}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    message.success('Analytics exported to Excel');
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <Card styles={{ body: { padding: '14px 18px' } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
@@ -2005,6 +2123,141 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
               ) : (
                 <Table columns={lineColumns} dataSource={filteredLines} rowKey={(r, i) => r.key ?? `${i}`} size="small"
                   scroll={{ x: 2400 }} pagination={{ pageSize: 50, size: 'small', showSizeChanger: true, showTotal: t => `${t} lines` }} />
+              )}
+            </div>
+          </Tabs.TabPane>
+          <Tabs.TabPane tab={<Space><RiseOutlined style={{ color: REDWOOD.primary }} /><Text strong>Analytics</Text>
+            {getAnalyticsData.length > 0 && <Tag>{getAnalyticsData.length}</Tag>}</Space>} key="analytics">
+            <div style={{ padding: '0 18px 18px' }}>
+              {!searched ? (
+                <Empty description="Run a search to see analytics" style={{ padding: 60 }} />
+              ) : allLines.length === 0 ? (
+                <Empty description="No data for analytics" style={{ padding: 60 }} />
+              ) : (
+                <>
+                  {/* View Selection and Filters */}
+                  <Card style={{ marginBottom: 16, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+                    <Space wrap style={{ marginBottom: 16 }}>
+                      <Text strong>View:</Text>
+                      <Segmented value={analyticsView} onChange={(v) => setAnalyticsView(v as any)}
+                        options={[
+                          { label: '📅 By Date', value: 'date' },
+                          { label: '📆 By Month', value: 'month' },
+                          { label: '📦 By Item', value: 'item' },
+                          { label: '👤 By Customer', value: 'customer' },
+                          { label: '🏷️ By Type', value: 'type' },
+                        ]} />
+                      <Button type="primary" icon={<FileExcelOutlined />} onClick={exportAnalyticsToExcel} style={{ marginLeft: 'auto', background: REDWOOD.success, borderColor: REDWOOD.success }}>
+                        Export to Excel
+                      </Button>
+                    </Space>
+
+                    {/* Filters */}
+                    <Row gutter={[12, 12]}>
+                      <Col xs={24} sm={12} md={8}>
+                        <Text style={{ fontSize: 11, fontWeight: 600 }}>Customer:</Text>
+                        <Select allowClear showSearch placeholder="All customers" size="small"
+                          value={analyticsFilters.customer || undefined}
+                          onChange={v => setAnalyticsFilters(f => ({ ...f, customer: v }))}
+                          options={analyticsFilterOptions.customers.map(c => ({ label: c, value: c }))}
+                          style={{ marginTop: 4 }} />
+                      </Col>
+                      <Col xs={24} sm={12} md={8}>
+                        <Text style={{ fontSize: 11, fontWeight: 600 }}>Product #:</Text>
+                        <Select allowClear showSearch placeholder="All products" size="small"
+                          value={analyticsFilters.product || undefined}
+                          onChange={v => setAnalyticsFilters(f => ({ ...f, product: v }))}
+                          options={analyticsFilterOptions.products.map(p => ({ label: p, value: p }))}
+                          style={{ marginTop: 4 }} />
+                      </Col>
+                      <Col xs={24} sm={12} md={8}>
+                        <Text style={{ fontSize: 11, fontWeight: 600 }}>Type:</Text>
+                        <Select allowClear showSearch placeholder="All types" size="small"
+                          value={analyticsFilters.type || undefined}
+                          onChange={v => setAnalyticsFilters(f => ({ ...f, type: v }))}
+                          options={analyticsFilterOptions.types.map(t => ({ label: t, value: t }))}
+                          style={{ marginTop: 4 }} />
+                      </Col>
+                    </Row>
+                  </Card>
+
+                  {/* Chart */}
+                  <Card style={{ marginBottom: 16, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={getAnalyticsData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="key" angle={-45} textAnchor="end" height={80} />
+                        <YAxis />
+                        <Tooltip formatter={(value) => typeof value === 'number' ? fmt(value) : value} />
+                        <Legend />
+                        <Bar dataKey="amount" fill={REDWOOD.success} name="Amount ($)" />
+                        <Bar dataKey="quantity" fill={REDWOOD.info} name="Quantity" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </Card>
+
+                  {/* Summary */}
+                  <Card style={{ marginBottom: 16, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+                    <Row gutter={16}>
+                      <Col xs={24} sm={12} md={6}>
+                        <div style={{ textAlign: 'center', padding: 12, background: REDWOOD.neutral100, borderRadius: 6 }}>
+                          <Text style={{ fontSize: 12, color: REDWOOD.textLight }}>Total Orders</Text>
+                          <div style={{ fontSize: 24, fontWeight: 'bold', color: REDWOOD.primary, marginTop: 8 }}>
+                            {getAnalyticsData.length}
+                          </div>
+                        </div>
+                      </Col>
+                      <Col xs={24} sm={12} md={6}>
+                        <div style={{ textAlign: 'center', padding: 12, background: REDWOOD.neutral100, borderRadius: 6 }}>
+                          <Text style={{ fontSize: 12, color: REDWOOD.textLight }}>Total Quantity</Text>
+                          <div style={{ fontSize: 24, fontWeight: 'bold', color: REDWOOD.success, marginTop: 8 }}>
+                            {fmt(getAnalyticsData.reduce((s, r) => s + r.quantity, 0))}
+                          </div>
+                        </div>
+                      </Col>
+                      <Col xs={24} sm={12} md={6}>
+                        <div style={{ textAlign: 'center', padding: 12, background: REDWOOD.neutral100, borderRadius: 6 }}>
+                          <Text style={{ fontSize: 12, color: REDWOOD.textLight }}>Total Amount</Text>
+                          <div style={{ fontSize: 24, fontWeight: 'bold', color: REDWOOD.error, marginTop: 8 }}>
+                            ${fmt(getAnalyticsData.reduce((s, r) => s + r.amount, 0))}
+                          </div>
+                        </div>
+                      </Col>
+                      <Col xs={24} sm={12} md={6}>
+                        <div style={{ textAlign: 'center', padding: 12, background: REDWOOD.neutral100, borderRadius: 6 }}>
+                          <Text style={{ fontSize: 12, color: REDWOOD.textLight }}>Avg Amount</Text>
+                          <div style={{ fontSize: 24, fontWeight: 'bold', color: REDWOOD.orange, marginTop: 8 }}>
+                            ${fmt(getAnalyticsData.length > 0 ? getAnalyticsData.reduce((s, r) => s + r.amount, 0) / getAnalyticsData.length : 0)}
+                          </div>
+                        </div>
+                      </Col>
+                    </Row>
+                  </Card>
+
+                  {/* Data Table */}
+                  <Card style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+                    <Table
+                      columns={[
+                        {
+                          title: analyticsView === 'date' ? 'Date' : analyticsView === 'month' ? 'Month' : analyticsView === 'item' ? 'Product #' : analyticsView === 'customer' ? 'Customer' : 'Type',
+                          dataIndex: 'key',
+                          width: 200,
+                          render: (v) => <Text strong>{v}</Text>,
+                          sorter: (a, b) => String(a.key).localeCompare(String(b.key)),
+                        },
+                        analyticsView === 'item' && { title: 'Description', dataIndex: 'description', width: 250, ellipsis: true, sorter: (a, b) => String(a.description).localeCompare(String(b.description)) },
+                        { title: 'Quantity', dataIndex: 'quantity', width: 120, align: 'right' as const, render: (v) => fmt(v), sorter: (a, b) => a.quantity - b.quantity },
+                        { title: 'Amount ($)', dataIndex: 'amount', width: 130, align: 'right' as const, render: (v) => fmt(v), sorter: (a, b) => a.amount - b.amount },
+                        { title: 'Avg Price', dataIndex: 'avgPrice', width: 120, align: 'right' as const, render: (v) => fmt(v), sorter: (a, b) => a.avgPrice - b.avgPrice },
+                        { title: 'Count', dataIndex: 'count', width: 100, align: 'right' as const, render: (v) => v, sorter: (a, b) => a.count - b.count },
+                      ].filter(Boolean) as ColumnsType<any>}
+                      dataSource={getAnalyticsData}
+                      rowKey="key"
+                      pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} records` }}
+                      size="small"
+                    />
+                  </Card>
+                </>
               )}
             </div>
           </Tabs.TabPane>
