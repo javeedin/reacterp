@@ -1668,6 +1668,8 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
   const [linesFilterText, setLinesFilterText] = useState('');
   const [analyticsView, setAnalyticsView] = useState<'date' | 'month' | 'item' | 'customer' | 'type'>('month');
   const [analyticsFilters, setAnalyticsFilters] = useState<{ customer?: string; product?: string; type?: string }>({});
+  const [showAnalyticsChart, setShowAnalyticsChart] = useState(false);
+  const [chartType, setChartType] = useState<'bar' | 'line' | 'pie'>('bar');
 
   // Execute an API URL straight from the dialog — shows HTTP status, timing and
   // the raw response (or the error) so an unreachable POD is easy to diagnose.
@@ -1748,6 +1750,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
 
   const columns = useMemo<ColumnsType<any>>(() => ([
     { title: 'Source Txn #', dataIndex: 'SourceTransactionNumber', width: 185, fixed: 'left',
+      sorter: (a, b) => String(a.SourceTransactionNumber ?? '').localeCompare(String(b.SourceTransactionNumber ?? '')),
       render: (v, r) => (
         <Space size={2} style={{ maxWidth: '100%' }}>
           <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12, maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis' }}
@@ -1756,26 +1759,52 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
           <Tooltip title="Edit order (change order)"><Button size="small" type="text" icon={<EditOutlined />} style={{ color: '#B07700' }} onClick={() => onEdit(r)} /></Tooltip>
         </Space>
       ) },
-    { title: 'Order', dataIndex: 'OrderNumber', width: 100, render: v => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Order', dataIndex: 'OrderNumber', width: 100,
+      sorter: (a, b) => String(a.OrderNumber ?? '').localeCompare(String(b.OrderNumber ?? '')),
+      render: v => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'Order Date', dataIndex: 'TransactionOn', width: 130, render: fmtDateTime,
       sorter: (a, b) => String(a.TransactionOn ?? '').localeCompare(String(b.TransactionOn ?? '')) },
-    { title: 'Transaction Type', dataIndex: 'TransactionType', width: 140, render: (v, r) => v ? <Tag color="purple" style={{ fontSize: 11 }}>{v}</Tag> : (r.TransactionTypeCode ? <Tag style={{ fontSize: 11 }}>{r.TransactionTypeCode}</Tag> : '—') },
-    { title: 'Currency', dataIndex: 'TransactionalCurrencyCode', width: 90, align: 'center', render: (v, r) => <Tag style={{ fontSize: 11 }}>{v ?? r.AppliedCurrencyCode ?? '—'}</Tag> },
-    { title: 'Payment Terms', dataIndex: 'PaymentTerms', width: 150, ellipsis: true, render: (v, r) => <Text style={{ fontSize: 12 }}>{v ?? r.PaymentTermsCode ?? '—'}</Text> },
-    { title: 'Status', dataIndex: 'Status', width: 160, render: (v, r) => (
+    { title: 'Transaction Type', dataIndex: 'TransactionType', width: 140,
+      sorter: (a, b) => String(a.TransactionType ?? '').localeCompare(String(b.TransactionType ?? '')),
+      render: (v, r) => v ? <Tag color="purple" style={{ fontSize: 11 }}>{v}</Tag> : (r.TransactionTypeCode ? <Tag style={{ fontSize: 11 }}>{r.TransactionTypeCode}</Tag> : '—') },
+    { title: 'Currency', dataIndex: 'TransactionalCurrencyCode', width: 90, align: 'center',
+      sorter: (a, b) => String(a.TransactionalCurrencyCode ?? '').localeCompare(String(b.TransactionalCurrencyCode ?? '')),
+      render: (v, r) => <Tag style={{ fontSize: 11 }}>{v ?? r.AppliedCurrencyCode ?? '—'}</Tag> },
+    { title: 'Payment Terms', dataIndex: 'PaymentTerms', width: 150, ellipsis: true,
+      sorter: (a, b) => String(a.PaymentTerms ?? '').localeCompare(String(b.PaymentTerms ?? '')),
+      render: (v, r) => <Text style={{ fontSize: 12 }}>{v ?? r.PaymentTermsCode ?? '—'}</Text> },
+    { title: 'Status', dataIndex: 'Status', width: 160,
+      sorter: (a, b) => String(a.Status ?? '').localeCompare(String(b.Status ?? '')),
+      render: (v, r) => (
         <Space size={4} wrap>
           {statusTag(v, r.StatusCode)}
           {r.StatusCode && <Tag style={{ fontSize: 10, margin: 0 }}>{r.StatusCode}</Tag>}
         </Space>
       ) },
-    { title: 'Business Unit', dataIndex: 'BusinessUnitName', width: 220, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Customer', dataIndex: 'BuyingPartyName', width: 220, ellipsis: true, render: v => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Customer #', dataIndex: 'BuyingPartyNumber', width: 110, render: v => v ?? '—' },
-    { title: 'Customer PO', dataIndex: 'CustomerPONumber', width: 120, render: v => v ?? '—' },
-    { title: 'Requested Ship', dataIndex: 'RequestedShipDate', width: 130, render: fmtDate },
-    { title: 'Source System', dataIndex: 'SourceTransactionSystem', width: 110, render: v => v ? <Tag style={{ fontSize: 11 }}>{v}</Tag> : '—' },
-    { title: 'Order Key', dataIndex: 'OrderKey', width: 200, ellipsis: true, render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v ?? '—'}</Text> },
-    { title: 'Created', dataIndex: 'CreationDate', width: 130, render: fmtDateTime },
+    { title: 'Business Unit', dataIndex: 'BusinessUnitName', width: 220, ellipsis: true,
+      sorter: (a, b) => String(a.BusinessUnitName ?? '').localeCompare(String(b.BusinessUnitName ?? '')),
+      render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Customer', dataIndex: 'BuyingPartyName', width: 220, ellipsis: true,
+      sorter: (a, b) => String(a.BuyingPartyName ?? '').localeCompare(String(b.BuyingPartyName ?? '')),
+      render: v => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Customer #', dataIndex: 'BuyingPartyNumber', width: 110,
+      sorter: (a, b) => String(a.BuyingPartyNumber ?? '').localeCompare(String(b.BuyingPartyNumber ?? '')),
+      render: v => v ?? '—' },
+    { title: 'Customer PO', dataIndex: 'CustomerPONumber', width: 120,
+      sorter: (a, b) => String(a.CustomerPONumber ?? '').localeCompare(String(b.CustomerPONumber ?? '')),
+      render: v => v ?? '—' },
+    { title: 'Requested Ship', dataIndex: 'RequestedShipDate', width: 130,
+      sorter: (a, b) => String(a.RequestedShipDate ?? '').localeCompare(String(b.RequestedShipDate ?? '')),
+      render: fmtDate },
+    { title: 'Source System', dataIndex: 'SourceTransactionSystem', width: 110,
+      sorter: (a, b) => String(a.SourceTransactionSystem ?? '').localeCompare(String(b.SourceTransactionSystem ?? '')),
+      render: v => v ? <Tag style={{ fontSize: 11 }}>{v}</Tag> : '—' },
+    { title: 'Order Key', dataIndex: 'OrderKey', width: 200, ellipsis: true,
+      sorter: (a, b) => String(a.OrderKey ?? '').localeCompare(String(b.OrderKey ?? '')),
+      render: v => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v ?? '—'}</Text> },
+    { title: 'Created', dataIndex: 'CreationDate', width: 130,
+      sorter: (a, b) => String(a.CreationDate ?? '').localeCompare(String(b.CreationDate ?? '')),
+      render: fmtDateTime },
     { title: '', key: 'totals', width: 44, fixed: 'right', align: 'center',
       render: (_, r) => (
         <Tooltip title="Order totals">
@@ -1845,6 +1874,12 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
     { title: 'Org Name', dataIndex: 'RequestedFulfillmentOrganizationName', width: 200, ellipsis: true,
       sorter: (a, b) => String(a.RequestedFulfillmentOrganizationName ?? '').localeCompare(String(b.RequestedFulfillmentOrganizationName ?? '')),
       render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: '', key: 'totals', width: 44, fixed: 'right' as const, align: 'center' as const,
+      render: (_, r) => (
+        <Tooltip title="Line totals">
+          <Button size="small" type="text" icon={<DollarOutlined />} style={{ color: REDWOOD.success }} onClick={() => setTotalsOrder(r._headerInfo?._order)} />
+        </Tooltip>
+      ) },
   ], [onOpen]);
 
   // Extract all lines from rows for the Search Lines tab
@@ -2183,17 +2218,55 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
 
                   {/* Chart */}
                   <Card style={{ marginBottom: 16, borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={getAnalyticsData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="key" angle={-45} textAnchor="end" height={80} />
-                        <YAxis />
-                        <RechartsTooltip formatter={(value) => typeof value === 'number' ? fmt(value) : value} />
-                        <Legend />
-                        <Bar dataKey="amount" fill={REDWOOD.success} name="Amount ($)" />
-                        <Bar dataKey="quantity" fill={REDWOOD.info} name="Quantity" />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }}>
+                      <Checkbox checked={showAnalyticsChart} onChange={e => setShowAnalyticsChart(e.target.checked)}>
+                        Show Chart
+                      </Checkbox>
+                      {showAnalyticsChart && (
+                        <Segmented value={chartType} onChange={(v) => setChartType(v as 'bar' | 'line' | 'pie')}
+                          options={[
+                            { label: 'Bar Chart', value: 'bar' },
+                            { label: 'Line Chart', value: 'line' },
+                            { label: 'Pie Chart', value: 'pie' },
+                          ]} />
+                      )}
+                    </Space>
+                    {showAnalyticsChart && (
+                      <ResponsiveContainer width="100%" height={450} margin={{ top: 20, right: 30, left: 0, bottom: 100 }}>
+                        {chartType === 'bar' && (
+                          <BarChart data={getAnalyticsData} margin={{ top: 20, right: 30, left: 0, bottom: 100 }}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="key" angle={-45} textAnchor="end" height={100} />
+                            <YAxis />
+                            <RechartsTooltip formatter={(value) => typeof value === 'number' ? fmt(value) : value} />
+                            <Legend />
+                            <Bar dataKey="amount" fill={REDWOOD.success} name="Amount ($)" />
+                            <Bar dataKey="quantity" fill={REDWOOD.info} name="Quantity" />
+                          </BarChart>
+                        )}
+                        {chartType === 'line' && (
+                          <LineChart data={getAnalyticsData} margin={{ top: 20, right: 30, left: 0, bottom: 100 }}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="key" angle={-45} textAnchor="end" height={100} />
+                            <YAxis />
+                            <RechartsTooltip formatter={(value) => typeof value === 'number' ? fmt(value) : value} />
+                            <Legend />
+                            <Line type="monotone" dataKey="amount" stroke={REDWOOD.success} name="Amount ($)" />
+                            <Line type="monotone" dataKey="quantity" stroke={REDWOOD.info} name="Quantity" />
+                          </LineChart>
+                        )}
+                        {chartType === 'pie' && (
+                          <PieChart>
+                            <Pie dataKey="amount" data={getAnalyticsData} cx="50%" cy="50%" labelLine={false} label={{ fontSize: 12 }} outerRadius={120}>
+                              {getAnalyticsData.map((_, index) => (
+                                <Cell key={`cell-${index}`} fill={[REDWOOD.primary, REDWOOD.success, REDWOOD.warning, REDWOOD.info, REDWOOD.error, REDWOOD.teal][index % 6]} />
+                              ))}
+                            </Pie>
+                            <RechartsTooltip formatter={(value) => typeof value === 'number' ? fmt(value) : value} />
+                          </PieChart>
+                        )}
+                      </ResponsiveContainer>
+                    )}
                   </Card>
 
                   {/* Summary */}
