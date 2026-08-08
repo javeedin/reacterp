@@ -340,25 +340,42 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     setLovLoading(true);
     try {
       const [buRes, ccyRes, orgRes, subRes] = await Promise.allSettled([
-        fetch(`${ORDS_BASE}/BUSINESS_UNITS`).then(r => r.json()).then(d => d.items ?? (Array.isArray(d) ? d : [])),
+        fetch(`${FUSION_BASE}/payablesOptions?onlyData=true&limit=500&fields=businessUnitId,businessUnitName,paymentCurrency,ledgerCurrency`, { headers: FUSION_HDRS })
+          .then(r => r.json())
+          .then(d => {
+            // Deduplicate business units by name and map to expected format
+            const seen = new Set<string>();
+            return (d.items ?? [])
+              .filter((b: any) => {
+                const n = b.businessUnitName;
+                if (!n || seen.has(n)) return false;
+                seen.add(n);
+                return true;
+              })
+              .map((b: any) => ({
+                bu_name: b.businessUnitName,
+                bu_id: b.businessUnitId,
+                BusinessUnitName: b.businessUnitName,
+                BusinessUnitId: b.businessUnitId,
+                functional_currency: b.paymentCurrency,
+                paymentCurrency: b.paymentCurrency,
+                ledgerCurrency: b.ledgerCurrency,
+              }));
+          }),
         fetch(`${GL_ORDS_BASE}/currencies?enabled=Y`).then(r => r.json()).then(d => d.items ?? d.data ?? (Array.isArray(d) ? d : [])),
         fetchLOV(`${FUSION_BASE}/inventoryOrganizations`),
         fetch(`${ORDS_BASE}/inventory/inventorywarehousesubinventory`).then(r => r.json()).then(d => d.items ?? (Array.isArray(d) ? d : [])),
       ]);
       if (buRes.status === 'fulfilled') {
         setBusUnits(buRes.value);
-        const defaultBu = buRes.value.find((b: any) => (b.bu_name ?? '') === PO_DEFAULTS.procurementBU);
-        if (defaultBu) {
-          if (defaultBu.functional_currency) headerForm.setFieldValue('currency', defaultBu.functional_currency);
-          if (defaultBu.bu_code) setSelectedBuCompanyCode(String(defaultBu.bu_code));
-        }
+        // Don't set defaults — let user select
       }
       if (ccyRes.status === 'fulfilled') setCurrencies(ccyRes.value);
       if (orgRes.status === 'fulfilled') setInventoryOrgs(orgRes.value);
       if (subRes.status === 'fulfilled') {
         const all = subRes.value;
         setAllSubinventories(all);
-        setSubinventories(all.filter((s: any) => s.warehouse_code === PO_DEFAULTS.shipToOrg));
+        setSubinventories([]); // Empty until user selects Ship To Organization
       }
     } finally { setLovLoading(false); }
   };
