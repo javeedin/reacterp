@@ -23,7 +23,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import { FUSION_POD_HOST, FUSION_POD_AUTH, getFusionInstance } from '../../config/fusionInstance';
 import CustomerSearchBipModal from '../../components/CustomerSearchBipModal';
 import { convertBipCustomerToFill, type CustomerSearchResult } from '../../services/customerSearchBip.service';
@@ -2188,7 +2188,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="key" angle={-45} textAnchor="end" height={80} />
                         <YAxis />
-                        <Tooltip formatter={(value) => typeof value === 'number' ? fmt(value) : value} />
+                        <RechartsTooltip formatter={(value) => typeof value === 'number' ? fmt(value) : value} />
                         <Legend />
                         <Bar dataKey="amount" fill={REDWOOD.success} name="Amount ($)" />
                         <Bar dataKey="quantity" fill={REDWOOD.info} name="Quantity" />
