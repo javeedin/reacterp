@@ -1670,6 +1670,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
   const [analyticsFilters, setAnalyticsFilters] = useState<{ customer?: string; product?: string; type?: string }>({});
   const [showAnalyticsChart, setShowAnalyticsChart] = useState(false);
   const [chartType, setChartType] = useState<'bar' | 'line' | 'pie'>('bar');
+  const [analyticsLoadLimit, setAnalyticsLoadLimit] = useState(50);
 
   // Execute an API URL straight from the dialog — shows HTTP status, timing and
   // the raw response (or the error) so an unreachable POD is easy to diagnose.
@@ -2189,7 +2190,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
 
                     {/* Filters */}
                     <Row gutter={[12, 12]}>
-                      <Col xs={24} sm={12} md={8}>
+                      <Col xs={24} sm={12} md={6}>
                         <Text style={{ fontSize: 11, fontWeight: 600 }}>Customer:</Text>
                         <Select allowClear showSearch placeholder="All customers" size="small"
                           value={analyticsFilters.customer || undefined}
@@ -2197,7 +2198,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
                           options={analyticsFilterOptions.customers.map(c => ({ label: c, value: c }))}
                           style={{ marginTop: 4 }} />
                       </Col>
-                      <Col xs={24} sm={12} md={8}>
+                      <Col xs={24} sm={12} md={6}>
                         <Text style={{ fontSize: 11, fontWeight: 600 }}>Product #:</Text>
                         <Select allowClear showSearch placeholder="All products" size="small"
                           value={analyticsFilters.product || undefined}
@@ -2205,13 +2206,17 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
                           options={analyticsFilterOptions.products.map(p => ({ label: p, value: p }))}
                           style={{ marginTop: 4 }} />
                       </Col>
-                      <Col xs={24} sm={12} md={8}>
+                      <Col xs={24} sm={12} md={6}>
                         <Text style={{ fontSize: 11, fontWeight: 600 }}>Type:</Text>
                         <Select allowClear showSearch placeholder="All types" size="small"
                           value={analyticsFilters.type || undefined}
                           onChange={v => setAnalyticsFilters(f => ({ ...f, type: v }))}
                           options={analyticsFilterOptions.types.map(t => ({ label: t, value: t }))}
                           style={{ marginTop: 4 }} />
+                      </Col>
+                      <Col xs={24} sm={12} md={6}>
+                        <Text style={{ fontSize: 11, fontWeight: 600 }}>Load Records:</Text>
+                        <InputNumber min={1} max={200} value={analyticsLoadLimit} onChange={(v) => setAnalyticsLoadLimit(v || 50)} size="small" style={{ width: '100%', marginTop: 4 }} placeholder="Max 200" />
                       </Col>
                     </Row>
                   </Card>
@@ -2235,24 +2240,32 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
                       <ResponsiveContainer width="100%" height={450} margin={{ top: 20, right: 30, left: 0, bottom: 100 }}>
                         {chartType === 'bar' && (
                           <BarChart data={getAnalyticsData} margin={{ top: 20, right: 30, left: 0, bottom: 100 }}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="key" angle={-45} textAnchor="end" height={100} />
-                            <YAxis />
-                            <RechartsTooltip formatter={(value) => typeof value === 'number' ? fmt(value) : value} />
-                            <Legend />
+                            <CartesianGrid strokeDasharray="3 3" stroke={REDWOOD.neutral300} />
+                            <XAxis dataKey="key" angle={-45} textAnchor="end" height={100} tick={{ fontSize: 12 }} />
+                            <YAxis tick={{ fontSize: 12 }} />
+                            <RechartsTooltip
+                              formatter={(value) => typeof value === 'number' ? fmt(value) : value}
+                              labelFormatter={(label) => `${label}`}
+                              contentStyle={{ backgroundColor: '#fff', border: `1px solid ${REDWOOD.neutral300}`, borderRadius: 4, padding: '8px' }}
+                            />
+                            <Legend wrapperStyle={{ paddingTop: '20px', fontSize: 12 }} />
                             <Bar dataKey="amount" fill={REDWOOD.success} name="Amount ($)" />
                             <Bar dataKey="quantity" fill={REDWOOD.info} name="Quantity" />
                           </BarChart>
                         )}
                         {chartType === 'line' && (
                           <LineChart data={getAnalyticsData} margin={{ top: 20, right: 30, left: 0, bottom: 100 }}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="key" angle={-45} textAnchor="end" height={100} />
-                            <YAxis />
-                            <RechartsTooltip formatter={(value) => typeof value === 'number' ? fmt(value) : value} />
-                            <Legend />
-                            <Line type="monotone" dataKey="amount" stroke={REDWOOD.success} name="Amount ($)" />
-                            <Line type="monotone" dataKey="quantity" stroke={REDWOOD.info} name="Quantity" />
+                            <CartesianGrid strokeDasharray="3 3" stroke={REDWOOD.neutral300} />
+                            <XAxis dataKey="key" angle={-45} textAnchor="end" height={100} tick={{ fontSize: 12 }} />
+                            <YAxis tick={{ fontSize: 12 }} />
+                            <RechartsTooltip
+                              formatter={(value) => typeof value === 'number' ? fmt(value) : value}
+                              labelFormatter={(label) => `${label}`}
+                              contentStyle={{ backgroundColor: '#fff', border: `1px solid ${REDWOOD.neutral300}`, borderRadius: 4, padding: '8px' }}
+                            />
+                            <Legend wrapperStyle={{ paddingTop: '20px', fontSize: 12 }} />
+                            <Line type="monotone" dataKey="amount" stroke={REDWOOD.success} name="Amount ($)" strokeWidth={2} />
+                            <Line type="monotone" dataKey="quantity" stroke={REDWOOD.info} name="Quantity" strokeWidth={2} />
                           </LineChart>
                         )}
                         {chartType === 'pie' && (
@@ -2262,7 +2275,11 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
                                 <Cell key={`cell-${index}`} fill={[REDWOOD.primary, REDWOOD.success, REDWOOD.warning, REDWOOD.info, REDWOOD.error, REDWOOD.teal][index % 6]} />
                               ))}
                             </Pie>
-                            <RechartsTooltip formatter={(value) => typeof value === 'number' ? fmt(value) : value} />
+                            <RechartsTooltip
+                              formatter={(value) => typeof value === 'number' ? fmt(value) : value}
+                              labelFormatter={(label) => `${label}`}
+                              contentStyle={{ backgroundColor: '#fff', border: `1px solid ${REDWOOD.neutral300}`, borderRadius: 4, padding: '8px' }}
+                            />
                           </PieChart>
                         )}
                       </ResponsiveContainer>
@@ -2324,9 +2341,9 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
                         { title: 'Avg Price', dataIndex: 'avgPrice', width: 120, align: 'right' as const, render: (v) => fmt(v), sorter: (a, b) => a.avgPrice - b.avgPrice },
                         { title: 'Count', dataIndex: 'count', width: 100, align: 'right' as const, render: (v) => v, sorter: (a, b) => a.count - b.count },
                       ].filter(Boolean) as ColumnsType<any>}
-                      dataSource={getAnalyticsData}
+                      dataSource={getAnalyticsData.slice(0, analyticsLoadLimit)}
                       rowKey="key"
-                      pagination={{ pageSize: 25, size: 'small', showSizeChanger: true, showTotal: t => `${t} records` }}
+                      pagination={{ pageSize: analyticsLoadLimit, size: 'small', showTotal: (t) => `${t} of ${getAnalyticsData.length} records` }}
                       size="small"
                     />
                   </Card>
