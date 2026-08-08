@@ -1663,6 +1663,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
   const [apiRun, setApiRun] = useState<{ running: boolean; status?: string; body?: string; ok?: boolean } | null>(null);
   const [filterText, setFilterText] = useState('');
   const [searchTab, setSearchTab] = useState<'orders' | 'lines'>('orders');
+  const [linesFilterText, setLinesFilterText] = useState('');
 
   // Execute an API URL straight from the dialog — shows HTTP status, timing and
   // the raw response (or the error) so an unreachable POD is easy to diagnose.
@@ -1787,24 +1788,60 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
 
   // Columns for the Search Lines tab
   const lineColumns = useMemo(() => [
-    { title: 'Customer', dataIndex: ['_headerInfo', 'BuyingPartyName'], width: 220, ellipsis: true, render: (v: any) => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Order #', dataIndex: ['_headerInfo', 'OrderNumber'], width: 100, render: (v: any) => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Source Transaction #', dataIndex: 'SourceTransactionNumber', width: 160, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Product #', dataIndex: 'ProductNumber', width: 120, render: v => v ?? '—' },
-    { title: 'Product Description', dataIndex: 'ProductDescription', width: 250, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Qty', dataIndex: 'OrderedQuantity', width: 80, align: 'right', render: v => typeof v === 'number' ? fmt(v) : v ?? '—' },
-    { title: 'Unit Price', dataIndex: 'UnitSellingPrice', width: 110, align: 'right', render: v => typeof v === 'number' ? fmt(v) : v ?? '—' },
-    { title: 'Extended Amount', dataIndex: 'ExtendedAmount', width: 130, align: 'right', render: v => typeof v === 'number' ? fmt(v) : v ?? '—' },
-    { title: 'Currency', dataIndex: ['_headerInfo', 'TransactionalCurrencyCode'], width: 90, align: 'center', render: (v: any) => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
-    { title: 'Status', dataIndex: 'Status', width: 140, render: (v: any, r: any) => (
+    { title: '', key: 'action', width: 44, fixed: 'left' as const, align: 'center' as const,
+      render: (_, r: any) => (
+        <Tooltip title="View order">
+          <Button size="small" type="text" icon={<ExportOutlined />} style={{ color: REDWOOD.info }} onClick={() => onOpen(r._headerInfo._order)} />
+        </Tooltip>
+      ) },
+    { title: 'Transaction Type', dataIndex: ['_headerInfo', 'TransactionTypeCode'], width: 130,
+      sorter: (a, b) => String(a._headerInfo?.TransactionTypeCode ?? '').localeCompare(String(b._headerInfo?.TransactionTypeCode ?? '')),
+      render: (v: any) => v ? <Tag color="purple" style={{ fontSize: 11 }}>{v}</Tag> : '—' },
+    { title: 'Transaction Date', dataIndex: ['_headerInfo', 'TransactionOn'], width: 130,
+      sorter: (a, b) => String(a._headerInfo?.TransactionOn ?? '').localeCompare(String(b._headerInfo?.TransactionOn ?? '')),
+      render: fmtDateTime },
+    { title: 'Customer', dataIndex: ['_headerInfo', 'BuyingPartyName'], width: 220, ellipsis: true,
+      sorter: (a, b) => String(a._headerInfo?.BuyingPartyName ?? '').localeCompare(String(b._headerInfo?.BuyingPartyName ?? '')),
+      render: (v: any) => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Order #', dataIndex: ['_headerInfo', 'OrderNumber'], width: 100,
+      sorter: (a, b) => String(a._headerInfo?.OrderNumber ?? '').localeCompare(String(b._headerInfo?.OrderNumber ?? '')),
+      render: (v: any) => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Source Transaction #', dataIndex: 'SourceTransactionNumber', width: 160, ellipsis: true,
+      sorter: (a, b) => String(a.SourceTransactionNumber ?? '').localeCompare(String(b.SourceTransactionNumber ?? '')),
+      render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Product #', dataIndex: 'ProductNumber', width: 120,
+      sorter: (a, b) => String(a.ProductNumber ?? '').localeCompare(String(b.ProductNumber ?? '')),
+      render: v => v ?? '—' },
+    { title: 'Product Description', dataIndex: 'ProductDescription', width: 250, ellipsis: true,
+      sorter: (a, b) => String(a.ProductDescription ?? '').localeCompare(String(b.ProductDescription ?? '')),
+      render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Qty', dataIndex: 'OrderedQuantity', width: 80, align: 'right' as const,
+      sorter: (a, b) => (a.OrderedQuantity ?? 0) - (b.OrderedQuantity ?? 0),
+      render: v => typeof v === 'number' ? fmt(v) : v ?? '—' },
+    { title: 'Unit Price', dataIndex: 'UnitSellingPrice', width: 110, align: 'right' as const,
+      sorter: (a, b) => (a.UnitSellingPrice ?? 0) - (b.UnitSellingPrice ?? 0),
+      render: v => typeof v === 'number' ? fmt(v) : v ?? '—' },
+    { title: 'Extended Amount', dataIndex: 'ExtendedAmount', width: 130, align: 'right' as const,
+      sorter: (a, b) => (a.ExtendedAmount ?? 0) - (b.ExtendedAmount ?? 0),
+      render: v => typeof v === 'number' ? fmt(v) : v ?? '—' },
+    { title: 'Currency', dataIndex: ['_headerInfo', 'TransactionalCurrencyCode'], width: 90, align: 'center' as const,
+      sorter: (a, b) => String(a._headerInfo?.TransactionalCurrencyCode ?? '').localeCompare(String(b._headerInfo?.TransactionalCurrencyCode ?? '')),
+      render: (v: any) => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Status', dataIndex: 'Status', width: 140,
+      sorter: (a, b) => String(a.Status ?? '').localeCompare(String(b.Status ?? '')),
+      render: (v: any, r: any) => (
         <Space size={4} wrap>
           {statusTag(v, r.StatusCode)}
           {r.StatusCode && <Tag style={{ fontSize: 10, margin: 0 }}>{r.StatusCode}</Tag>}
         </Space>
       ) },
-    { title: 'Org Code', dataIndex: 'RequestedFulfillmentOrganizationCode', width: 120, render: v => v ?? '—' },
-    { title: 'Org Name', dataIndex: 'RequestedFulfillmentOrganizationName', width: 200, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-  ], []);
+    { title: 'Org Code', dataIndex: 'RequestedFulfillmentOrganizationCode', width: 120,
+      sorter: (a, b) => String(a.RequestedFulfillmentOrganizationCode ?? '').localeCompare(String(b.RequestedFulfillmentOrganizationCode ?? '')),
+      render: v => v ?? '—' },
+    { title: 'Org Name', dataIndex: 'RequestedFulfillmentOrganizationName', width: 200, ellipsis: true,
+      sorter: (a, b) => String(a.RequestedFulfillmentOrganizationName ?? '').localeCompare(String(b.RequestedFulfillmentOrganizationName ?? '')),
+      render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+  ], [onOpen]);
 
   // Extract all lines from rows for the Search Lines tab
   const allLines = useMemo(() => {
@@ -1819,6 +1856,9 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
               BuyingPartyName: order.BuyingPartyName,
               OrderNumber: order.OrderNumber,
               TransactionalCurrencyCode: order.TransactionalCurrencyCode,
+              TransactionTypeCode: order.TransactionTypeCode,
+              TransactionOn: order.TransactionOn,
+              _order: order,
             },
             key: `${order.HeaderId}-${line.LineId}`,
           });
@@ -1827,6 +1867,27 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
     });
     return lines;
   }, [rows]);
+
+  // Filter lines based on search text
+  const filteredLines = useMemo(() => {
+    if (!linesFilterText.trim()) return allLines;
+    const search = linesFilterText.toLowerCase();
+    return allLines.filter(line => {
+      const searchableFields = [
+        line._headerInfo?.BuyingPartyName,
+        line._headerInfo?.OrderNumber,
+        line.SourceTransactionNumber,
+        line.ProductNumber,
+        line.ProductDescription,
+        line.RequestedFulfillmentOrganizationCode,
+        line.RequestedFulfillmentOrganizationName,
+        line.Status,
+        line.StatusCode,
+        line._headerInfo?.TransactionTypeCode,
+      ];
+      return searchableFields.some(field => String(field ?? '').toLowerCase().includes(search));
+    });
+  }, [allLines, linesFilterText]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1926,17 +1987,24 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
             </div>
           </Tabs.TabPane>
           <Tabs.TabPane tab={<Space><FileTextOutlined style={{ color: REDWOOD.primary }} /><Text strong>Search Lines</Text>
-            {allLines.length > 0 && <Tag>{allLines.length}</Tag>}</Space>} key="lines">
+            {filteredLines.length > 0 && <Tag>{filteredLines.length}{filteredLines.length !== allLines.length ? ` of ${allLines.length}` : ''}</Tag>}</Space>} key="lines">
             <div style={{ padding: '0 18px 18px' }}>
+              <Space style={{ marginBottom: 12 }}>
+                <Input placeholder="Filter any column…" allowClear size="small" prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
+                  value={linesFilterText} onChange={e => setLinesFilterText(e.target.value)} style={{ width: 300 }} />
+                <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={runSearch}>Refresh</Button>
+              </Space>
               {loading ? (
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin size="large" tip="Loading…" /></div>
               ) : !searched ? (
                 <Empty description="Run a search" style={{ padding: 60 }} />
               ) : allLines.length === 0 ? (
                 <Empty description="No lines found" style={{ padding: 60 }} />
+              ) : filteredLines.length === 0 ? (
+                <Empty description="No lines match filter" style={{ padding: 60 }} />
               ) : (
-                <Table columns={lineColumns} dataSource={allLines} rowKey={(r, i) => r.key ?? `${i}`} size="small"
-                  scroll={{ x: 2000 }} pagination={{ pageSize: 50, size: 'small', showSizeChanger: true, showTotal: t => `${t} lines` }} />
+                <Table columns={lineColumns} dataSource={filteredLines} rowKey={(r, i) => r.key ?? `${i}`} size="small"
+                  scroll={{ x: 2400 }} pagination={{ pageSize: 50, size: 'small', showSizeChanger: true, showTotal: t => `${t} lines` }} />
               )}
             </div>
           </Tabs.TabPane>
