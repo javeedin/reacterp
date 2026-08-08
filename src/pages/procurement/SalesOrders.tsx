@@ -1828,6 +1828,9 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
           <Button size="small" type="text" icon={<ExportOutlined />} style={{ color: REDWOOD.info }} onClick={() => onOpen(r._headerInfo._order)} />
         </Tooltip>
       ) },
+    { title: 'Source Transaction #', dataIndex: 'SourceTransactionNumber', width: 160, fixed: 'left' as const, ellipsis: true,
+      sorter: (a, b) => String(a.SourceTransactionNumber ?? '').localeCompare(String(b.SourceTransactionNumber ?? '')),
+      render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'Transaction Type', dataIndex: ['_headerInfo', 'TransactionTypeCode'], width: 130,
       sorter: (a, b) => String(a._headerInfo?.TransactionTypeCode ?? '').localeCompare(String(b._headerInfo?.TransactionTypeCode ?? '')),
       render: (v: any) => v ? <Tag color="purple" style={{ fontSize: 11 }}>{v}</Tag> : '—' },
@@ -1840,9 +1843,6 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
     { title: 'Order #', dataIndex: ['_headerInfo', 'OrderNumber'], width: 100,
       sorter: (a, b) => String(a._headerInfo?.OrderNumber ?? '').localeCompare(String(b._headerInfo?.OrderNumber ?? '')),
       render: (v: any) => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Source Transaction #', dataIndex: 'SourceTransactionNumber', width: 160, ellipsis: true,
-      sorter: (a, b) => String(a.SourceTransactionNumber ?? '').localeCompare(String(b.SourceTransactionNumber ?? '')),
-      render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
     { title: 'Product #', dataIndex: 'ProductNumber', width: 120,
       sorter: (a, b) => String(a.ProductNumber ?? '').localeCompare(String(b.ProductNumber ?? '')),
       render: v => v ?? '—' },
