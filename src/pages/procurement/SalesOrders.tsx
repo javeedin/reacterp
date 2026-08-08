@@ -2257,7 +2257,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
                         )}
                         {chartType === 'pie' && (
                           <PieChart>
-                            <Pie dataKey="amount" data={getAnalyticsData} cx="50%" cy="50%" labelLine={false} label={{ fontSize: 12 }} outerRadius={120}>
+                            <Pie dataKey="amount" data={getAnalyticsData} cx="50%" cy="50%" labelLine={false} label={(entry) => `${entry.key}`} outerRadius={120}>
                               {getAnalyticsData.map((_, index) => (
                                 <Cell key={`cell-${index}`} fill={[REDWOOD.primary, REDWOOD.success, REDWOOD.warning, REDWOOD.info, REDWOOD.error, REDWOOD.teal][index % 6]} />
                               ))}
