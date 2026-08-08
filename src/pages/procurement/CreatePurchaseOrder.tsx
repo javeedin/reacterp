@@ -364,10 +364,12 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
   };
 
   const handleProcurementBuChange = (buName: string) => {
-    headerForm.setFieldValue('billTo', buName);
     const bu = busUnits.find((b: any) => (b.bu_name ?? '') === buName);
     if (bu) {
-      if (bu.functional_currency) headerForm.setFieldValue('currency', bu.functional_currency);
+      // Auto-populate Bill To BU with same value as Procurement BU
+      headerForm.setFieldValue('billTo', buName);
+      // Auto-populate currency from ledgerCurrency of the selected Business Unit
+      if (bu.ledgerCurrency) headerForm.setFieldValue('currency', bu.ledgerCurrency);
       setSelectedBuCompanyCode(bu.bu_code ? String(bu.bu_code) : '');
     } else {
       setSelectedBuCompanyCode('');
