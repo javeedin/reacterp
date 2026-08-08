@@ -920,11 +920,13 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
   const navigate = useNavigate();
   const [form] = Form.useForm();
   const [data, setData]             = useState<RawPO[]>([]);
+  const [expandedLines, setExpandedLines] = useState<POLine[]>([]);
   const [loading, setLoading]       = useState(false);
   const [total, setTotal]           = useState(0);
   const [page, setPage]             = useState(1);
   const [searchParams, setSearchParams] = useState<SearchParams>({});
   const [hasSearched, setHasSearched]   = useState(false);
+  const [subTab, setSubTab]         = useState('orders');
   const [apiOpen, setApiOpen]       = useState(false);
   const [apiTestLoading, setATL]    = useState(false);
   const [apiResult, setApiResult]   = useState<{ status: number; body: string } | null>(null);
@@ -999,7 +1001,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
 
   const buildUrl = (params: SearchParams, pageNum: number) => {
     const q = buildQParam(params);
-    const up = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String((pageNum - 1) * PAGE_SIZE), totalResults: 'true' });
+    const up = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String((pageNum - 1) * PAGE_SIZE), totalResults: 'true', expand: 'lines' });
     if (q) up.set('q', q);
     return `${BASE_URL}/purchaseOrders?${up.toString()}`;
   };
@@ -1047,10 +1049,28 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
       );
       setData(items);
       setTotal(json.totalResults ?? json.count ?? items.length);
+
+      // Extract all lines from the expanded data
+      const allLines: POLine[] = [];
+      items.forEach((po, idx) => {
+        const lines = po.lines?.items ?? po.lines ?? [];
+        if (Array.isArray(lines)) {
+          lines.forEach((line: any) => {
+            allLines.push({
+              ...line,
+              _POHeaderId: po.POHeaderId,
+              _PONumber: po.OrderNumber,
+              _POCreationDate: po.CreationDate,
+            } as POLine & { _POHeaderId: number; _PONumber: string; _POCreationDate: string });
+          });
+        }
+      });
+      setExpandedLines(allLines);
+
       return items;
     } catch (e: any) {
       message.error(`Failed to load purchase orders: ${e.message}`, 6);
-      setData([]); setTotal(0);
+      setData([]); setTotal(0); setExpandedLines([]);
       return [];
     } finally { setLoading(false); }
   }, []);
@@ -1063,7 +1083,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
     fetchLineCounts(items);
   };
 
-  const handleReset = () => { form.resetFields(); setSearchParams({}); setPage(1); setData([]); setTotal(0); setHasSearched(false); setLineCountMap(new Map()); setShipToMap(new Map()); };
+  const handleReset = () => { form.resetFields(); setSearchParams({}); setPage(1); setData([]); setExpandedLines([]); setTotal(0); setHasSearched(false); setLineCountMap(new Map()); setShipToMap(new Map()); };
 
   // Deep-link: ?orderNumber=<PO> (e.g. drill-down from cost-distribution reference)
   // prefills the form and runs the search automatically.
@@ -1209,6 +1229,38 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
     },
   ];
 
+  const lineColumns: ColumnsType<POLine & { _POHeaderId?: number; _PONumber?: string; _POCreationDate?: string }> = [
+    { title: '#', dataIndex: 'LineNumber', width: 48, align: 'center',
+      render: v => <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>{v}</Text> },
+    { title: 'PO Number', dataIndex: '_PONumber', width: 130, fixed: 'left',
+      render: (v) => <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info }}>{v ?? '—'}</Text> },
+    { title: 'Type', dataIndex: 'LineType', width: 80,
+      render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Item', dataIndex: 'Item', width: 130,
+      render: v => <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info }}>{v ?? '—'}</Text> },
+    { title: 'Description', dataIndex: 'Description', ellipsis: true,
+      render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Category', dataIndex: 'Category', width: 90,
+      render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'UOM', dataIndex: 'UOM', width: 60, align: 'center',
+      render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
+    { title: 'Qty', dataIndex: 'Quantity', width: 90, align: 'right',
+      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{v ?? '—'}</Text> },
+    { title: 'Base Price', dataIndex: 'BasePrice', width: 100, align: 'right',
+      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: REDWOOD.neutral600 }}>{fmtAmt(v)}</Text> },
+    { title: 'Unit Price', dataIndex: 'Price', width: 100, align: 'right',
+      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmtAmt(v)}</Text> },
+    { title: 'Ordered Amt', dataIndex: 'Ordered', width: 120, align: 'right',
+      render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmtAmt(v)}</Text> },
+    { title: 'Tax', dataIndex: 'TotalTax', width: 90, align: 'right',
+      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmtAmt(v)}</Text> },
+    { title: 'Total', dataIndex: 'Total', width: 120, align: 'right',
+      render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: REDWOOD.primary }}>{fmtAmt(v)}</Text> },
+    { title: 'Status', dataIndex: 'StatusCode', width: 160,
+      render: (v, rec) => getStatusTag(v ?? rec.Status) },
+    { title: 'Need-By', dataIndex: 'NeedByDate', width: 110, render: d => fmtDate(d) },
+  ];
+
   return (
     <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
 
@@ -1268,46 +1320,86 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
         </Form>
       </Card>
 
-      {/* Results */}
+      {/* Results with Orders and Lines Sub-tabs */}
       <Card styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-        <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Text strong style={{ fontSize: 13 }}>
-            Purchase Orders
-            {hasSearched && total > 0 && <Text type="secondary" style={{ fontWeight: 400, marginLeft: 8 }}>({total} result{total !== 1 ? 's' : ''})</Text>}
-          </Text>
-          {selectedKeys.length > 0 && (
-            <Space style={{ marginLeft: 'auto' }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>{selectedKeys.length} selected</Text>
-              <Button size="small" type="primary" icon={<CheckCircleOutlined />} loading={approving}
-                onClick={submitSelectedForApproval}
-                style={{ background: '#1D7B4D', borderColor: '#1D7B4D', fontWeight: 600 }}>
-                Submit for Approval
-              </Button>
-              <Tooltip title="View approval API URL & JSON body">
-                <Button size="small" icon={<ApiOutlined />} onClick={() => setApproveApiOpen(true)}
-                  style={{ borderColor: REDWOOD.info, color: REDWOOD.info }} />
-              </Tooltip>
-            </Space>
-          )}
-        </div>
-        <Table
-          columns={columns} dataSource={data} rowKey="POHeaderId"
-          rowSelection={{ selectedRowKeys: selectedKeys, onChange: setSelectedKeys, preserveSelectedRowKeys: true }}
-          loading={loading} size="small" scroll={{ x: 1400 }}
-          pagination={hasSearched && total > PAGE_SIZE ? {
-            current: page, pageSize: PAGE_SIZE, total, showSizeChanger: false,
-            onChange: async p => { setPage(p); const items = await fetchPOs(searchParams, p); fetchLineCounts(items); },
-            showTotal: (t, [s, e]) => `${s}–${e} of ${t}`,
-            style: { padding: '10px 16px', margin: 0 },
-          } : false}
-          locale={{
-            emptyText: hasSearched
-              ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No purchase orders found" style={{ padding: 40 }} />
-              : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Use the search panel above to find purchase orders" style={{ padding: 40 }} />,
-          }}
-          rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
-          onRow={rec => ({ style: { cursor: 'pointer' }, onDoubleClick: () => onOpen(rec) })}
-        />
+        <Tabs activeKey={subTab} onChange={setSubTab} style={{ margin: 0 }}>
+          <Tabs.TabPane
+            key="orders"
+            label={<span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <ShoppingCartOutlined style={{ fontSize: 13 }} /> Orders
+              {hasSearched && total > 0 && <Text type="secondary" style={{ fontWeight: 400, fontSize: 12 }}>({total})</Text>}
+            </span>}
+          >
+            <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Text strong style={{ fontSize: 13 }}>
+                Purchase Orders
+                {hasSearched && total > 0 && <Text type="secondary" style={{ fontWeight: 400, marginLeft: 8 }}>({total} result{total !== 1 ? 's' : ''})</Text>}
+              </Text>
+              {selectedKeys.length > 0 && (
+                <Space style={{ marginLeft: 'auto' }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{selectedKeys.length} selected</Text>
+                  <Button size="small" type="primary" icon={<CheckCircleOutlined />} loading={approving}
+                    onClick={submitSelectedForApproval}
+                    style={{ background: '#1D7B4D', borderColor: '#1D7B4D', fontWeight: 600 }}>
+                    Submit for Approval
+                  </Button>
+                  <Tooltip title="View approval API URL & JSON body">
+                    <Button size="small" icon={<ApiOutlined />} onClick={() => setApproveApiOpen(true)}
+                      style={{ borderColor: REDWOOD.info, color: REDWOOD.info }} />
+                  </Tooltip>
+                </Space>
+              )}
+            </div>
+            <Table
+              columns={columns} dataSource={data} rowKey="POHeaderId"
+              rowSelection={{ selectedRowKeys: selectedKeys, onChange: setSelectedKeys, preserveSelectedRowKeys: true }}
+              loading={loading} size="small" scroll={{ x: 1400 }}
+              pagination={hasSearched && total > PAGE_SIZE ? {
+                current: page, pageSize: PAGE_SIZE, total, showSizeChanger: false,
+                onChange: async p => { setPage(p); const items = await fetchPOs(searchParams, p); fetchLineCounts(items); },
+                showTotal: (t, [s, e]) => `${s}–${e} of ${t}`,
+                style: { padding: '10px 16px', margin: 0 },
+              } : false}
+              locale={{
+                emptyText: hasSearched
+                  ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No purchase orders found" style={{ padding: 40 }} />
+                  : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Use the search panel above to find purchase orders" style={{ padding: 40 }} />,
+              }}
+              rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
+              onRow={rec => ({ style: { cursor: 'pointer' }, onDoubleClick: () => onOpen(rec) })}
+            />
+          </Tabs.TabPane>
+
+          <Tabs.TabPane
+            key="lines"
+            label={<span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <UnorderedListOutlined style={{ fontSize: 13 }} /> Lines
+              {hasSearched && expandedLines.length > 0 && <Text type="secondary" style={{ fontWeight: 400, fontSize: 12 }}>({expandedLines.length})</Text>}
+            </span>}
+          >
+            <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+              <Text strong style={{ fontSize: 13 }}>
+                Order Lines
+                {hasSearched && expandedLines.length > 0 && <Text type="secondary" style={{ fontWeight: 400, marginLeft: 8 }}>({expandedLines.length} line{expandedLines.length !== 1 ? 's' : ''})</Text>}
+              </Text>
+            </div>
+            <Table
+              columns={lineColumns} dataSource={expandedLines}
+              rowKey={(_, i) => `line-${i}`}
+              loading={loading} size="small" scroll={{ x: 1600 }}
+              locale={{
+                emptyText: hasSearched
+                  ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No lines found in search results" style={{ padding: 40 }} />
+                  : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Use the search panel above to see order lines" style={{ padding: 40 }} />,
+              }}
+              pagination={expandedLines.length > 50 ? {
+                pageSize: 50, showSizeChanger: false,
+                showTotal: (t) => `${t} line${t !== 1 ? 's' : ''}`,
+                style: { padding: '10px 16px', margin: 0 },
+              } : false}
+            />
+          </Tabs.TabPane>
+        </Tabs>
       </Card>
 
       {/* Submit-for-Approval API Modal */}
