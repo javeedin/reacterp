@@ -6460,6 +6460,24 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         <Form form={form} layout="horizontal" size="small" labelAlign="left" colon labelWrap
           labelCol={{ flex: '0 0 104px' }} wrapperCol={{ flex: '1 1 auto' }}
           onValuesChange={(_c, all) => setHdr(prev => ({ ...prev, ...all }))}>
+          {isBranchSales && (
+            <div style={{
+              background: '#fff7e6',
+              border: `2px solid ${REDWOOD.warning}`,
+              borderRadius: 8,
+              padding: '12px 16px',
+              marginBottom: 16,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12
+            }}>
+              <ShoppingOutlined style={{ fontSize: 20, color: REDWOOD.warning }} />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.warning }}>🔖 BRANCH SALES ORDER</div>
+                <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 2 }}>After saving, you'll be prompted to create a linked Purchase Order with BRNS- prefix</div>
+              </div>
+            </div>
+          )}
           <Tabs size="small" items={[
             {
               key: 'header', label: <span><BankOutlined style={{ marginRight: 5 }} />Header</span>,
@@ -6486,7 +6504,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                       <Select showSearch placeholder="Select" onChange={onBU} optionFilterProp="label" disabled={editMode}
                         options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item>
                     <Form.Item label="Order Date" name="orderDate" style={{ marginBottom: 10 }}><DatePicker style={{ width: '100%' }} disabled={editMode && !hdrUnlocked} /></Form.Item>
-                    <Form.Item label="Order Type" name="orderType" style={{ marginBottom: 10 }}><Input disabled={editMode && !hdrUnlocked} /></Form.Item>
+                    <Form.Item label="Order Type" name="orderType" style={{ marginBottom: 10 }}>
+                      <Select
+                        showSearch
+                        placeholder="Select order type"
+                        disabled={editMode && !hdrUnlocked}
+                        onChange={onOrderTypeChange}
+                        optionFilterProp="label"
+                        options={orderTypeOpts}
+                      />
+                    </Form.Item>
                   </VSection></Col>
 
                   {/* S2 — Customer Information. Customer is locked in edit mode (a DOO
