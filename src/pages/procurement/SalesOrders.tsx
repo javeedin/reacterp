@@ -4888,6 +4888,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     // If same currency, set rate to 1
     if (!baseCcy || !txnCcy || baseCcy === txnCcy) {
       frm.setFieldsValue({ rate: 1 });
+      setHdr(prev => ({ ...prev, rate: 1 }));
       return;
     }
 
@@ -4914,6 +4915,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       const rate = Number(latest.rate ?? latest.RATE ?? 0);
       if (rate > 0) {
         frm.setFieldsValue({ rate });
+        setHdr(prev => ({ ...prev, rate }));
         message.success(`✓ Conversion rate fetched: 1 ${baseCcy} = ${rate} ${txnCcy}`);
       } else {
         message.info(`Could not get valid rate for ${baseCcy} → ${txnCcy}, please enter manually`);
