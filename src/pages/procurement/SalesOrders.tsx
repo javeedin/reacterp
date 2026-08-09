@@ -3955,8 +3955,10 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
             </div>
           </Form.Item></Col>
           <Col xs={24} md={4}><Form.Item label="Account #" name="accountNumber" style={{ marginBottom: 8 }}><Input placeholder="—" readOnly size="small" /></Form.Item></Col>
-          <input type="hidden" name="billToSite" value={form.getFieldValue('billToSite')} />
-          <input type="hidden" name="shipToSite" value={form.getFieldValue('shipToSite')} />
+          <Form.Item name="custAccountId" hidden><Input /></Form.Item>
+          <Form.Item name="partyId" hidden><Input /></Form.Item>
+          <Form.Item name="billToSite" hidden><Input /></Form.Item>
+          <Form.Item name="shipToSite" hidden><Input /></Form.Item>
           <Col xs={24} md={12}><Form.Item label="Bill To Address" name="billToAddress" style={{ marginBottom: 8 }}><Input.TextArea rows={1} readOnly size="small" style={{ fontSize: '12px' }} /></Form.Item></Col>
           <Col xs={24} md={12}><Form.Item label="Ship To Address" name="shipToAddress" style={{ marginBottom: 0 }}><Input.TextArea rows={1} readOnly size="small" style={{ fontSize: '12px' }} /></Form.Item></Col>
         </Section>
