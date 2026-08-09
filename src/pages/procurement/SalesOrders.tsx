@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
-  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload, Checkbox, Dropdown, Steps, Collapse, Segmented,
+  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload, Checkbox, Dropdown, Steps, Collapse, Segmented, AutoComplete, Drawer, Divider,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -4667,6 +4667,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [branchSalesForm] = Form.useForm();
   const [savedOrderNumber, setSavedOrderNumber] = useState<string | null>(null);
   const [creatingBranchPO, setCreatingBranchPO] = useState(false);
+  const [branchSupplierOpts, setBranchSupplierOpts] = useState<any[]>([]);
+  const [poApiDrawerOpen, setPoApiDrawerOpen] = useState(false);
+  const [lastPoResponse, setLastPoResponse] = useState<{ success?: boolean; error?: string; url?: string; body?: any; response?: any } | null>(null);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   // Edit mode: the raw Fusion order lines (with child links) for the Billing /
   // Actual Costing tabs (the grid uses a simplified NewLine shape).
@@ -5991,12 +5994,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const createBranchPO = async () => {
     if (!savedOrderNumber) return;
     const branchBU = branchSalesForm.getFieldValue('branchBusinessUnit');
-    const branchSupplier = branchSalesForm.getFieldValue('branchSupplierName');
+    const branchSupplierId = branchSalesForm.getFieldValue('branchSupplierId');
+    const branchSupplierName = branchSalesForm.getFieldValue('branchSupplierName');
     const shipToLoc = branchSalesForm.getFieldValue('shipToLocation');
     const currency = branchSalesForm.getFieldValue('currency');
 
-    if (!branchBU || !branchSupplier || !shipToLoc) {
-      message.error('Please fill in all Branch Sales fields');
+    if (!branchBU || (!branchSupplierId && !branchSupplierName) || !shipToLoc) {
+      message.error('Please fill in all Branch Sales fields (Business Unit, Supplier, Location)');
       return;
     }
 
@@ -6016,10 +6020,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
       // Build PO header payload
       const poPayload = {
-        OrderNumber: `BRNS-${savedOrderNumber}`,
+        SourceTransactionNumber: savedOrderNumber,
+        SourceTransactionSystem: 'OPS',
         OrderType: 'Standard',
         BusinessUnit: branchBU,
-        SupplierName: branchSupplier,
+        ...(branchSupplierId ? { SupplierId: branchSupplierId } : { SupplierName: branchSupplierName }),
         ReceivingLocationCode: shipToLoc,
         TransactionalCurrencyCode: currency,
         Lines: poLines,
@@ -6037,8 +6042,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       let data: any = null;
       try { data = JSON.parse(text); } catch { /* raw */ }
 
+      setLastPoResponse({
+        success: r.ok,
+        error: r.ok ? undefined : (collectOrderErrors(data, text, true) || [`HTTP ${r.status}`])[0],
+        url,
+        body: poPayload,
+        response: data,
+      });
+
       if (r.ok && data) {
-        message.success(`Branch Purchase Order ${data.OrderNumber || `BRNS-${savedOrderNumber}`} created successfully`);
+        message.success(`Branch Purchase Order created successfully`);
         setBranchSalesModalOpen(false);
         branchSalesForm.resetFields();
         setSavedOrderNumber(null);
@@ -6047,7 +6060,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         message.error(`Failed to create Branch PO: ${err.join(', ')}`);
       }
     } catch (e: any) {
-      message.error(`Network error: ${e?.message || 'Failed to create Branch PO'}`);
+      const errMsg = e?.message || 'Failed to create Branch PO';
+      setLastPoResponse({ success: false, error: errMsg });
+      message.error(`Network error: ${errMsg}`);
     } finally {
       setCreatingBranchPO(false);
     }
@@ -7347,16 +7362,17 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
       {/* Branch Sales Modal — capture branch details and create PO */}
       <Modal open={branchSalesModalOpen} onCancel={() => { setBranchSalesModalOpen(false); branchSalesForm.resetFields(); setSavedOrderNumber(null); }}
-        maskClosable={false} width={600} title={<Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /> Create Branch Purchase Order (BRNS)</Space>}
+        maskClosable={false} width={700} title={<Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /> Create Branch Purchase Order</Space>}
         footer={<Space>
           <Button onClick={() => { setBranchSalesModalOpen(false); branchSalesForm.resetFields(); setSavedOrderNumber(null); }}>Cancel</Button>
+          <Button icon={<ApiOutlined />} onClick={() => setPoApiDrawerOpen(true)} title="View PO API details">API Inspector</Button>
           <Button type="primary" loading={creatingBranchPO} onClick={createBranchPO} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
-            Create Branch PO
+            Create Purchase Order
           </Button>
         </Space>}>
         <div style={{ marginBottom: 16, padding: '12px 16px', background: '#E6F7FF', borderRadius: 6, border: `1px solid ${REDWOOD.info}` }}>
           <Text style={{ fontSize: 12, color: REDWOOD.info }}>
-            Sales Order <Text code strong>{savedOrderNumber}</Text> is a Branch Sales order. Auto-create a Purchase Order with the BRNS prefix below.
+            Sales Order <Text code strong>{savedOrderNumber}</Text> is a Branch Sales order. Create a linked Purchase Order below. PO will reference this SO as source transaction.
           </Text>
         </div>
         <Form form={branchSalesForm} layout="vertical" size="middle">
@@ -7364,9 +7380,33 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             <Select showSearch placeholder="Select Branch Business Unit" optionFilterProp="label"
               options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} />
           </Form.Item>
-          <Form.Item label="Branch Supplier Name" name="branchSupplierName" rules={[{ required: true, message: 'Enter supplier name' }]}>
-            <Input placeholder="Enter supplier name" />
-          </Form.Item>
+          <Row gutter={8}>
+            <Col span={16}>
+              <Form.Item label="Supplier" name="branchSupplierName" rules={[{ required: true, message: 'Select or enter supplier' }]}>
+                <AutoComplete
+                  placeholder="Search supplier by name..."
+                  options={branchSupplierOpts}
+                  onSearch={(val) => {
+                    if (val && val.length >= 2) {
+                      fetch(`${FUSION_BASE}/suppliers?q=SupplierName="${encodeURIComponent(val)}"&limit=10&onlyData=true`, { headers: FUSION_HDRS })
+                        .then(r => r.ok ? r.json() : Promise.reject())
+                        .then(d => setBranchSupplierOpts((d.items ?? []).map((s: any) => ({ label: `${pf(s, ['SupplierName'])}`, value: pf(s, ['SupplierName']), id: pf(s, ['SupplierId']) }))))
+                        .catch(() => setBranchSupplierOpts([]));
+                    }
+                  }}
+                  filterOption={false}
+                  onSelect={(val, opt: any) => {
+                    branchSalesForm.setFieldValue('branchSupplierId', opt.id);
+                  }}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Supplier ID" name="branchSupplierId" style={{ marginBottom: 0 }}>
+                <Input placeholder="Auto-filled" readOnly size="small" />
+              </Form.Item>
+            </Col>
+          </Row>
           <Form.Item label="Ship-To Location (Inventory Org)" name="shipToLocation" rules={[{ required: true, message: 'Select a location' }]}>
             <Select showSearch placeholder="Select Ship-To Location" optionFilterProp="label"
               options={orgRows.map((o: any) => ({ value: pf(o, ['OrganizationCode']), label: `${pf(o, ['OrganizationCode'])}${pf(o, ['OrganizationName']) ? ' — ' + pf(o, ['OrganizationName']) : ''}` }))} />
@@ -7377,12 +7417,83 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           <Form.Item>
             <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 12 }}>
               <Text type="secondary">
-                The Purchase Order will include {lines.filter(l => l.itemNumber && num(l.qty) > 0).length} line item{lines.filter(l => l.itemNumber && num(l.qty) > 0).length !== 1 ? 's' : ''} with the same codes, quantities, and prices from this Sales Order.
+                The PO will include {lines.filter(l => l.itemNumber && num(l.qty) > 0).length} line item{lines.filter(l => l.itemNumber && num(l.qty) > 0).length !== 1 ? 's' : ''} from this Sales Order with the same item codes, quantities, and unit prices.
               </Text>
             </div>
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* PO API Inspector Drawer */}
+      <Drawer
+        title="PO API Inspector — Branch Purchase Order"
+        placement="right"
+        onClose={() => setPoApiDrawerOpen(false)}
+        open={poApiDrawerOpen}
+        width={600}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div>
+            <Paragraph>
+              <Text strong>Endpoint:</Text>
+            </Paragraph>
+            <div style={{ background: '#f5f5f5', padding: '8px', borderRadius: '4px', wordBreak: 'break-all', fontFamily: 'monospace', fontSize: '11px' }}>
+              <b>POST</b> {`${FUSION_BASE}/purchaseOrders`}
+            </div>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Paragraph>
+              <Text strong>Request Payload:</Text>
+            </Paragraph>
+            {lastPoResponse?.body ? (
+              <pre style={{ background: '#f5f5f5', padding: '12px', borderRadius: '4px', maxHeight: '300px', overflow: 'auto', fontSize: '11px', fontFamily: 'monospace', lineHeight: '1.4' }}>
+                {JSON.stringify(lastPoResponse.body, null, 2)}
+              </pre>
+            ) : (
+              <div style={{ background: '#f5f5f5', padding: '12px', borderRadius: '4px', color: '#999' }}>
+                Request payload will appear here after creation attempt
+              </div>
+            )}
+            {lastPoResponse?.body && (
+              <Button size="small" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(JSON.stringify(lastPoResponse.body, null, 2)); message.success('Copied'); }} style={{ marginTop: '8px' }}>
+                Copy Payload
+              </Button>
+            )}
+          </div>
+
+          {lastPoResponse && (
+            <>
+              <Divider />
+              <div>
+                <Paragraph>
+                  <Text strong>Response:</Text>
+                </Paragraph>
+                {lastPoResponse.success ? (
+                  <div>
+                    <Tag color="green">Success</Tag>
+                    <Paragraph style={{ marginTop: '8px' }}>
+                      <Text type="secondary">Response data:</Text>
+                    </Paragraph>
+                    <pre style={{ background: '#f5f5f5', padding: '8px', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace', maxHeight: '200px', overflow: 'auto' }}>
+                      {JSON.stringify(lastPoResponse.response, null, 2)}
+                    </pre>
+                  </div>
+                ) : (
+                  <div>
+                    <Tag color="red">Error</Tag>
+                    <Paragraph style={{ marginTop: '8px' }}>
+                      <Text type="secondary">{lastPoResponse.error}</Text>
+                    </Paragraph>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </Drawer>
 
     </div>
   );
