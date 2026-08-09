@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   Layout, Breadcrumb, Card, Table, Form, Input, Select, DatePicker, Button,
-  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload, Checkbox, Dropdown, Steps, Collapse, Segmented, AutoComplete, Drawer, Divider,
+  Tag, Typography, Space, Tooltip, Spin, Row, Col, message, Modal, Empty, Tabs, InputNumber, Upload, Checkbox, Dropdown, Steps, Collapse, Segmented, Radio, Drawer, Divider,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -223,7 +223,7 @@ const parseEffContexts = (d: any, category: string): EffCtx[] => {
 // edit form still shows the fields and uploads with the correct VO/context.
 const FALLBACK_HDR_EFF: EffCtx[] = [
   { category: 'DOO_HEADERS_ADD_INFO', voName: 'HeaderEffBTransaction__CodeprivateVO', contextCode: 'Transaction Code',
-    segs: [{ name: 'transactionCode', label: 'Transaction Code' }, { name: 'customer', label: 'customer' }] },
+    segs: [{ name: 'transactionCode', label: 'Transaction Code' }, { name: 'customer', label: 'customer' }, { name: 'branchBusinessUnit', label: 'Branch BU' }] },
 ];
 const FALLBACK_LINE_EFF: EffCtx[] = [
   { category: 'DOO_FULFILL_LINES_ADD_INFO', voName: 'FulfillLineEffBaddinfoprivateVO', contextCode: 'addinfo',
@@ -1640,8 +1640,8 @@ const OrderView: React.FC<{ order: any; onCopy?: (order: any, lines: any[]) => v
 // ── Search tab ───────────────────────────────────────────────────────────────
 interface Filters {
   dateFrom?: Dayjs | null; dateTo?: Dayjs | null;
-  businessUnit?: string; customer?: string; customerNumber?: string;
-  statusCode?: string; orderKey?: string;
+  businessUnit?: string; businessUnitId?: string; customer?: string; customerNumber?: string;
+  statusCode?: string; orderKey?: string; orderType?: string;
 }
 
 const STATUS_CODES = [
@@ -1691,17 +1691,71 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
   const [pageOffset, setPageOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [busUnits, setBusUnits] = useState<any[]>([]);
+  const [busUnitsLoading, setBusUnitsLoading] = useState(false);
+  const [orderTypeOpts, setOrderTypeOpts] = useState<any[]>([]);
+  const [orderTypeLookup, setOrderTypeLookup] = useState<Map<string, any>>(new Map());
 
   const [filters, setFilters] = useState<Filters>({
     dateFrom: dayjs().subtract(1, 'month'), dateTo: dayjs().add(1, 'day'),
   });
+
+  // Load business units from payablesOptions API on mount
+  useEffect(() => {
+    const loadBusinessUnits = async () => {
+      setBusUnitsLoading(true);
+      try {
+        const url = `${FUSION_BASE}/payablesOptions?onlyData=true&limit=500&fields=businessUnitId,businessUnitName,paymentCurrency,ledgerCurrency`;
+        const r = await fetchWithTimeout(url, { headers: FUSION_HDRS });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        const items = d.items ?? [];
+        // Deduplicate by businessUnitName
+        const seen = new Set<string>();
+        const deduped = items.filter((bu: any) => {
+          const name = bu.businessUnitName;
+          if (seen.has(name)) return false;
+          seen.add(name);
+          return true;
+        });
+        setBusUnits(deduped);
+      } catch (e: any) {
+        console.error('Error loading business units:', e);
+        setBusUnits([]);
+      } finally {
+        setBusUnitsLoading(false);
+      }
+    };
+    loadBusinessUnits();
+  }, []);
+
+  // Load order types from standardLookups
+  useEffect(() => {
+    fetch(`${FUSION_BASE}/standardLookups?q=LookupType LIKE 'ORA_DOO_ORDER_TYPES%'&expand=lookupCodes&onlyData=true&limit=500`, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        const items = d.items ?? [];
+        const lookup = new Map<string, any>();
+        const opts: any[] = [];
+        items.forEach((lookupType: any) => {
+          (lookupType.lookupCodes ?? []).forEach((code: any) => {
+            lookup.set(code.LookupCode, code);
+            opts.push({ value: code.LookupCode, label: `${code.LookupCode} — ${code.Meaning}` });
+          });
+        });
+        setOrderTypeLookup(lookup);
+        setOrderTypeOpts(opts);
+      })
+      .catch(e => console.error('Error loading order types:', e));
+  }, []);
 
   // Dates unquoted (TransactionOn>2026-01-16); text uses SQL LIKE; codes exact.
   const buildQ = useCallback((f: Filters) => {
     const parts: string[] = [];
     if (f.dateFrom) parts.push(`TransactionOn>${dayjs(f.dateFrom).format('YYYY-MM-DD')}`);
     if (f.dateTo) parts.push(`TransactionOn<${dayjs(f.dateTo).format('YYYY-MM-DD')}`);
-    if (f.businessUnit?.trim()) parts.push(`BusinessUnitName LIKE '%${f.businessUnit.trim()}%'`);
+    if (f.businessUnitId) parts.push(`RequestingBusinessUnitId=${String(f.businessUnitId)}`);
+    if (f.orderType) parts.push(`TransactionTypeCode='${f.orderType}'`);
     if (f.customer?.trim()) parts.push(`BuyingPartyName LIKE '%${f.customer.trim()}%'`);
     if (f.customerNumber?.trim()) parts.push(`BuyingPartyNumber='${f.customerNumber.trim()}'`);
     if (f.statusCode) parts.push(`StatusCode='${f.statusCode}'`);
@@ -1979,6 +2033,160 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
     return { customers, products, types };
   }, [filteredLines]);
 
+  // Export orders to Excel
+  const exportOrdersToExcel = async () => {
+    if (filtered.length === 0) { message.warning('No orders to export'); return; }
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Orders');
+
+    // Title
+    const titleCell = worksheet.addRow(['Sales Orders']);
+    titleCell.font = { bold: true, size: 14, color: { argb: 'FFC74634' } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'center' };
+    worksheet.mergeCells('A1:M1');
+    worksheet.getRow(1).height = 24;
+
+    // Summary info
+    worksheet.addRow(['']);
+    const summaryRow = worksheet.addRow([
+      `Date: ${dayjs().format('YYYY-MM-DD HH:mm')}`,
+      `Total Orders: ${filtered.length}`,
+    ]);
+    summaryRow.font = { size: 10 };
+    worksheet.addRow(['']);
+
+    // Headers
+    const headers = ['Order Number', 'Customer', 'Order Date', 'Status', 'Currency', 'Ordered Qty', 'Ordered Amount', 'Freight', 'Tax', 'Total', 'Business Unit', 'Type', 'Buyer'];
+    const headerRow = worksheet.addRow(headers);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC74634' } };
+    headerRow.alignment = { horizontal: 'center', vertical: 'center' };
+
+    // Data rows
+    filtered.forEach((row: any) => {
+      const dataRow = worksheet.addRow([
+        row.OrderNumber,
+        row.BuyingPartyName ?? '—',
+        fmtDate(row.TransactionOn),
+        row.StatusCode ?? row.Status,
+        row.AppliedCurrencyCode ?? row.CurrencyCode ?? 'AED',
+        row.OrderedQuantity ?? 0,
+        row.OrderedAmount ?? 0,
+        row.FreightAmount ?? 0,
+        row.TaxAmount ?? 0,
+        row.GrandTotalAmount ?? row.OrderAmount ?? 0,
+        row.BusinessUnitName ?? '—',
+        row.TransactionTypeCode ?? row.TransactionType ?? '—',
+        row.BuyerName ?? '—',
+      ]);
+      dataRow.font = { size: 10 };
+      dataRow.alignment = { horizontal: 'right', vertical: 'center' };
+    });
+
+    // Format columns
+    worksheet.columns = [
+      { width: 18 },
+      { width: 25 },
+      { width: 15 },
+      { width: 15 },
+      { width: 10 },
+      { width: 15 },
+      { width: 15 },
+      { width: 12 },
+      { width: 12 },
+      { width: 15 },
+      { width: 18 },
+      { width: 15 },
+      { width: 18 },
+    ];
+
+    // Save
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `SalesOrders_${dayjs().format('YYYY-MM-DD_HHmmss')}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    message.success(`Exported ${filtered.length} orders`);
+  };
+
+  // Export lines to Excel
+  const exportLinesToExcel = async () => {
+    if (filteredLines.length === 0) { message.warning('No lines to export'); return; }
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Lines');
+
+    // Title
+    const titleCell = worksheet.addRow(['Sales Order Lines']);
+    titleCell.font = { bold: true, size: 14, color: { argb: 'FFC74634' } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'center' };
+    worksheet.mergeCells('A1:J1');
+    worksheet.getRow(1).height = 24;
+
+    // Summary info
+    worksheet.addRow(['']);
+    const summaryRow = worksheet.addRow([
+      `Date: ${dayjs().format('YYYY-MM-DD HH:mm')}`,
+      `Total Lines: ${filteredLines.length}`,
+      `Total Quantity: ${filteredLines.reduce((sum, r) => sum + (r.OrderedQuantity ?? 0), 0)}`,
+      `Total Amount: ${filteredLines.reduce((sum, r) => sum + (r.ExtendedAmount ?? 0), 0)}`,
+    ]);
+    summaryRow.font = { size: 10 };
+    worksheet.addRow(['']);
+
+    // Headers
+    const headers = ['Order', 'Line #', 'Product', 'Description', 'Qty', 'UOM', 'Unit Price', 'Extended Amount', 'Status', 'Customer'];
+    const headerRow = worksheet.addRow(headers);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC74634' } };
+    headerRow.alignment = { horizontal: 'center', vertical: 'center' };
+
+    // Data rows
+    filteredLines.forEach((row: any) => {
+      const dataRow = worksheet.addRow([
+        row.OrderNumber ?? '—',
+        row.LineNumber ?? row.DisplayLineNumber ?? '—',
+        row.ProductNumber ?? '—',
+        row.ProductDescription ?? '—',
+        row.OrderedQuantity ?? 0,
+        row.OrderedUOM ?? '—',
+        row.UnitSellingPrice ?? 0,
+        row.ExtendedAmount ?? 0,
+        row.StatusCode ?? row.Status ?? '—',
+        row.BuyingPartyName ?? '—',
+      ]);
+      dataRow.font = { size: 10 };
+      dataRow.alignment = { horizontal: 'right', vertical: 'center' };
+    });
+
+    // Format columns
+    worksheet.columns = [
+      { width: 18 },
+      { width: 10 },
+      { width: 18 },
+      { width: 30 },
+      { width: 10 },
+      { width: 8 },
+      { width: 12 },
+      { width: 15 },
+      { width: 15 },
+      { width: 25 },
+    ];
+
+    // Save
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `SalesOrderLines_${dayjs().format('YYYY-MM-DD_HHmmss')}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    message.success(`Exported ${filteredLines.length} lines`);
+  };
+
   // Export analytics to Excel
   const exportAnalyticsToExcel = async () => {
     const workbook = new ExcelJS.Workbook();
@@ -2064,8 +2272,35 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
             </Col>
             <Col xs={12} sm={8} md={5}>
               <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Business Unit</Text>} style={{ marginBottom: 6 }}>
-                <Input placeholder="e.g. MITSUMI" allowClear value={filters.businessUnit}
-                  onChange={e => setFilters(f => ({ ...f, businessUnit: e.target.value }))} onPressEnter={runSearch} />
+                <Select
+                  allowClear
+                  showSearch
+                  placeholder="Select business unit"
+                  value={filters.businessUnitId || undefined}
+                  onChange={v => {
+                    const selected = busUnits.find(bu => bu.businessUnitId === v);
+                    setFilters(f => ({ ...f, businessUnitId: v, businessUnit: selected?.businessUnitName }));
+                  }}
+                  optionFilterProp="label"
+                  loading={busUnitsLoading}
+                  options={busUnits.map(bu => ({
+                    value: bu.businessUnitId,
+                    label: bu.businessUnitName,
+                  }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col xs={12} sm={8} md={5}>
+              <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Order Type</Text>} style={{ marginBottom: 6 }}>
+                <Select
+                  allowClear
+                  showSearch
+                  placeholder="Any order type"
+                  value={filters.orderType || undefined}
+                  onChange={v => setFilters(f => ({ ...f, orderType: v }))}
+                  optionFilterProp="label"
+                  options={orderTypeOpts}
+                />
               </Form.Item>
             </Col>
             <Col xs={12} sm={8} md={5}>
@@ -2108,7 +2343,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
 
       <Card styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
         <Tabs activeKey={searchTab} onChange={(key) => setSearchTab(key as 'orders' | 'lines')} style={{ paddingTop: 12 }}>
-          <Tabs.TabPane tab={<Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /><Text strong>Search Orders</Text>
+          <Tabs.TabPane tab={<Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /><Text strong>Orders</Text>
             {rows.length > 0 && <Tag>{filtered.length}{filtered.length !== rows.length ? ` of ${rows.length}` : ''}</Tag>}</Space>} key="orders">
             <div style={{ padding: '0 18px 18px' }}>
               <Space style={{ marginBottom: 12 }}>
@@ -2118,6 +2353,10 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
                 <Input placeholder="Filter any column…" allowClear size="small" prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
                   value={filterText} onChange={e => setFilterText(e.target.value)} style={{ width: 220 }} />
                 <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={runSearch}>Refresh</Button>
+                <Button size="small" icon={<DownloadOutlined />} onClick={exportOrdersToExcel} disabled={filtered.length === 0}
+                  style={{ marginLeft: 'auto', borderColor: REDWOOD.success, color: REDWOOD.success, fontWeight: 600 }}>
+                  Export Orders
+                </Button>
               </Space>
               {loading ? (
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin size="large" tip="Loading…" /></div>
@@ -2146,13 +2385,17 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
               )}
             </div>
           </Tabs.TabPane>
-          <Tabs.TabPane tab={<Space><FileTextOutlined style={{ color: REDWOOD.primary }} /><Text strong>Search Lines</Text>
+          <Tabs.TabPane tab={<Space><FileTextOutlined style={{ color: REDWOOD.primary }} /><Text strong>Lines</Text>
             {filteredLines.length > 0 && <Tag>{filteredLines.length}{filteredLines.length !== allLines.length ? ` of ${allLines.length}` : ''}</Tag>}</Space>} key="lines">
             <div style={{ padding: '0 18px 18px' }}>
               <Space style={{ marginBottom: 12 }}>
                 <Input placeholder="Filter any column…" allowClear size="small" prefix={<SearchOutlined style={{ color: REDWOOD.neutral300 }} />}
                   value={linesFilterText} onChange={e => setLinesFilterText(e.target.value)} style={{ width: 300 }} />
                 <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={runSearch}>Refresh</Button>
+                <Button size="small" icon={<DownloadOutlined />} onClick={exportLinesToExcel} disabled={filteredLines.length === 0}
+                  style={{ marginLeft: 'auto', borderColor: REDWOOD.success, color: REDWOOD.success, fontWeight: 600 }}>
+                  Export Lines
+                </Button>
               </Space>
               {loading ? (
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin size="large" tip="Loading…" /></div>
@@ -2580,6 +2823,8 @@ interface OrderHeader {
   custAccountId?: string; partyId?: string;
   // Currency conversion details
   currencyRateType?: string; currencyDate?: Dayjs | null;
+  // Branch Sales order details
+  branchBU?: string;
   // Header EFF (Additional Information) segment values, keyed by segment API name.
   effVals?: Record<string, string>;
 }
@@ -2923,18 +3168,48 @@ let _impSeq = 0;
 const impKey = () => `imp-${++_impSeq}`;
 
 // Resolve a batch of item numbers against itemsV2 (validity + description + UOM).
-async function resolveItems(numbers: string[], org?: string): Promise<Record<string, { ItemDescription?: string; uom?: string; exists: boolean }>> {
+async function resolveItems(numbers: string[], org?: string, source: 'itemsV2' | 'itemCost' | 'priceList' = 'itemCost'): Promise<Record<string, { ItemDescription?: string; uom?: string; exists: boolean }>> {
   const out: Record<string, { ItemDescription?: string; uom?: string; exists: boolean }> = {};
   const uniq = Array.from(new Set(numbers.map(n => String(n ?? '').trim()).filter(Boolean)));
-  for (let i = 0; i < uniq.length; i += 20) {
-    const chunk = uniq.slice(i, i + 20);
-    const inList = chunk.map(n => `'${n.replace(/'/g, "''")}'`).join(',');
-    let q = `ItemNumber in (${inList})`; if (org) q += `;OrganizationCode=${org}`;
-    try {
-      const items = await fetchAllPages(`${FUSION_BASE}/itemsV2?q=${encodeURIComponent(q)}&limit=200&onlyData=true`);
-      items.forEach((it: any) => { out[String(it.ItemNumber)] = { ItemDescription: it.ItemDescription, uom: pf(it, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']), exists: true }; });
-    } catch { /* leave unresolved */ }
+
+  if (source === 'itemsV2') {
+    for (let i = 0; i < uniq.length; i += 20) {
+      const chunk = uniq.slice(i, i + 20);
+      const inList = chunk.map(n => `'${n.replace(/'/g, "''")}'`).join(',');
+      let q = `ItemNumber in (${inList})`; if (org) q += `;OrganizationCode=${org}`;
+      try {
+        const items = await fetchAllPages(`${FUSION_BASE}/itemsV2?q=${encodeURIComponent(q)}&limit=200&onlyData=true`);
+        items.forEach((it: any) => { out[String(it.ItemNumber)] = { ItemDescription: it.ItemDescription, uom: pf(it, ['PrimaryUOMValue', 'PrimaryUOMCode', 'UOMCode']), exists: true }; });
+      } catch { /* leave unresolved */ }
+    }
+  } else if (source === 'itemCost') {
+    for (const item of uniq) {
+      try {
+        const items = await fetchAllPages(`${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemNumber=${item}`)}&onlyData=true&limit=1`);
+        if (items.length > 0) {
+          const it = items[0];
+          out[item] = { ItemDescription: pf(it, ['ItemDescription', 'item', 'Item', 'ItemNumber']), uom: pf(it, ['PrimaryUOMCode', 'UOMCode', 'UOM']), exists: true };
+        }
+      } catch { /* leave unresolved */ }
+    }
+  } else if (source === 'priceList') {
+    // Price list validation is simpler - just check if item exists
+    for (const item of uniq) {
+      try {
+        const items = await fetchAllPages(`${FUSION_BASE}/priceLists?onlyData=true&limit=1`);
+        if (items.length > 0) {
+          // Try to find item in first price list
+          const plId = pf(items[0], ['PriceListId']);
+          const plItems = await fetchAllPages(`${FUSION_BASE}/priceLists/${encodeURIComponent(plId)}/child/items?q=${encodeURIComponent(`ProductNumber=${item}`)}&onlyData=true&limit=1`);
+          if (plItems.length > 0) {
+            const it = plItems[0];
+            out[item] = { ItemDescription: pf(it, ['ProductDescription', 'ItemDescription']), uom: pf(it, ['PrimaryUOMCode', 'UOMCode']), exists: true };
+          }
+        }
+      } catch { /* leave unresolved */ }
+    }
   }
+
   uniq.forEach(n => { if (!out[n]) out[n] = { exists: false }; });
   return out;
 }
@@ -2945,13 +3220,14 @@ const StagedPreview: React.FC<{ rows: ImpRow[]; org?: string; ccy?: string; onAd
   const [data, setData] = useState<ImpRow[]>(rows);
   const [validating, setValidating] = useState(false);
   const [validated, setValidated] = useState(false);
+  const [validationSource, setValidationSource] = useState<'itemsV2' | 'itemCost' | 'priceList'>('itemCost');
   useEffect(() => { setData(rows); setValidated(false); }, [rows]);
   const upd = (key: string, patch: Partial<ImpRow>) => setData(p => p.map(r => r.key === key ? { ...r, ...patch } : r));
   const remove = (key: string) => setData(p => p.filter(r => r.key !== key));
   const validate = async () => {
     setValidating(true);
     try {
-      const res = await resolveItems(data.map(r => r.itemNumber), org);
+      const res = await resolveItems(data.map(r => r.itemNumber), org, validationSource);
       setData(p => p.map(r => { const m = res[r.itemNumber.trim()]; return { ...r, valid: !!m?.exists, description: r.description || m?.ItemDescription, uom: r.uom || m?.uom, note: m?.exists ? undefined : 'Item not found' }; }));
       setValidated(true);
       const bad = data.filter(r => !res[r.itemNumber.trim()]?.exists).length;
@@ -2974,8 +3250,16 @@ const StagedPreview: React.FC<{ rows: ImpRow[]; org?: string; ccy?: string; onAd
   ];
   return (
     <div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-        <Button icon={<SearchOutlined />} loading={validating} onClick={validate}>Validate items</Button>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+        <Space size={8}>
+          <span style={{ fontSize: 12, color: REDWOOD.neutral600 }}>Validate with:</span>
+          <Radio.Group value={validationSource} onChange={e => { setValidationSource(e.target.value); setValidated(false); }} size="small">
+            <Radio.Button value="itemCost">Item Cost</Radio.Button>
+            <Radio.Button value="itemsV2">ItemsV2</Radio.Button>
+            <Radio.Button value="priceList">Price List</Radio.Button>
+          </Radio.Group>
+        </Space>
+        <Button icon={<SearchOutlined />} loading={validating} onClick={validate} type="primary" style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>Validate items</Button>
         <Button icon={<RollbackOutlined />} onClick={onReset}>Start over</Button>
         <Text type="secondary" style={{ fontSize: 12 }}>{data.length} row(s){validated ? ` · ${badN} invalid` : ''}</Text>
         <span style={{ marginLeft: 'auto' }}><Text strong>Total: {fmtQty(totQty)} unit(s) · {fmtAmount(totAmt, ccy)}</Text></span>
@@ -2983,12 +3267,12 @@ const StagedPreview: React.FC<{ rows: ImpRow[]; org?: string; ccy?: string; onAd
       <Table size="small" columns={cols} dataSource={data} rowKey="key" pagination={data.length > 50 ? { pageSize: 50 } : false} scroll={{ y: 360 }}
         rowClassName={r => r.valid === false ? 'imp-bad' : ''} />
       <div style={{ marginTop: 10, textAlign: 'right' }}>
-        <Button type="primary" icon={<PlusOutlined />} disabled={!data.length} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
+        <Button type="primary" icon={<PlusOutlined />} disabled={!validated || badN > 0 || !data.length} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
           onClick={() => {
             const picked = data.filter(r => r.itemNumber.trim()).map(r => ({ ItemNumber: r.itemNumber.trim(), ItemDescription: r.description, PrimaryUOMValue: r.uom, _qty: num(r.qty), _price: num(r.price) }));
             if (!picked.length) { message.warning('Nothing to add'); return; }
             onAdd(picked); message.success(`Added ${picked.length} line(s) to the order`);
-          }}>Add {data.length} line(s) to order{badN ? ` (${badN} unverified)` : ''}</Button>
+          }}>Add {data.length} line(s) to order</Button>
       </div>
     </div>
   );
@@ -3099,6 +3383,14 @@ const PastePanel: React.FC<{ org?: string; ccy?: string; onAdd: (items: any[]) =
     setHasHeader(looksHeader); setHeaderRow(0);
     setMap({ item: Math.max(0, guessCol(hdr, ['item', 'sku', 'product', 'code'])), qty: guessCol(hdr, ['qty', 'quantity']) < 0 ? 1 : guessCol(hdr, ['qty', 'quantity']), price: guessCol(hdr, ['price', 'rate', 'amount']) < 0 ? 2 : guessCol(hdr, ['price', 'rate', 'amount']), desc: guessCol(hdr, ['desc', 'name']) });
   };
+
+  // Auto-build preview when grid and map are ready
+  useEffect(() => {
+    if (!grid || map.item < 0) return;
+    const rs = tableToRows(grid, map, hasHeader ? headerRow : -1);
+    if (rs.length) setRows(rs);
+  }, [grid, map, hasHeader, headerRow]);
+
   if (rows) return <StagedPreview rows={rows} org={org} ccy={ccy} onAdd={onAdd} onReset={() => setRows(null)} />;
   const headers = grid ? (hasHeader ? grid[headerRow] : grid[headerRow].map((_, i) => `Col ${i + 1}`)).map(String) : [];
   return (
@@ -3111,10 +3403,6 @@ const PastePanel: React.FC<{ org?: string; ccy?: string; onAdd: (items: any[]) =
       {grid && <div style={{ marginTop: 12 }}>
         <Space style={{ marginBottom: 8 }}><Checkbox checked={hasHeader} onChange={e => setHasHeader(e.target.checked)}>First row is a header</Checkbox></Space>
         <MapBar headers={headers} map={map} setMap={setMap} headerRow={hasHeader ? headerRow : -1 + 0} setHeaderRow={setHeaderRow} maxHeader={grid.length} />
-        <div style={{ textAlign: 'right' }}>
-          <Button type="primary" icon={<ImportOutlined />} disabled={map.item < 0} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
-            onClick={() => { const rs = tableToRows(grid, map, hasHeader ? headerRow : -1); if (!rs.length) { message.warning('No item rows found'); return; } setRows(rs); }}>Build preview</Button>
-        </div>
       </div>}
     </div>
   );
@@ -3840,9 +4128,9 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
       return;
     }
 
-    // Fetch conversion rate from daily rates webservice
+    // Fetch conversion rate from daily rates webservice (txn → base)
     try {
-      const params = new URLSearchParams({ from_currency: baseCcy, to_currency: txnCcy });
+      const params = new URLSearchParams({ from_currency: txnCcy, to_currency: baseCcy });
       const url = `${APEX_BASE}/currencies/dailyrates?${params}`;
       const res = await fetch(url);
 
@@ -3852,7 +4140,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
       const items: any[] = json.items ?? json.data ?? (Array.isArray(json) ? json : []);
 
       if (items.length === 0) {
-        message.info(`No rate found for ${baseCcy} → ${txnCcy}, please enter manually`);
+        message.info(`No rate found for ${txnCcy} → ${baseCcy}, please enter manually`);
         return;
       }
 
@@ -3863,9 +4151,9 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
       const rate = Number(latest.rate ?? latest.RATE ?? 0);
       if (rate > 0) {
         frm.setFieldsValue({ rate });
-        message.success(`✓ Conversion rate fetched: 1 ${baseCcy} = ${rate} ${txnCcy}`);
+        message.success(`✓ Conversion rate fetched: 1 ${txnCcy} = ${rate} ${baseCcy}`);
       } else {
-        message.info(`Could not get valid rate for ${baseCcy} → ${txnCcy}, please enter manually`);
+        message.info(`Could not get valid rate for ${txnCcy} → ${baseCcy}, please enter manually`);
       }
     } catch (err) {
       console.error('Error fetching conversion rate:', err);
@@ -3932,33 +4220,36 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
           </div>
         )}
         <Section icon={<BankOutlined />} title="Order Details" color={REDWOOD.primary}>
-          <Col xs={24} md={12}><Form.Item label="Business Unit" name="businessUnit" rules={req('Select business unit')} style={{ marginBottom: 8 }}>
+          <Col xs={24} md={15}><Form.Item label="Business Unit" name="businessUnit" rules={req('Select business unit')} style={{ marginBottom: 8 }}>
             <Select showSearch placeholder="Select" size="small" onChange={onBU} optionFilterProp="label"
               options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Base Ccy" name="baseCurrency" rules={req('Base currency')} style={{ marginBottom: 8 }}><Input placeholder="AED" readOnly size="small" /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Txn Ccy" name="txnCurrency" rules={req('Currency')} style={{ marginBottom: 8 }}>
+          <Col xs={12} md={5}><Form.Item label="Base Ccy" name="baseCurrency" rules={req('Base currency')} style={{ marginBottom: 8 }}><Input placeholder="AED" readOnly size="small" /></Form.Item></Col>
+          <Col xs={12} md={5}><Form.Item label="Txn Ccy" name="txnCurrency" rules={req('Currency')} style={{ marginBottom: 8 }}>
             <Select showSearch disabled={!buName} placeholder="Currency" size="small" onChange={() => onTxnCurrencyChange(form)} options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Rate" name="rate" style={{ marginBottom: 8 }}><InputNumber disabled={!buName} style={{ width: '100%' }} size="small" min={0} placeholder="Auto-populated" /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Rate Type" name="currencyRateType" style={{ marginBottom: 8 }}>
+          <Col xs={12} md={5}><Form.Item label="Rate" name="rate" style={{ marginBottom: 8 }}><InputNumber disabled={!buName} style={{ width: '100%' }} size="small" min={0} placeholder="Auto-populated" /></Form.Item></Col>
+          <Col xs={12} md={5}><Form.Item label="Rate Type" name="currencyRateType" style={{ marginBottom: 8 }}>
             <Select disabled={!buName} placeholder="Rate type" size="small" options={[{ value: 'Corporate', label: 'Corporate' }, { value: 'Spot', label: 'Spot' }, { value: 'User', label: 'User' }]} /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Currency Date" name="currencyDate" style={{ marginBottom: 8 }}><DatePicker disabled={!buName} style={{ width: '100%' }} size="small" /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Order Type" name="orderType" rules={req('Order type')} style={{ marginBottom: 8 }}>
+          <Col xs={12} md={5}><Form.Item label="Currency Date" name="currencyDate" style={{ marginBottom: 8 }}><DatePicker disabled={!buName} style={{ width: '100%' }} size="small" /></Form.Item></Col>
+          <Col xs={12} md={5}><Form.Item label="Order Type" name="orderType" rules={req('Order type')} style={{ marginBottom: 8 }}>
             <Select showSearch disabled={!buName} placeholder="Select order type" size="small" loading={orderTypeOpts.length === 0} onChange={onOrderTypeChange} options={orderTypeOpts} /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')} style={{ marginBottom: 0 }}><DatePicker disabled={!buName} style={{ width: '100%' }} size="small" /></Form.Item></Col>
+          <Col xs={12} md={5}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')} style={{ marginBottom: 8 }}><DatePicker disabled={!buName} style={{ width: '100%' }} size="small" /></Form.Item></Col>
+          {isBranchSales && (
+            <Col xs={12} md={12}><Form.Item label="Branch Business Unit" name="branchBU" rules={req('Branch BU')} style={{ marginBottom: 0 }}>
+              <Select showSearch placeholder="Select Branch BU" size="small" optionFilterProp="label"
+                options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item></Col>
+          )}
         </Section>
 
         <Section icon={<ProfileOutlined />} title="Customer" color={REDWOOD.info}>
-          <Col xs={24} md={20}><Form.Item label="Customer Name" name="customerName" rules={req('Customer')} style={{ marginBottom: 8, display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+          <Col xs={24} md={16}><Form.Item label="Customer Name" name="customerName" rules={req('Customer')} style={{ marginBottom: 8, display: 'flex', alignItems: 'flex-end', gap: 8 }}>
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, opacity: !buName ? 0.5 : 1, pointerEvents: !buName ? 'none' : 'auto' }}>
               <Input placeholder={buName ? "Select a customer..." : "Select BU first"} value={form.getFieldValue('customerName')} readOnly style={{ flex: 1, fontSize: '14px', fontWeight: '500' }} disabled={!buName} />
               <Button type="primary" icon={<SearchOutlined />} onClick={() => setCustSearchModalOpen(true)} disabled={!buName} title={buName ? "Search Customer" : "Select BU first"} />
             </div>
           </Form.Item></Col>
-          <Col xs={24} md={4}><Form.Item label="Account #" name="accountNumber" style={{ marginBottom: 8 }}><Input placeholder="—" readOnly size="small" /></Form.Item></Col>
-          <Form.Item name="custAccountId" hidden><Input /></Form.Item>
-          <Form.Item name="partyId" hidden><Input /></Form.Item>
-          <Form.Item name="billToSite" hidden><Input /></Form.Item>
-          <Form.Item name="shipToSite" hidden><Input /></Form.Item>
+          <Col xs={24} md={8}><Form.Item label="Account #" name="accountNumber" style={{ marginBottom: 8 }}><Input placeholder="—" readOnly size="small" /></Form.Item></Col>
+          <input type="hidden" name="billToSite" value={form.getFieldValue('billToSite')} />
+          <input type="hidden" name="shipToSite" value={form.getFieldValue('shipToSite')} />
           <Col xs={24} md={12}><Form.Item label="Bill To Address" name="billToAddress" style={{ marginBottom: 8 }}><Input.TextArea rows={1} readOnly size="small" style={{ fontSize: '12px' }} /></Form.Item></Col>
           <Col xs={24} md={12}><Form.Item label="Ship To Address" name="shipToAddress" style={{ marginBottom: 0 }}><Input.TextArea rows={1} readOnly size="small" style={{ fontSize: '12px' }} /></Form.Item></Col>
         </Section>
@@ -4667,11 +4958,19 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [autoInvoiceOpen, setAutoInvoiceOpen] = useState(false);
   const [branchSalesModalOpen, setBranchSalesModalOpen] = useState(false);
   const [branchSalesForm] = Form.useForm();
+  const [custSearchModalOpen, setCustSearchModalOpen] = useState(false);
   const [savedOrderNumber, setSavedOrderNumber] = useState<string | null>(null);
+  const [createdPONumber, setCreatedPONumber] = useState<string | null>(null);
   const [creatingBranchPO, setCreatingBranchPO] = useState(false);
-  const [branchSupplierOpts, setBranchSupplierOpts] = useState<any[]>([]);
-  const [poApiDrawerOpen, setPoApiDrawerOpen] = useState(false);
-  const [lastPoResponse, setLastPoResponse] = useState<{ success?: boolean; error?: string; url?: string; body?: any; response?: any } | null>(null);
+  const [isBranchSales, setIsBranchSales] = useState(false);
+  const [branchSuppliers, setBranchSuppliers] = useState<any[]>([]);
+  const [branchShipToOrgs, setBranchShipToOrgs] = useState<any[]>([]);
+  const [branchBUData, setBranchBUData] = useState<{ baseCurrency?: string; conversionRate?: number }>({});
+  const [branchPoPayload, setBranchPoPayload] = useState<string>('');
+  const [branchApiDrawerOpen, setBranchApiDrawerOpen] = useState(false);
+  const [branchPoNeedByDate, setBranchPoNeedByDate] = useState<any>(dayjs().add(7, 'days'));
+  const [orderTypeOpts, setOrderTypeOpts] = useState<any[]>([]);
+  const [orderTypeLookup, setOrderTypeLookup] = useState<Map<string, any>>(new Map());
   const jsonInputRef = useRef<HTMLInputElement>(null);
   // Edit mode: the raw Fusion order lines (with child links) for the Billing /
   // Actual Costing tabs (the grid uses a simplified NewLine shape).
@@ -4873,7 +5172,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     }));
   };
 
-  // Fetch currency conversion rate
+  // Fetch currency conversion rate (txn → base, e.g. USD → AED)
   const onTxnCurrencyChange = async (frm: any) => {
     const baseCcy = frm.getFieldValue('baseCurrency');
     const txnCcy = frm.getFieldValue('txnCurrency');
@@ -4892,9 +5191,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       return;
     }
 
-    // Fetch conversion rate from daily rates webservice
+    // Fetch conversion rate from daily rates webservice (txn → base)
     try {
-      const params = new URLSearchParams({ from_currency: baseCcy, to_currency: txnCcy });
+      const params = new URLSearchParams({ from_currency: txnCcy, to_currency: baseCcy });
       const url = `${APEX_BASE}/currencies/dailyrates?${params}`;
       const res = await fetch(url);
 
@@ -4904,7 +5203,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       const items: any[] = json.items ?? json.data ?? (Array.isArray(json) ? json : []);
 
       if (items.length === 0) {
-        message.info(`No rate found for ${baseCcy} → ${txnCcy}, please enter manually`);
+        message.info(`No rate found for ${txnCcy} → ${baseCcy}, please enter manually`);
         return;
       }
 
@@ -4916,9 +5215,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       if (rate > 0) {
         frm.setFieldsValue({ rate });
         setHdr(prev => ({ ...prev, rate }));
-        message.success(`✓ Conversion rate fetched: 1 ${baseCcy} = ${rate} ${txnCcy}`);
+        message.success(`✓ Conversion rate fetched: 1 ${txnCcy} = ${rate} ${baseCcy}`);
       } else {
-        message.info(`Could not get valid rate for ${baseCcy} → ${txnCcy}, please enter manually`);
+        message.info(`Could not get valid rate for ${txnCcy} → ${baseCcy}, please enter manually`);
       }
     } catch (err) {
       console.error('Error fetching conversion rate:', err);
@@ -4957,7 +5256,97 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     return `${hdr.orderType || 'SO'}${d.format('YYYYMM')}${orderSeq}`;
   }, [hdr.orderType, hdr.orderDate, orderSeq, editMode, editOrder]);
 
-  useEffect(() => { const h = initialDraft?.header ?? header; form.setFieldsValue(h as any); setHdr(h); /* init once */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Set default CustomerPONumber to Order No if not already set
+  useEffect(() => {
+    if (orderNumber && !hdr.customerPONumber) {
+      form.setFieldsValue({ customerPONumber: orderNumber });
+      setHdr(prev => ({ ...prev, customerPONumber: orderNumber }));
+    }
+  }, [orderNumber]);
+
+  useEffect(() => {
+    try {
+      const h = initialDraft?.header ?? header;
+      console.log('NewOrderTab: Initializing form with header:', h);
+      if (!h) {
+        console.error('NewOrderTab: Header is missing!', { initialDraft, header });
+        return;
+      }
+      form.setFieldsValue(h as any);
+      setHdr(h);
+      console.log('NewOrderTab: Form initialized successfully');
+      /* init once */
+    } catch (e) {
+      console.error('NewOrderTab: Form initialization error:', e);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-populate form when bUnits load (for initial header value set)
+  useEffect(() => {
+    try {
+      console.log('NewOrderTab: bUnits loaded, count:', bUnits.length);
+      if (bUnits.length > 0) {
+        const h = initialDraft?.header ?? header;
+        if (h && h.businessUnit) {
+          console.log('NewOrderTab: Setting businessUnit field to:', h.businessUnit);
+          form.setFieldsValue({ businessUnit: h.businessUnit });
+        }
+      }
+    } catch (e) {
+      console.error('NewOrderTab: Error re-populating form:', e);
+    }
+  }, [bUnits.length, form, header, initialDraft]);
+
+  // Update isBranchSales based on order type (initial load or change)
+  useEffect(() => {
+    if (hdr.orderType && orderTypeLookup.size > 0) {
+      const lookupDetail = orderTypeLookup.get(hdr.orderType);
+      const isBranch = lookupDetail && lookupDetail.Tag === 'BRANCH SALES';
+      setIsBranchSales(isBranch);
+    }
+  }, [hdr.orderType, orderTypeLookup]);
+
+  // Populate Branch BU in EFF when branch BU is selected
+  useEffect(() => {
+    if (hdr.branchBU && hdrEffCtxs.length > 0) {
+      // Find the correct field name for branch BU from active context
+      const active = hdrEffCtxs.find(c => c.voName === hdrEffCtxSel);
+      if (active) {
+        const branchBuField = active.segs.find(s =>
+          s.name.toLowerCase().includes('branch') ||
+          s.label.toLowerCase().includes('branch')
+        );
+        if (branchBuField) {
+          setHdrEffVals(v => ({ ...v, [branchBuField.name]: hdr.branchBU }));
+        }
+      }
+    }
+  }, [hdr.branchBU, hdrEffCtxs, hdrEffCtxSel]);
+
+  // Fetch order types from standardLookups
+  useEffect(() => {
+    fetch(`${FUSION_BASE}/standardLookups?q=LookupType LIKE 'ORA_DOO_ORDER_TYPES%'&expand=lookupCodes&onlyData=true&limit=500`, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        const items = d.items ?? [];
+        if (items.length > 0 && items[0].lookupCodes) {
+          const lookupMap = new Map<string, any>();
+          const opts = items[0].lookupCodes
+            .filter((lc: any) => lc.EnabledFlag === 'Y')
+            .map((lc: any) => {
+              lookupMap.set(lc.LookupCode, lc);
+              return { value: lc.LookupCode, label: lc.Meaning };
+            })
+            .sort((a: any, b: any) => a.label.localeCompare(b.label));
+          setOrderTypeOpts(opts);
+          setOrderTypeLookup(lookupMap);
+        }
+      })
+      .catch(err => {
+        console.error('Error fetching order types:', err);
+        setOrderTypeOpts([]);
+      });
+  }, []);
 
   // On edit: retrieve the saved header Additional Information (EFF) and prefill
   // the segment inputs so the change order re-sends / updates them.
@@ -5159,6 +5548,58 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   };
   const onWh = (code: string) => { form.setFieldsValue({ subinventory: undefined }); loadSubs(code); syncHdr(); };
   const onCustomer = (name: string, opt: any) => { const row = opt?._c ?? customers.find(c => custName(c) === name); if (row) { const fill = customerFill(row); form.setFieldsValue(fill); setHdr(prev => ({ ...prev, ...fill })); } };
+  const onCustomerBipSelect = (customer: CustomerSearchResult) => {
+    const fill = convertBipCustomerToFill(customer);
+    form.setFieldsValue(fill);
+    setHdr(prev => ({ ...prev, ...fill }));
+  };
+
+  const onBranchBUChange = (buName: string) => {
+    const bu = bUnits.find(b => b.businessUnitName === buName);
+    if (bu) {
+      const baseCcy = pf(bu, ['paymentCurrency', 'ledgerCurrency', 'invoiceCurrency']);
+      setBranchBUData({ baseCurrency: baseCcy });
+      branchSalesForm.setFieldsValue({ currency: baseCcy });
+
+      // Filter inventory orgs by Business Unit ID — try multiple field name variations
+      const filteredOrgs = orgRows.filter((o: any) => {
+        const orgBuId = pf(o, ['BusinessUnitId', 'business_unit_id', 'bu_id', 'BUId']);
+        return orgBuId === bu.businessUnitId || orgBuId === String(bu.businessUnitId);
+      });
+      console.log('Branch BU Change:', { buName, bu, orgRowsCount: orgRows.length, filteredOrgsCount: filteredOrgs.length, filteredOrgs });
+      setBranchShipToOrgs(filteredOrgs);
+
+      setBranchPoNeedByDate(dayjs().add(7, 'days'));
+    }
+  };
+
+  const fetchBranchSuppliers = useCallback(async (term: string) => {
+    if (!term || term.length < 2) {
+      setBranchSuppliers([]);
+      return;
+    }
+    try {
+      const url = `${FUSION_BASE}/suppliers?q=SupplierName LIKE '%${term}%' OR SupplierNumber LIKE '%${term}%'&limit=30`;
+      const r = await fetch(url, { headers: FUSION_HDRS });
+      if (r.ok) {
+        const data = await r.json();
+        setBranchSuppliers(data.items ?? []);
+      } else {
+        console.error('Supplier search failed:', r.status);
+      }
+    } catch (e) {
+      console.error('Failed to fetch suppliers:', e);
+    }
+  }, []);
+
+  const onOrderTypeChange = (orderTypeCode: string) => {
+    const lookupDetail = orderTypeLookup.get(orderTypeCode);
+    const isBranch = lookupDetail && lookupDetail.Tag === 'BRANCH SALES';
+    setIsBranchSales(isBranch);
+    if (isBranch) {
+      message.info('⚠️ This is a Branch Sales order. Additional branch details will be required after saving.');
+    }
+  };
 
   const addItems = (items: any[]) => {
     setLines(prev => {
@@ -5637,9 +6078,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       SourceTransactionId: srcId,
       ...(revision != null ? { SourceTransactionRevisionNumber: revision } : {}),
       TransactionalCurrencyCode: hdr.txnCurrency,
-      ...(hdr.rate != null ? { CurrencyConversionRate: Number(hdr.rate) } : {}),
-      ...(hdr.currencyRateType ? { CurrencyConversionType: hdr.currencyRateType } : {}),
-      ...(hdr.currencyDate ? { CurrencyConversionDate: hdr.currencyDate.format('YYYY-MM-DD') } : {}),
+      ...(hdr.rate != null ? {
+        CurrencyConversionRate: Number(hdr.rate),
+        CurrencyConversionType: hdr.currencyRateType || 'User',
+        CurrencyConversionDate: hdr.currencyDate ? hdr.currencyDate.format('YYYY-MM-DD[T]00:00:00[Z]') : dateIso
+      } : {}),
       ...(hdr.businessUnitId != null ? { BusinessUnitId: numOrStr(hdr.businessUnitId) } : {}),
       ...(hdr.accountNumber ? { BuyingPartyNumber: hdr.accountNumber } : {}),
       RequestedShipDate: dateIso,
@@ -5652,6 +6095,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       ...(hdr.businessUnitId != null ? { RequestingBusinessUnitId: numOrStr(hdr.businessUnitId) } : {}),
       ...(hdr.paymentTerms ? { PaymentTerms: hdr.paymentTerms } : {}),
       ...(hdr.warehouse ? { RequestedFulfillmentOrganizationCode: hdr.warehouse } : {}),
+      ...(hdr.customerPONumber ? { CustomerPONumber: hdr.customerPONumber } : {}),
       billToCustomer: [{
         ...(hdr.custAccountId != null ? { CustomerAccountId: numOrStr(hdr.custAccountId) } : {}),
         ...(hdr.billToSite != null ? { SiteUseId: numOrStr(hdr.billToSite) } : {}),
@@ -5887,7 +6331,17 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         if (hdr.orderType && orderTypeLookup.get(hdr.orderType)?.Tag === 'BRANCH SALES' && !editMode) {
           setSavedOrderNumber(String(data.OrderNumber));
           branchSalesForm.resetFields();
-          branchSalesForm.setFieldsValue({ currency: hdr.txnCurrency });
+          const needByDate = dayjs().add(7, 'days');
+          const branchBU = form.getFieldValue('branchBU');
+          branchSalesForm.setFieldsValue({
+            currency: hdr.txnCurrency,
+            needByDate,
+            branchBusinessUnit: branchBU
+          });
+          if (branchBU) {
+            onBranchBUChange(branchBU);
+          }
+          setBranchPoNeedByDate(needByDate);
           setBranchSalesModalOpen(true);
         }
       } else {
@@ -5998,44 +6452,91 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const createBranchPO = async () => {
     if (!savedOrderNumber) return;
     const branchBU = branchSalesForm.getFieldValue('branchBusinessUnit');
-    const branchSupplierId = branchSalesForm.getFieldValue('branchSupplierId');
-    const branchSupplierName = branchSalesForm.getFieldValue('branchSupplierName');
+    const branchSupplier = branchSalesForm.getFieldValue('branchSupplierName');
     const shipToLoc = branchSalesForm.getFieldValue('shipToLocation');
     const currency = branchSalesForm.getFieldValue('currency');
+    const needByDate = branchSalesForm.getFieldValue('needByDate');
 
-    if (!branchBU || (!branchSupplierId && !branchSupplierName) || !shipToLoc) {
-      message.error('Please fill in all Branch Sales fields (Business Unit, Supplier, Location)');
+    if (!branchBU || !branchSupplier || !shipToLoc) {
+      message.error('Please fill in all Branch Sales fields');
       return;
     }
 
     setCreatingBranchPO(true);
     try {
-      // Build PO line items from SO lines
+      // Get Business Unit ID for the selected branch BU
+      const buRow = bUnits.find(b => b.businessUnitName === branchBU);
+      const procBUId = buRow?.businessUnitId;
+      if (!procBUId) {
+        message.error('Could not find Business Unit ID for selected branch');
+        return;
+      }
+
+      // Build PO line items with proper Fusion structure
       const poLines = lines
         .filter(l => l.itemNumber && num(l.qty) > 0)
-        .map((l, idx) => ({
-          LineNumber: idx + 1,
-          ItemNumber: l.itemNumber,
-          Quantity: num(l.qty),
-          UnitOfMeasure: l.uom || 'EA',
-          UnitPrice: num(l.unitPrice),
-          Description: l.description,
-        }));
+        .map((l, idx) => {
+          const orgObj = orgRows.find(o => pf(o, ['OrganizationCode']) === shipToLoc);
+          return {
+            LineNumber: idx + 1,
+            LineType: 'Goods',
+            Item: l.itemNumber,
+            Description: l.description,
+            Quantity: num(l.qty),
+            Price: num(l.unitPrice),
+            UOM: l.uom || 'EA',
+            schedules: [{
+              ScheduleNumber: 1,
+              Quantity: num(l.qty),
+              ShipToLocation: shipToLoc,
+              ShipToOrganizationCode: shipToLoc,
+              ShipToOrganization: pf(orgObj, ['OrganizationName']),
+              RequestedDeliveryDate: (needByDate || branchPoNeedByDate).format('YYYY-MM-DD'),
+              ReceiptCloseTolerancePercent: 0,
+              InvoiceMatchOptionCode: 'P',
+              InvoiceMatchOption: 'Order',
+              EarlyReceiptToleranceDays: 0,
+              InvoiceCloseTolerancePercent: 0,
+              LateReceiptToleranceDays: 0,
+              AccrueAtReceiptFlag: true,
+              InspectionRequiredFlag: true,
+              ReceiptRequiredFlag: false,
+              ReceiptRoutingId: 3,
+              ReceiptRouting: 'Direct delivery',
+              DestinationTypeCode: 'INVENTORY',
+              MatchApprovalLevelCode: '3-Way',
+              MatchApprovalLevel: '3 Way',
+              distributions: [{
+                DistributionNumber: 1,
+                DeliverToLocation: shipToLoc,
+                DeliverToLocationCode: shipToLoc,
+                Quantity: num(l.qty),
+              }],
+            }],
+          };
+        });
 
-      // Build PO header payload
+      // Build PO header payload with correct Fusion structure
       const poPayload = {
-        SourceTransactionNumber: savedOrderNumber,
-        SourceTransactionSystem: 'OPS',
-        OrderType: 'Standard',
-        BusinessUnit: branchBU,
-        ...(branchSupplierId ? { SupplierId: branchSupplierId } : { SupplierName: branchSupplierName }),
-        ReceivingLocationCode: shipToLoc,
-        TransactionalCurrencyCode: currency,
-        Lines: poLines,
+        ProcurementBUId: procBUId,
+        OrderNumber: `BRNS-${savedOrderNumber}`,
+        RequiredAcknowledgment: 'None',
+        CurrencyCode: currency,
+        ConversionRateType: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'User') : null,
+        ConversionRateTypeCode: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'User') : null,
+        ConversionRate: hdr.rate && hdr.rate !== 1 ? num(hdr.rate) : null,
+        ConversionRateDate: hdr.currencyDate ? hdr.currencyDate.format('YYYY-MM-DD') : null,
+        Supplier: branchSupplier,
+        DefaultShipToLocation: shipToLoc,
+        PayOnReceiptFlag: 'N',
+        BuyerManagedTransportFlag: false,
+        lines: poLines,
       };
 
-      // POST to purchase order creation endpoint
-      const url = `${FUSION_BASE}/purchaseOrders`;
+      setBranchPoPayload(JSON.stringify(poPayload, null, 2));
+
+      // POST to draft purchase order creation endpoint
+      const url = `${FUSION_BASE}/draftPurchaseOrders`;
       const r = await fetch(url, {
         method: 'POST',
         headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
@@ -6046,16 +6547,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       let data: any = null;
       try { data = JSON.parse(text); } catch { /* raw */ }
 
-      setLastPoResponse({
-        success: r.ok,
-        error: r.ok ? undefined : (collectOrderErrors(data, text, true) || [`HTTP ${r.status}`])[0],
-        url,
-        body: poPayload,
-        response: data,
-      });
-
       if (r.ok && data) {
-        message.success(`Branch Purchase Order created successfully`);
+        const poNum = data.OrderNumber || data.PurchaseOrderNumber || `BRNS-${savedOrderNumber}`;
+        setCreatedPONumber(poNum);
+        message.success(`Branch Purchase Order ${poNum} created successfully`);
         setBranchSalesModalOpen(false);
         branchSalesForm.resetFields();
         setSavedOrderNumber(null);
@@ -6064,9 +6559,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         message.error(`Failed to create Branch PO: ${err.join(', ')}`);
       }
     } catch (e: any) {
-      const errMsg = e?.message || 'Failed to create Branch PO';
-      setLastPoResponse({ success: false, error: errMsg });
-      message.error(`Network error: ${errMsg}`);
+      message.error(`Network error: ${e?.message || 'Failed to create Branch PO'}`);
     } finally {
       setCreatingBranchPO(false);
     }
@@ -6429,7 +6922,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           <Tag color="geekblue" style={{ fontVariantNumeric: 'tabular-nums' }}>{editMode ? (editOrder?.OrderNumber ?? orderNumber) : orderNumber}</Tag>
           {editMode
             ? (() => { const s = String(orderStatus || pf(editOrder, ['StatusCode', 'Status']) || 'DOO_DRAFT').replace(/^DOO_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); return <Tag color={isDraftStatus ? 'gold' : 'green'} style={{ fontWeight: 600 }}>Status: {s}</Tag>; })()
-            : <><Tag color="purple">{hdr.orderType}</Tag><Tag>{hdr.txnCurrency}</Tag></>}</Space>}
+            : <><Tag color="purple">{hdr.orderType}</Tag><Tag>{hdr.txnCurrency}</Tag>{isBranchSales && hdr.branchBU && <Tag color="orange">{hdr.businessUnit} → {hdr.branchBU}</Tag>}</> }</Space>}
         extra={<Space>
           {/* Refresh — re-pull the whole order (lines, charges, tax, totals) from Fusion */}
           {editMode && <Button icon={<ReloadOutlined />} loading={refreshing} onClick={refreshOrder} style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}>Refresh</Button>}
@@ -6463,6 +6956,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}>Auto Shipconfirm</Button>}
             {!returnMode && anyAwaitingBilling && <Button icon={<DollarOutlined />} onClick={() => setAutoInvoiceOpen(true)}
               style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary }}>Create AR Invoice</Button>}
+            {isBranchSales && isDraftStatus && <Button icon={<ShoppingOutlined />} onClick={() => { setSavedOrderNumber(createdOrderNumber || orderNumber); setBranchSalesModalOpen(true); }}
+              style={{ borderColor: REDWOOD.teal, color: REDWOOD.teal }}>Create Branch PO</Button>}
             {/* Order Actions — Discard Draft (draft only) / Cancel Order (processing) */}
             {(editMode || !!createdOrderKey) && (
               <Dropdown trigger={['click']} disabled={orderActionBusy} menu={{ items: [
@@ -6479,24 +6974,6 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         <Form form={form} layout="horizontal" size="small" labelAlign="left" colon labelWrap
           labelCol={{ flex: '0 0 104px' }} wrapperCol={{ flex: '1 1 auto' }}
           onValuesChange={(_c, all) => setHdr(prev => ({ ...prev, ...all }))}>
-          {isBranchSales && (
-            <div style={{
-              background: '#fff7e6',
-              border: `2px solid ${REDWOOD.warning}`,
-              borderRadius: 8,
-              padding: '12px 16px',
-              marginBottom: 16,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12
-            }}>
-              <ShoppingOutlined style={{ fontSize: 20, color: REDWOOD.warning }} />
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.warning }}>🔖 BRANCH SALES ORDER</div>
-                <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 2 }}>After saving, you'll be prompted to create a linked Purchase Order with BRNS- prefix</div>
-              </div>
-            </div>
-          )}
           <Tabs size="small" items={[
             {
               key: 'header', label: <span><BankOutlined style={{ marginRight: 5 }} />Header</span>,
@@ -6504,7 +6981,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                 <Row gutter={[12, 12]} align="stretch">
                   {/* S1 — Order. In edit mode everything is locked; the pencil (draft
                       only) unlocks just Order Date + Order Type, saved via header PATCH. */}
-                  <Col xs={24} sm={12} md={5}><VSection icon={<BankOutlined />} title="Order" color={REDWOOD.primary}>
+                  <Col xs={24} sm={12} md={8}><VSection icon={<BankOutlined />} title="Order" color={REDWOOD.primary}>
                     {editMode && (
                       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
                         {!isDraftStatus
@@ -6533,14 +7010,34 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                         options={orderTypeOpts}
                       />
                     </Form.Item>
+                    <Form.Item label="Customer PO" name="customerPONumber" style={{ marginBottom: 10 }}><Input placeholder="Customer PO number" disabled={editMode && !hdrUnlocked} /></Form.Item>
+                    {isBranchSales && (
+                      <>
+                        <Form.Item label="Branch BU" name="branchBU" rules={[{ required: true, message: 'Select a branch BU' }]} style={{ marginBottom: 10, marginTop: 10 }}>
+                          <Select
+                            showSearch
+                            placeholder="Select Branch Business Unit"
+                            optionFilterProp="label"
+                            options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))}
+                          />
+                        </Form.Item>
+                        <div style={{ fontSize: 12, color: REDWOOD.warning, fontWeight: 500, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <ShoppingOutlined style={{ fontSize: 14 }} />
+                          <span>🔖 Branch Sales — will create linked PO with BRNS- prefix</span>
+                        </div>
+                      </>
+                    )}
                   </VSection></Col>
 
                   {/* S2 — Customer Information. Customer is locked in edit mode (a DOO
                       order's buying party can't be changed via REST). */}
-                  <Col xs={24} sm={12} md={9}><VSection icon={<ProfileOutlined />} title="Customer Information" color={REDWOOD.info}>
-                    <Form.Item label="Customer Name" name="customerName" layout="vertical" labelCol={{ span: 24 }} wrapperCol={{ span: 24 }} style={{ marginBottom: hdr.customerName ? 2 : 10 }}>
-                      <Select showSearch placeholder="Search customer" onChange={onCustomer} optionFilterProp="label" options={custOptions} disabled={editMode} notFoundContent={customers.length ? 'No match' : 'Loading…'} /></Form.Item>
-                    {hdr.customerName && <div style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info, whiteSpace: 'normal', lineHeight: 1.35, margin: '0 0 10px' }}>{hdr.customerName}</div>}
+                  <Col xs={24} sm={12} md={5}><VSection icon={<ProfileOutlined />} title="Customer Information" color={REDWOOD.info}>
+                    <Form.Item label="Customer Name" name="customerName" layout="vertical" labelCol={{ span: 24 }} wrapperCol={{ span: 24 }} style={{ marginBottom: 10 }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                        <Input readOnly placeholder="Select a customer" value={hdr.customerName || ''} style={{ flex: 1 }} />
+                        <Button type="primary" icon={<SearchOutlined />} onClick={() => setCustSearchModalOpen(true)} disabled={!hdr.businessUnit} title={hdr.businessUnit ? "Search Customer (BIP)" : "Select Business Unit first"} style={{ background: REDWOOD.info, borderColor: REDWOOD.info }} />
+                      </div>
+                    </Form.Item>
                     <Form.Item label="Cust Number" name="accountNumber" style={{ marginBottom: 10 }}><Input readOnly placeholder="—" /></Form.Item>
                     <Form.Item label="Payment Terms" name="paymentTerms" style={{ marginBottom: 10 }}>
                       <Select showSearch optionFilterProp="label" options={payTermOpts} disabled={editMode} /></Form.Item>
@@ -6565,7 +7062,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                   </VSection></Col>
 
                   {/* S3 — Warehouse */}
-                  <Col xs={24} sm={12} md={4}><VSection icon={<ShoppingOutlined />} title="Warehouse" color={REDWOOD.teal}>
+                  <Col xs={24} sm={12} md={5}><VSection icon={<ShoppingOutlined />} title="Warehouse" color={REDWOOD.teal}>
                     <Form.Item label={<WarehouseLabel />} name="warehouse" style={{ marginBottom: 10 }}>
                       <Select showSearch placeholder={buName ? 'Organization' : 'Select BU first'} onChange={onWh} options={whOptions} optionFilterProp="label" /></Form.Item>
                     <Form.Item label="Sub Inventory" name="subinventory" style={{ marginBottom: 10 }}>
@@ -7366,148 +7863,221 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
       {/* Branch Sales Modal — capture branch details and create PO */}
       <Modal open={branchSalesModalOpen} onCancel={() => { setBranchSalesModalOpen(false); branchSalesForm.resetFields(); setSavedOrderNumber(null); }}
-        maskClosable={false} width={700} title={<Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /> Create Branch Purchase Order</Space>}
+        maskClosable={false} width={1100} title={<Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /> Create Branch Purchase Order (BRNS) — Sales Order {savedOrderNumber}</Space>}
         footer={<Space>
+          <Button icon={<ApiOutlined />} onClick={() => setBranchApiDrawerOpen(true)}>View API</Button>
           <Button onClick={() => { setBranchSalesModalOpen(false); branchSalesForm.resetFields(); setSavedOrderNumber(null); }}>Cancel</Button>
-          <Button icon={<ApiOutlined />} onClick={() => setPoApiDrawerOpen(true)} title="View PO API details">API Inspector</Button>
           <Button type="primary" loading={creatingBranchPO} onClick={createBranchPO} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}>
-            Create Purchase Order
+            Create Branch PO
           </Button>
         </Space>}>
         <div style={{ marginBottom: 16, padding: '12px 16px', background: '#E6F7FF', borderRadius: 6, border: `1px solid ${REDWOOD.info}` }}>
           <Text style={{ fontSize: 12, color: REDWOOD.info }}>
-            Sales Order <Text code strong>{savedOrderNumber}</Text> is a Branch Sales order. Create a linked Purchase Order below. PO will reference this SO as source transaction.
+            Sales Order <Text code strong>{savedOrderNumber}</Text> is a Branch Sales order. Auto-create a Purchase Order with the BRNS prefix below.
           </Text>
         </div>
         <Form form={branchSalesForm} layout="vertical" size="middle">
-          <Form.Item label="Branch Business Unit" name="branchBusinessUnit" rules={[{ required: true, message: 'Select a business unit' }]}>
-            <Select showSearch placeholder="Select Branch Business Unit" optionFilterProp="label"
-              options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} />
-          </Form.Item>
-          <Row gutter={8}>
-            <Col span={16}>
-              <Form.Item label="Supplier" name="branchSupplierName" rules={[{ required: true, message: 'Select or enter supplier' }]}>
-                <AutoComplete
-                  placeholder="Search supplier by name..."
-                  options={branchSupplierOpts}
-                  onSearch={(val) => {
-                    if (val && val.length >= 2) {
-                      fetch(`${FUSION_BASE}/suppliers?q=SupplierName="${encodeURIComponent(val)}"&limit=10&onlyData=true`, { headers: FUSION_HDRS })
-                        .then(r => r.ok ? r.json() : Promise.reject())
-                        .then(d => setBranchSupplierOpts((d.items ?? []).map((s: any) => ({ label: `${pf(s, ['SupplierName'])}`, value: pf(s, ['SupplierName']), id: pf(s, ['SupplierId']) }))))
-                        .catch(() => setBranchSupplierOpts([]));
-                    }
-                  }}
-                  filterOption={false}
-                  onSelect={(val, opt: any) => {
-                    branchSalesForm.setFieldValue('branchSupplierId', opt.id);
-                  }}
-                />
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label="Branch Business Unit" name="branchBusinessUnit" rules={[{ required: true, message: 'Select a business unit' }]}>
+                <Select showSearch placeholder="Select Branch Business Unit" optionFilterProp="label"
+                  onChange={(buName) => onBranchBUChange(buName)}
+                  options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} />
               </Form.Item>
             </Col>
-            <Col span={8}>
-              <Form.Item label="Supplier ID" name="branchSupplierId" style={{ marginBottom: 0 }}>
-                <Input placeholder="Auto-filled" readOnly size="small" />
+            <Col span={12}>
+              <Form.Item label="Currency" name="currency">
+                <Input readOnly suffix={branchBUData.baseCurrency ? `(Base: ${branchBUData.baseCurrency})` : ''} />
               </Form.Item>
             </Col>
           </Row>
+          <Form.Item label={<span>Branch Supplier <SearchOutlined style={{ color: REDWOOD.info, marginLeft: 4 }} /></span>} name="branchSupplierName" rules={[{ required: true, message: 'Select a supplier' }]}>
+            <Select showSearch placeholder="Search supplier by name..." optionFilterProp="label" allowClear
+              onSearch={(term) => fetchBranchSuppliers(term)}
+              notFoundContent={branchSuppliers.length === 0 ? 'Type to search suppliers...' : undefined}
+              options={branchSuppliers.map(s => ({
+                value: s.Supplier ?? s.SupplierName ?? s.SupplierNumber,
+                label: `${s.Supplier ?? s.SupplierName ?? 'Unknown'}${s.SupplierNumber ? ` (${s.SupplierNumber})` : ''}`
+              }))} />
+          </Form.Item>
           <Form.Item label="Ship-To Location (Inventory Org)" name="shipToLocation" rules={[{ required: true, message: 'Select a location' }]}>
-            <Select showSearch placeholder="Select Ship-To Location" optionFilterProp="label"
-              options={orgRows.map((o: any) => ({ value: pf(o, ['OrganizationCode']), label: `${pf(o, ['OrganizationCode'])}${pf(o, ['OrganizationName']) ? ' — ' + pf(o, ['OrganizationName']) : ''}` }))} />
+            <Select showSearch placeholder="Select Ship-To Location" optionFilterProp="label" allowClear
+              options={branchShipToOrgs.map((o: any) => ({ value: pf(o, ['OrganizationCode']), label: `${pf(o, ['OrganizationCode'])}${pf(o, ['OrganizationName']) ? ' — ' + pf(o, ['OrganizationName']) : ''}` }))} />
           </Form.Item>
-          <Form.Item label="Currency" name="currency">
-            <Input readOnly />
+          <Form.Item label="Need-By Date" name="needByDate" rules={[{ required: true, message: 'Select need-by date' }]}>
+            <DatePicker value={branchPoNeedByDate} onChange={(date) => setBranchPoNeedByDate(date)} />
           </Form.Item>
-          <Form.Item>
-            <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginTop: 12 }}>
-              <Text type="secondary">
-                The PO will include {lines.filter(l => l.itemNumber && num(l.qty) > 0).length} line item{lines.filter(l => l.itemNumber && num(l.qty) > 0).length !== 1 ? 's' : ''} from this Sales Order with the same item codes, quantities, and unit prices.
-              </Text>
-            </div>
-          </Form.Item>
+
+          <Divider>Line Items from Sales Order</Divider>
+
+          <div style={{ marginBottom: 16, maxHeight: '300px', overflowY: 'auto' }}>
+            <Table
+              size="small"
+              rowKey="key"
+              dataSource={lines.filter(l => l.itemNumber && num(l.qty) > 0)}
+              pagination={false}
+              columns={[
+                { title: 'Item', dataIndex: 'itemNumber', width: 100 },
+                { title: 'Description', dataIndex: 'description', ellipsis: true },
+                { title: 'Qty', dataIndex: 'qty', width: 70, align: 'right', render: (v: any) => fmtQty(num(v)) },
+                { title: 'UOM', dataIndex: 'uom', width: 60 },
+                { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v: any) => fmtAmount(num(v), hdr.txnCurrency) },
+                {
+                  title: 'Line Total',
+                  width: 120,
+                  align: 'right',
+                  render: (_: any, record: any) => {
+                    const lineTot = num(record.qty) * num(record.unitPrice);
+                    return fmtAmount(lineTot, hdr.txnCurrency);
+                  }
+                },
+              ]}
+            />
+          </div>
+
+          <Row gutter={16} style={{ background: REDWOOD.neutral100, padding: '12px', borderRadius: '6px', marginBottom: '16px' }}>
+            <Col span={12}>
+              <div>
+                <Text style={{ fontSize: '12px', color: REDWOOD.neutral600 }}>Transaction Currency Total</Text>
+                <div style={{ fontSize: '16px', fontWeight: '700', color: REDWOOD.primary }}>
+                  {fmtAmount(lines.filter(l => l.itemNumber && num(l.qty) > 0).reduce((s, l) => s + (num(l.qty) * num(l.unitPrice)), 0), hdr.txnCurrency)}
+                </div>
+              </div>
+            </Col>
+            <Col span={12}>
+              <div>
+                <Text style={{ fontSize: '12px', color: REDWOOD.neutral600 }}>Base Currency (Conversion Rate: {num(hdr.rate).toFixed(4)})</Text>
+                <div style={{ fontSize: '16px', fontWeight: '700', color: REDWOOD.success }}>
+                  {fmtAmount(
+                    lines.filter(l => l.itemNumber && num(l.qty) > 0).reduce((s, l) => s + (num(l.qty) * num(l.unitPrice)), 0) * (num(hdr.rate) || 1),
+                    branchBUData.baseCurrency || hdr.baseCurrency
+                  )}
+                </div>
+              </div>
+            </Col>
+          </Row>
         </Form>
       </Modal>
 
-      {/* PO API Inspector Drawer */}
+      {/* Branch PO API Drawer */}
       <Drawer
-        title="PO API Inspector — Branch Purchase Order"
+        title="API Inspector - Branch Purchase Order"
         placement="right"
-        onClose={() => setPoApiDrawerOpen(false)}
-        open={poApiDrawerOpen}
+        onClose={() => setBranchApiDrawerOpen(false)}
+        open={branchApiDrawerOpen}
         width={600}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div>
-            <Paragraph>
-              <Text strong>Endpoint:</Text>
-            </Paragraph>
-            <div style={{ background: '#f5f5f5', padding: '8px', borderRadius: '4px', wordBreak: 'break-all', fontFamily: 'monospace', fontSize: '11px' }}>
-              <b>POST</b> {`${FUSION_BASE}/purchaseOrders`}
-            </div>
-          </div>
+            <Typography.Paragraph>
+              <Text strong>PO Payload (will be sent on Create):</Text>
+            </Typography.Paragraph>
+            {(() => {
+              try {
+                const branchBU = branchSalesForm.getFieldValue('branchBusinessUnit');
+                const branchSupplier = branchSalesForm.getFieldValue('branchSupplierName');
+                const shipToLoc = branchSalesForm.getFieldValue('shipToLocation');
+                const currency = branchSalesForm.getFieldValue('currency');
 
-          <Divider />
+                if (!branchBU || !branchSupplier || !shipToLoc) {
+                  return <div style={{ background: '#f5f5f5', padding: '12px', borderRadius: '4px', color: '#999' }}>
+                    Fill in required fields to preview PO payload
+                  </div>;
+                }
 
-          <div>
-            <Paragraph>
-              <Text strong>Request Payload:</Text>
-            </Paragraph>
-            {lastPoResponse?.body ? (
-              <pre style={{ background: '#f5f5f5', padding: '12px', borderRadius: '4px', maxHeight: '300px', overflow: 'auto', fontSize: '11px', fontFamily: 'monospace', lineHeight: '1.4' }}>
-                {JSON.stringify(lastPoResponse.body, null, 2)}
-              </pre>
-            ) : (
-              <div style={{ background: '#f5f5f5', padding: '12px', borderRadius: '4px', color: '#999' }}>
-                Request payload will appear here after creation attempt
-              </div>
-            )}
-            {lastPoResponse?.body && (
-              <Button size="small" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(JSON.stringify(lastPoResponse.body, null, 2)); message.success('Copied'); }} style={{ marginTop: '8px' }}>
+                const poLines = lines
+                  .filter(l => l.itemNumber && num(l.qty) > 0)
+                  .map((l, idx) => ({
+                    LineNumber: idx + 1,
+                    ItemNumber: l.itemNumber,
+                    Quantity: num(l.qty),
+                    UnitOfMeasure: l.uom || 'EA',
+                    UnitPrice: num(l.unitPrice),
+                    Description: l.description,
+                  }));
+
+                const poPayload = {
+                  OrderNumber: `BRNS-${savedOrderNumber}`,
+                  OrderType: 'Standard',
+                  BusinessUnit: branchBU,
+                  SupplierName: branchSupplier,
+                  ReceivingLocationCode: shipToLoc,
+                  TransactionalCurrencyCode: currency,
+                  Lines: poLines,
+                };
+
+                const payload = JSON.stringify(poPayload, null, 2);
+                setBranchPoPayload(payload);
+
+                return <pre
+                  style={{
+                    background: '#f5f5f5',
+                    padding: '12px',
+                    borderRadius: '4px',
+                    maxHeight: '400px',
+                    overflow: 'auto',
+                    fontSize: '11px',
+                    fontFamily: 'monospace',
+                    lineHeight: '1.4',
+                  }}
+                >
+                  {payload}
+                </pre>;
+              } catch (e) {
+                return <div style={{ background: '#fff1f0', padding: '12px', borderRadius: '4px', color: '#d93025' }}>
+                  Error building payload: {String(e)}
+                </div>;
+              }
+            })()}
+            {branchPoPayload && (
+              <Button
+                size="small"
+                icon={<CopyOutlined />}
+                onClick={() => {
+                  navigator.clipboard.writeText(branchPoPayload);
+                  message.success('Payload copied to clipboard');
+                }}
+                style={{ marginTop: '8px' }}
+              >
                 Copy Payload
               </Button>
             )}
           </div>
 
-          {lastPoResponse && (
-            <>
-              <Divider />
-              <div>
-                <Paragraph>
-                  <Text strong>Response:</Text>
-                </Paragraph>
-                {lastPoResponse.success ? (
-                  <div>
-                    <Tag color="green">Success</Tag>
-                    <Paragraph style={{ marginTop: '8px' }}>
-                      <Text type="secondary">Response data:</Text>
-                    </Paragraph>
-                    <pre style={{ background: '#f5f5f5', padding: '8px', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace', maxHeight: '200px', overflow: 'auto' }}>
-                      {JSON.stringify(lastPoResponse.response, null, 2)}
-                    </pre>
-                  </div>
-                ) : (
-                  <div>
-                    <Tag color="red">Error</Tag>
-                    <Paragraph style={{ marginTop: '8px' }}>
-                      <Text type="secondary">{lastPoResponse.error}</Text>
-                    </Paragraph>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+          <Divider />
+
+          <div>
+            <Typography.Paragraph>
+              <Text strong>Endpoint:</Text>
+            </Typography.Paragraph>
+            <div style={{ background: '#f5f5f5', padding: '8px', borderRadius: '4px', wordBreak: 'break-all', fontFamily: 'monospace', fontSize: '12px' }}>
+              POST {FUSION_BASE}/purchaseOrders
+            </div>
+          </div>
         </div>
       </Drawer>
 
+      <CustomerSearchBipModal
+        open={custSearchModalOpen}
+        onClose={() => setCustSearchModalOpen(false)}
+        onSelect={onCustomerBipSelect}
+        businessUnitId={hdr.businessUnitId?.toString()}
+        businessUnitName={hdr.businessUnit}
+        soapBaseUrl={`${getFusionInstance().host}/xmlpserver/services/v2/ReportService`}
+        username={getFusionInstance().username}
+        password={getFusionInstance().password}
+      />
     </div>
   );
 };
 
 const SalesOrders: React.FC = () => {
+  console.log('SalesOrders component rendering...');
   const [openTabs, setOpenTabs] = useState<{ key: string; order: any }[]>([]);
   const [newTabs, setNewTabs] = useState<{ key: string; header: OrderHeader; draft?: SoDraft; editOrder?: any; returnMode?: boolean }[]>([]);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [activeKey, setActiveKey] = useState('search');
+  console.log('SalesOrders: State initialized');
 
   const openOrder = useCallback((order: any) => {
     const key = String(order.OrderKey ?? order.HeaderId ?? order.OrderNumber);
