@@ -5166,6 +5166,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [orderTypeOpts, setOrderTypeOpts] = useState<any[]>([]);
   const [orderTypeLookup, setOrderTypeLookup] = useState<Map<string, any>>(new Map());
   const [inventoryTransactionFlag, setInventoryTransactionFlag] = useState<boolean>(false);
+  const [arTxn, setArTxn] = useState<string | null>(null);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   // Edit mode: the raw Fusion order lines (with child links) for the Billing /
   // Actual Costing tabs (the grid uses a simplified NewLine shape).
@@ -7823,7 +7824,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               }] : []),
               ...(editMode && rawLines.length && billingChildName ? [{
                 key: 'billing', label: vTab(<ProfileOutlined />, 'Billing', REDWOOD.teal ?? '#00918A'),
-                children: <MergedLineChildTab lines={rawLines} name={billingChildName} />,
+                children: <MergedLineChildTab lines={rawLines} name={billingChildName} overrides={[{
+                  match: ['billingtransactionnumber', 'billingtrxnumber', 'billingtransactionnum'],
+                  render: (v: any) => v
+                    ? <Tooltip title="Open AR invoice"><Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12 }} onClick={() => setArTxn(String(v))}>{v}</Button></Tooltip>
+                    : '—'
+                }]} />,
               }] : []),
               // Edit mode: Sales Credits + Notes & Attachments (order-level children).
               ...(editMode && (editOrder?.OrderKey ?? editOrder?.HeaderId) != null ? [{
@@ -8632,6 +8638,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         username={getFusionInstance().username}
         password={getFusionInstance().password}
       />
+      <ARInvoiceDialog txn={arTxn} onClose={() => setArTxn(null)} />
     </div>
   );
 };
