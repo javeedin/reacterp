@@ -4061,15 +4061,8 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
     form.setFieldsValue({ orderType: 'LSO01', rate: 1, orderDate: dayjs() });
     setSubs([]);
     setIsBranchSales(false);
-    setInventoryTransactionFlag(true);
+    setInventoryTransactionFlag(false);
   }, [open, form]);
-
-  // Update inventoryTransactionFlag when isBranchSales changes (default true for branch sales)
-  useEffect(() => {
-    if (isBranchSales) {
-      setInventoryTransactionFlag(true);
-    }
-  }, [isBranchSales]);
 
   useEffect(() => {
     // Fetch order types from standardLookups
@@ -4279,10 +4272,10 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
             <Select showSearch disabled={!buName} placeholder={buName ? 'Organization' : 'Select BU first'} size="small" onChange={onWarehouse} options={whOptions} optionFilterProp="label" /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Sub Inventory" name="subinventory" rules={inventoryTransactionFlag && isBranchSales ? req('Subinventory required for inventory transactions') : undefined} style={{ marginBottom: 8 }}>
             <Select showSearch disabled={!buName} placeholder="Subinventory" size="small" notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Inventory Transaction" name="inventoryTransactionFlag" style={{ marginBottom: 8 }}>
+          <Col xs={12} md={6}><Form.Item label={<Tooltip title="Enable only if your Fusion instance is configured for direct inventory transactions with appropriate orchestration tasks"><span>Inventory Transaction</span></Tooltip>} name="inventoryTransactionFlag" style={{ marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <input type="checkbox" checked={inventoryTransactionFlag} onChange={(e) => setInventoryTransactionFlag(e.target.checked)} style={{ cursor: 'pointer' }} />
-              <span style={{ fontSize: 12, color: inventoryTransactionFlag ? REDWOOD.primary : REDWOOD.neutral600 }}>{inventoryTransactionFlag ? 'Direct inventory transaction' : 'Standard fulfillment flow'}</span>
+              <span style={{ fontSize: 12, color: inventoryTransactionFlag ? REDWOOD.primary : REDWOOD.neutral600 }}>{inventoryTransactionFlag ? 'Direct inventory transaction' : 'Standard fulfillment (recommended)'}</span>
             </div>
           </Form.Item></Col>
           <Col xs={24}><Form.Item label="Remarks" name="remarks" style={{ marginBottom: 0 }}><Input.TextArea disabled={!buName} rows={1} placeholder="Optional notes…" size="small" /></Form.Item></Col>
@@ -4999,7 +4992,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [branchPoNeedByDate, setBranchPoNeedByDate] = useState<any>(dayjs().add(7, 'days'));
   const [orderTypeOpts, setOrderTypeOpts] = useState<any[]>([]);
   const [orderTypeLookup, setOrderTypeLookup] = useState<Map<string, any>>(new Map());
-  const [inventoryTransactionFlag, setInventoryTransactionFlag] = useState<boolean>(true);
+  const [inventoryTransactionFlag, setInventoryTransactionFlag] = useState<boolean>(false);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   // Edit mode: the raw Fusion order lines (with child links) for the Billing /
   // Actual Costing tabs (the grid uses a simplified NewLine shape).
@@ -7379,10 +7372,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                       <Select showSearch placeholder={buName ? 'Organization' : 'Select BU first'} onChange={onWh} options={whOptions} optionFilterProp="label" /></Form.Item>
                     <Form.Item label="Sub Inventory" name="subinventory" rules={inventoryTransactionFlag && isBranchSales ? [{ required: true, message: 'Subinventory required for inventory transactions' }] : undefined} style={{ marginBottom: 10 }}>
                       <Select showSearch notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item>
-                    <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 8 }}>Inventory Transaction</div>
+                    <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 8 }}><Tooltip title="Enable only if your Fusion instance is configured for direct inventory transactions with appropriate orchestration tasks">Inventory Transaction</Tooltip></div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                       <input type="checkbox" checked={inventoryTransactionFlag} onChange={(e) => setInventoryTransactionFlag(e.target.checked)} style={{ cursor: 'pointer' }} />
-                      <span style={{ fontSize: 12, color: inventoryTransactionFlag ? REDWOOD.primary : REDWOOD.neutral600 }}>{inventoryTransactionFlag ? 'Direct inventory transaction' : 'Standard fulfillment flow'}</span>
+                      <span style={{ fontSize: 12, color: inventoryTransactionFlag ? REDWOOD.primary : REDWOOD.neutral600 }}>{inventoryTransactionFlag ? 'Direct inventory transaction' : 'Standard fulfillment (recommended)'}</span>
                     </div>
                     <Form.Item label="Base Currency" name="baseCurrency" style={{ marginBottom: 10 }}><Input readOnly placeholder="—" /></Form.Item>
                     <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 2 }}>Default Tax Code</div>
