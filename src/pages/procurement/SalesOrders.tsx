@@ -4249,7 +4249,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
           <Col xs={12} md={5}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')} style={{ marginBottom: 8 }}><DatePicker disabled={!buName} style={{ width: '100%' }} size="small" /></Form.Item></Col>
           {isBranchSales && (
             <Col xs={12} md={12}><Form.Item label="Branch Business Unit" name="branchBU" rules={req('Branch BU')} style={{ marginBottom: 0 }}>
-              <Select showSearch disabled={isBranchBUDisabled || !isDraftStatus} placeholder="Select Branch BU" size="small" optionFilterProp="label"
+              <Select showSearch disabled={!buName} placeholder="Select Branch BU" size="small" optionFilterProp="label"
                 options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item></Col>
           )}
         </Section>
