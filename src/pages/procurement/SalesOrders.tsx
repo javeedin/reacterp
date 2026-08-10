@@ -7948,15 +7948,22 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         <Form form={branchSalesForm} layout="vertical" size="middle">
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item label="Branch Business Unit" name="branchBusinessUnit" rules={[{ required: true, message: 'Select a business unit' }]}>
-                <Select showSearch placeholder="Select Branch Business Unit" optionFilterProp="label"
-                  onChange={(buName) => onBranchBUChange(buName)}
-                  options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} />
+              <Form.Item label="Sales Order Number" name="salesOrderNumber">
+                <Input readOnly value={savedOrderNumber || orderNumber || ''} />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item label="Currency" name="currency">
                 <Input readOnly suffix={branchBUData.baseCurrency ? `(Base: ${branchBUData.baseCurrency})` : ''} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label="Branch Business Unit" name="branchBusinessUnit" rules={[{ required: true, message: 'Select a business unit' }]}>
+                <Select disabled showSearch placeholder="Select Branch Business Unit" optionFilterProp="label"
+                  onChange={(buName) => onBranchBUChange(buName)}
+                  options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} />
               </Form.Item>
             </Col>
           </Row>
