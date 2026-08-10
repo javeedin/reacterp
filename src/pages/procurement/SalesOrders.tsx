@@ -5294,11 +5294,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           console.log('NewOrderTab: Setting businessUnit field to:', h.businessUnit);
           form.setFieldsValue({ businessUnit: h.businessUnit });
         }
+        // Populate branchBU if editing a branch sales order
+        if (h && h.branchBU && isBranchSales) {
+          console.log('NewOrderTab: Populating branchBU for edit mode:', h.branchBU);
+          form.setFieldsValue({ branchBU: h.branchBU });
+        }
       }
     } catch (e) {
       console.error('NewOrderTab: Error re-populating form:', e);
     }
-  }, [bUnits.length, form, header, initialDraft]);
+  }, [bUnits.length, form, header, initialDraft, isBranchSales]);
 
   // Update isBranchSales based on order type (initial load or change)
   useEffect(() => {
@@ -6992,7 +6997,17 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}>Auto Shipconfirm</Button>}
             {!returnMode && anyAwaitingBilling && <Button icon={<DollarOutlined />} onClick={() => setAutoInvoiceOpen(true)}
               style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary }}>Create AR Invoice</Button>}
-            {isBranchSales && isDraftStatus && <Button icon={<ShoppingOutlined />} onClick={() => { setSavedOrderNumber(createdOrderNumber || orderNumber); setBranchSalesModalOpen(true); }}
+            {isBranchSales && isDraftStatus && <Button icon={<ShoppingOutlined />} onClick={() => {
+              setSavedOrderNumber(createdOrderNumber || orderNumber);
+              branchSalesForm.setFieldsValue({
+                branchBusinessUnit: hdr.branchBU,
+                needByDate: dayjs().add(7, 'days')
+              });
+              if (hdr.branchBU) {
+                onBranchBUChange(hdr.branchBU);
+              }
+              setBranchSalesModalOpen(true);
+            }}
               style={{ borderColor: REDWOOD.teal, color: REDWOOD.teal }}>Create Branch PO</Button>}
             {/* Order Actions — Discard Draft (draft only) / Cancel Order (processing) */}
             {(editMode || !!createdOrderKey) && (
@@ -7933,7 +7948,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               <Button type="primary" icon={<SearchOutlined />} onClick={() => setBranchSupplierSearchOpen(true)} style={{ background: REDWOOD.info, borderColor: REDWOOD.info }} />
             </div>
           </Form.Item>
-          <Form.Item label={<span>Ship-To Location (Inventory Org) <Tooltip title={`Web Service: GET /organizations?q=BusinessUnitId EQ ${form.getFieldValue('branchBU') ? "'" + form.getFieldValue('branchBU') + "'" : 'N/A'}`}><ApiOutlined style={{ color: REDWOOD.info, marginLeft: 4, cursor: 'pointer' }} /></Tooltip></span>} name="shipToLocation" rules={[{ required: true, message: 'Select a location' }]}>
+          <Form.Item label={<span>Ship-To Location (Inventory Org) <Tooltip title={`Web Service: GET /inventoryOrganizations?q=BusinessUnitId EQ ${form.getFieldValue('branchBU') ? "'" + form.getFieldValue('branchBU') + "'" : 'N/A'}`}><ApiOutlined style={{ color: REDWOOD.info, marginLeft: 4, cursor: 'pointer' }} /></Tooltip></span>} name="shipToLocation" rules={[{ required: true, message: 'Select a location' }]}>
             <Select showSearch placeholder="Select Ship-To Location" optionFilterProp="label" allowClear
               options={branchShipToOrgs.map((o: any) => ({ value: pf(o, ['OrganizationCode']), label: `${pf(o, ['OrganizationCode'])}${pf(o, ['OrganizationName']) ? ' — ' + pf(o, ['OrganizationName']) : ''}` }))} />
           </Form.Item>
@@ -8101,6 +8116,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         title={<Space><SearchOutlined style={{ color: REDWOOD.info }} /> Search Suppliers</Space>}
         footer={null}
       >
+        <div style={{ marginBottom: 16, padding: '8px 12px', background: REDWOOD.neutral100, borderRadius: 4, fontSize: 11, color: REDWOOD.neutral600 }}>
+          <Text code>GET /suppliers?q=SupplierName LIKE '%{'{term}'}%' OR SupplierNumber LIKE '%{'{term}'}%'</Text>
+        </div>
         <div style={{ marginBottom: 16 }}>
           <Input.Search
             placeholder="Search by supplier name or number..."
