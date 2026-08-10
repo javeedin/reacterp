@@ -223,7 +223,7 @@ const parseEffContexts = (d: any, category: string): EffCtx[] => {
 // edit form still shows the fields and uploads with the correct VO/context.
 const FALLBACK_HDR_EFF: EffCtx[] = [
   { category: 'DOO_HEADERS_ADD_INFO', voName: 'HeaderEffBTransaction__CodeprivateVO', contextCode: 'Transaction Code',
-    segs: [{ name: 'transactionCode', label: 'Transaction Code' }, { name: 'customer', label: 'customer' }, { name: 'branchBusinessUnit', label: 'Branch BU' }] },
+    segs: [{ name: 'transactionCode', label: 'Transaction Code' }, { name: 'customer', label: 'customer' }, { name: 'branchsalesorder', label: 'Branch Sales Order' }, { name: 'pricelist', label: 'PRICELIST' }, { name: 'branchBusinessUnit', label: 'BRANCH BUSINESS UNIT' }] },
 ];
 const FALLBACK_LINE_EFF: EffCtx[] = [
   { category: 'DOO_FULFILL_LINES_ADD_INFO', voName: 'FulfillLineEffBaddinfoprivateVO', contextCode: 'addinfo',
@@ -5306,22 +5306,41 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     }
   }, [hdr.orderType, orderTypeLookup]);
 
-  // Populate Branch BU in EFF when branch BU is selected
+  // Populate Branch BU and Branch Sales Order in EFF when values are selected
   useEffect(() => {
-    if (hdr.branchBU && hdrEffCtxs.length > 0) {
-      // Find the correct field name for branch BU from active context
+    if (hdrEffCtxs.length > 0) {
       const active = hdrEffCtxs.find(c => c.voName === hdrEffCtxSel);
       if (active) {
-        const branchBuField = active.segs.find(s =>
-          s.name.toLowerCase().includes('branch') ||
-          s.label.toLowerCase().includes('branch')
-        );
-        if (branchBuField) {
-          setHdrEffVals(v => ({ ...v, [branchBuField.name]: hdr.branchBU }));
+        const updates: Record<string, string> = {};
+
+        // Sync Branch BU value
+        if (hdr.branchBU) {
+          const branchBuField = active.segs.find(s =>
+            s.name.toLowerCase().includes('branch') && s.name.toLowerCase().includes('business')
+          );
+          if (branchBuField) {
+            console.log('Syncing Branch BU to EFF:', { fieldName: branchBuField.name, value: hdr.branchBU });
+            updates[branchBuField.name] = hdr.branchBU;
+          }
+        }
+
+        // Sync Order number to branchsalesorder field
+        if (orderNumber) {
+          const branchSalesOrderField = active.segs.find(s =>
+            s.name.toLowerCase().includes('branchsalesorder') || s.name.toLowerCase().includes('order')
+          );
+          if (branchSalesOrderField) {
+            console.log('Syncing Branch Sales Order to EFF:', { fieldName: branchSalesOrderField.name, value: orderNumber });
+            updates[branchSalesOrderField.name] = orderNumber;
+          }
+        }
+
+        if (Object.keys(updates).length > 0) {
+          setHdrEffVals(v => ({ ...v, ...updates }));
         }
       }
     }
-  }, [hdr.branchBU, hdrEffCtxs, hdrEffCtxSel]);
+  }, [hdr.branchBU, orderNumber, hdrEffCtxs, hdrEffCtxSel]);
 
   // Fetch order types from standardLookups
   useEffect(() => {
@@ -5802,6 +5821,20 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     packing: editOrder?.PackingInstructions ?? '', shipping: editOrder?.ShippingInstructions ?? '', fob: editOrder?.FOBPointCode ?? editOrder?.FOBPoint ?? undefined as string | undefined,
   });
   const [shipPackSaving, setShipPackSaving] = useState(false);
+
+  // Auto-include Branch BU in packing instructions for branch sales orders
+  useEffect(() => {
+    if (isBranchSales && hdr.branchBU && editMode) {
+      // For existing orders in edit mode, prepend Branch BU to packing instructions if not already there
+      const packingText = shipPack.packing || '';
+      if (!packingText.includes(hdr.branchBU)) {
+        const branchBuPrefix = `Branch BU: ${hdr.branchBU}\n`;
+        const updatedPacking = branchBuPrefix + packingText;
+        setShipPack(s => ({ ...s, packing: updatedPacking }));
+      }
+    }
+  }, [isBranchSales, hdr.branchBU, editMode]);
+
   const saveShipPack = async () => {
     if (!childOrderKey) { message.warning('Save the order first'); return; }
     setShipPackSaving(true);
