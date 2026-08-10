@@ -4048,7 +4048,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
   const [orderTypeOpts, setOrderTypeOpts] = useState<any[]>([]);
   const [orderTypeLookup, setOrderTypeLookup] = useState<Map<string, any>>(new Map());
   const [isBranchSales, setIsBranchSales] = useState(false);
-  const [inventoryTransactionFlag, setInventoryTransactionFlag] = useState(false);
+  const [inventoryTransactionFlag, setInventoryTransactionFlag] = useState(true);
   const [branchSalesModalOpen, setBranchSalesModalOpen] = useState(false);
   const [branchForm] = Form.useForm();
   const [custSearchModalOpen, setCustSearchModalOpen] = useState(false);
@@ -4061,7 +4061,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
     form.setFieldsValue({ orderType: 'LSO01', rate: 1, orderDate: dayjs() });
     setSubs([]);
     setIsBranchSales(false);
-    setInventoryTransactionFlag(false);
+    setInventoryTransactionFlag(true);
   }, [open, form]);
 
   // Update inventoryTransactionFlag when isBranchSales changes (default true for branch sales)
@@ -4999,7 +4999,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [branchPoNeedByDate, setBranchPoNeedByDate] = useState<any>(dayjs().add(7, 'days'));
   const [orderTypeOpts, setOrderTypeOpts] = useState<any[]>([]);
   const [orderTypeLookup, setOrderTypeLookup] = useState<Map<string, any>>(new Map());
-  const [inventoryTransactionFlag, setInventoryTransactionFlag] = useState<boolean>(isBranchSales);
+  const [inventoryTransactionFlag, setInventoryTransactionFlag] = useState<boolean>(true);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   // Edit mode: the raw Fusion order lines (with child links) for the Billing /
   // Actual Costing tabs (the grid uses a simplified NewLine shape).
