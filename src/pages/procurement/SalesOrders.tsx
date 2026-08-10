@@ -4171,11 +4171,16 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
   };
 
   const submit = () => form.validateFields().then(() => {
+    // Validate subinventory is required when inventoryTransactionFlag is true
+    const all = form.getFieldsValue(true);
+    if (inventoryTransactionFlag && isBranchSales && !all.subinventory) {
+      message.error('Subinventory is required for inventory transactions');
+      return;
+    }
     // getFieldsValue(true) keeps values set via setFieldsValue that have no
     // Form.Item (customer ids, sites, addresses); add the BU id from its row.
-    const all = form.getFieldsValue(true);
     const bu = bUnits.find(b => b.businessUnitName === all.businessUnit);
-    onProceed({ ...all, businessUnitId: bu?.businessUnitId });
+    onProceed({ ...all, businessUnitId: bu?.businessUnitId, inventoryTransactionFlag });
     onClose();
   }).catch(() => { /* show errors */ });
 
@@ -4261,8 +4266,14 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
             <Select showSearch disabled={!buName} allowClear placeholder="Salesperson" size="small" optionFilterProp="label" options={salesRepOpts} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label={<WarehouseLabel />} name="warehouse" rules={req('Warehouse')} style={{ marginBottom: 8 }}>
             <Select showSearch disabled={!buName} placeholder={buName ? 'Organization' : 'Select BU first'} size="small" onChange={onWarehouse} options={whOptions} optionFilterProp="label" /></Form.Item></Col>
-          <Col xs={12} md={6}><Form.Item label="Sub Inventory" name="subinventory" style={{ marginBottom: 8 }}>
+          <Col xs={12} md={6}><Form.Item label="Sub Inventory" name="subinventory" rules={inventoryTransactionFlag && isBranchSales ? req('Subinventory required for inventory transactions') : undefined} style={{ marginBottom: 8 }}>
             <Select showSearch disabled={!buName} placeholder="Subinventory" size="small" notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item></Col>
+          <Col xs={12} md={6}><Form.Item label="Inventory Transaction" name="inventoryTransactionFlag" style={{ marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input type="checkbox" checked={inventoryTransactionFlag} onChange={(e) => setInventoryTransactionFlag(e.target.checked)} disabled={isBranchSales} style={{ cursor: isBranchSales ? 'not-allowed' : 'pointer' }} />
+              <span style={{ fontSize: 12, color: inventoryTransactionFlag ? REDWOOD.primary : REDWOOD.neutral600 }}>{inventoryTransactionFlag ? 'Direct inventory transaction' : 'Standard fulfillment flow'}</span>
+            </div>
+          </Form.Item></Col>
           <Col xs={24}><Form.Item label="Remarks" name="remarks" style={{ marginBottom: 0 }}><Input.TextArea disabled={!buName} rows={1} placeholder="Optional notes…" size="small" /></Form.Item></Col>
         </Section>
       </Form>
@@ -4974,6 +4985,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [branchPoNeedByDate, setBranchPoNeedByDate] = useState<any>(dayjs().add(7, 'days'));
   const [orderTypeOpts, setOrderTypeOpts] = useState<any[]>([]);
   const [orderTypeLookup, setOrderTypeLookup] = useState<Map<string, any>>(new Map());
+  const [inventoryTransactionFlag, setInventoryTransactionFlag] = useState<boolean>(isBranchSales);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   // Edit mode: the raw Fusion order lines (with child links) for the Billing /
   // Actual Costing tabs (the grid uses a simplified NewLine shape).
@@ -5314,6 +5326,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       setIsBranchSales(isBranch);
     }
   }, [hdr.orderType, orderTypeLookup]);
+
+  // Update inventoryTransactionFlag when isBranchSales changes (default true for branch sales)
+  useEffect(() => {
+    if (isBranchSales) {
+      setInventoryTransactionFlag(true);
+    }
+  }, [isBranchSales]);
 
   // When editing a branch sales order, if branchBusinessUnit has a stored value in EFF or hdr.branchBU, disable the field
   useEffect(() => {
@@ -6208,6 +6227,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       ProductNumber: l.itemNumber,
       ...(hdr.subinventory && !(returnMode && l.returnLine) ? { SubinventoryCode: hdr.subinventory } : {}),
       ...(hdr.paymentTerms ? { PaymentTerms: hdr.paymentTerms } : {}),
+      InventoryTransactionFlag: inventoryTransactionFlag,
+      InventoryInterfacedFlag: false,
       TransactionCategoryCode: (returnMode && l.returnLine) ? 'RETURN' : 'ORDER',
       // Return (RMA) line — LineCategoryCode RETURN + reference the original
       // fulfillment line via the originalOrderReference child (referenced return;
@@ -6346,6 +6367,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
   const save = async () => {
     if (lines.length === 0) { message.warning('Add at least one line'); return; }
+    if (inventoryTransactionFlag && isBranchSales && !hdr.subinventory) { message.error('Subinventory is required for inventory transactions'); return; }
     setPosting(true); setSaveError(null); setOrderErrors([]);
     setLines(prev => prev.map(l => l.error ? { ...l, error: undefined } : l));
     const stamp = String(Date.now());
@@ -7144,8 +7166,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                   <Col xs={24} sm={12} md={5}><VSection icon={<ShoppingOutlined />} title="Warehouse" color={REDWOOD.teal}>
                     <Form.Item label={<WarehouseLabel />} name="warehouse" style={{ marginBottom: 10 }}>
                       <Select showSearch placeholder={buName ? 'Organization' : 'Select BU first'} onChange={onWh} options={whOptions} optionFilterProp="label" /></Form.Item>
-                    <Form.Item label="Sub Inventory" name="subinventory" style={{ marginBottom: 10 }}>
+                    <Form.Item label="Sub Inventory" name="subinventory" rules={inventoryTransactionFlag && isBranchSales ? [{ required: true, message: 'Subinventory required for inventory transactions' }] : undefined} style={{ marginBottom: 10 }}>
                       <Select showSearch notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item>
+                    <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 8 }}>Inventory Transaction</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                      <input type="checkbox" checked={inventoryTransactionFlag} onChange={(e) => setInventoryTransactionFlag(e.target.checked)} disabled={isBranchSales} style={{ cursor: isBranchSales ? 'not-allowed' : 'pointer' }} />
+                      <span style={{ fontSize: 12, color: inventoryTransactionFlag ? REDWOOD.primary : REDWOOD.neutral600 }}>{inventoryTransactionFlag ? 'Direct inventory transaction' : 'Standard fulfillment flow'}</span>
+                    </div>
                     <Form.Item label="Base Currency" name="baseCurrency" style={{ marginBottom: 10 }}><Input readOnly placeholder="—" /></Form.Item>
                     <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 2 }}>Default Tax Code</div>
                     <Select size="small" showSearch allowClear style={{ width: '100%' }} value={defaultTaxCode} placeholder={taxOptions.length ? 'Apply to all lines' : 'Select a BU first'}
