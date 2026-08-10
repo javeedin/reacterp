@@ -5625,15 +5625,21 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     }
     try {
       const url = `${FUSION_BASE}/suppliers?q=Supplier LIKE '*${term}*' OR SupplierNumber LIKE '*${term}*'&limit=20`;
+      console.log('Fetching suppliers with URL:', url);
       const r = await fetch(url, { headers: FUSION_HDRS });
       if (r.ok) {
         const data = await r.json();
+        console.log('Supplier search response:', data);
         setBranchSuppliers(data.items ?? []);
       } else {
-        console.error('Supplier search failed:', r.status);
+        console.error('Supplier search failed:', r.status, r.statusText);
+        const text = await r.text();
+        console.error('Response:', text.slice(0, 500));
+        message.error(`Supplier search failed: HTTP ${r.status} ${r.statusText}`);
       }
     } catch (e) {
       console.error('Failed to fetch suppliers:', e);
+      message.error(`Error fetching suppliers: ${e}`);
     }
   }, []);
 
@@ -8141,8 +8147,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         title={<Space><SearchOutlined style={{ color: REDWOOD.info }} /> Search Suppliers</Space>}
         footer={null}
       >
-        <div style={{ marginBottom: 16, padding: '8px 12px', background: REDWOOD.neutral100, borderRadius: 4, fontSize: 11, color: REDWOOD.neutral600 }}>
-          <Text code>GET /suppliers?q=Supplier LIKE '*{'{term}'}*' OR SupplierNumber LIKE '*{'{term}'}*'&limit=20</Text>
+        <div style={{ marginBottom: 16, padding: '12px', background: REDWOOD.neutral100, borderRadius: 4, fontSize: 11, color: REDWOOD.neutral600, wordBreak: 'break-all' }}>
+          <div style={{ marginBottom: 8, fontWeight: 500 }}>API URL:</div>
+          <Text code>{`${FUSION_BASE}/suppliers?q=Supplier LIKE '*${branchSupplierSearchTerm}*' OR SupplierNumber LIKE '*${branchSupplierSearchTerm}*'&limit=20`}</Text>
         </div>
         <div style={{ marginBottom: 16 }}>
           <Input.Search
