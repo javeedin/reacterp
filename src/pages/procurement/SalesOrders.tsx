@@ -4046,6 +4046,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
   const [orderTypeOpts, setOrderTypeOpts] = useState<any[]>([]);
   const [orderTypeLookup, setOrderTypeLookup] = useState<Map<string, any>>(new Map());
   const [isBranchSales, setIsBranchSales] = useState(false);
+  const [inventoryTransactionFlag, setInventoryTransactionFlag] = useState(false);
   const [branchSalesModalOpen, setBranchSalesModalOpen] = useState(false);
   const [branchForm] = Form.useForm();
   const [custSearchModalOpen, setCustSearchModalOpen] = useState(false);
@@ -4058,7 +4059,15 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
     form.setFieldsValue({ orderType: 'LSO01', rate: 1, orderDate: dayjs() });
     setSubs([]);
     setIsBranchSales(false);
+    setInventoryTransactionFlag(false);
   }, [open, form]);
+
+  // Update inventoryTransactionFlag when isBranchSales changes (default true for branch sales)
+  useEffect(() => {
+    if (isBranchSales) {
+      setInventoryTransactionFlag(true);
+    }
+  }, [isBranchSales]);
 
   useEffect(() => {
     // Fetch order types from standardLookups
