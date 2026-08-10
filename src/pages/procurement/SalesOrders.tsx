@@ -4221,30 +4221,30 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
         )}
         <Section icon={<BankOutlined />} title="Order Details" color={REDWOOD.primary}>
           <Col xs={24} md={15}><Form.Item label="Business Unit" name="businessUnit" rules={req('Select business unit')} style={{ marginBottom: 8 }}>
-            <Select showSearch placeholder="Select" size="small" onChange={onBU} optionFilterProp="label"
+            <Select showSearch disabled={!isDraftStatus} placeholder="Select" size="small" onChange={onBU} optionFilterProp="label"
               options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item></Col>
           <Col xs={12} md={5}><Form.Item label="Base Ccy" name="baseCurrency" rules={req('Base currency')} style={{ marginBottom: 8 }}><Input placeholder="AED" readOnly size="small" /></Form.Item></Col>
           <Col xs={12} md={5}><Form.Item label="Txn Ccy" name="txnCurrency" rules={req('Currency')} style={{ marginBottom: 8 }}>
-            <Select showSearch disabled={!buName} placeholder="Currency" size="small" onChange={() => onTxnCurrencyChange(form)} options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
-          <Col xs={12} md={5}><Form.Item label="Rate" name="rate" style={{ marginBottom: 8 }}><InputNumber disabled={!buName} style={{ width: '100%' }} size="small" min={0} placeholder="Auto-populated" /></Form.Item></Col>
+            <Select showSearch disabled={!buName || !isDraftStatus} placeholder="Currency" size="small" onChange={() => onTxnCurrencyChange(form)} options={CURRENCIES.map(c => ({ value: c, label: c }))} /></Form.Item></Col>
+          <Col xs={12} md={5}><Form.Item label="Rate" name="rate" style={{ marginBottom: 8 }}><InputNumber disabled={!buName || !isDraftStatus} style={{ width: '100%' }} size="small" min={0} placeholder="Auto-populated" /></Form.Item></Col>
           <Col xs={12} md={5}><Form.Item label="Rate Type" name="currencyRateType" style={{ marginBottom: 8 }}>
-            <Select disabled={!buName} placeholder="Rate type" size="small" options={[{ value: 'Corporate', label: 'Corporate' }, { value: 'Spot', label: 'Spot' }, { value: 'User', label: 'User' }]} /></Form.Item></Col>
-          <Col xs={12} md={5}><Form.Item label="Currency Date" name="currencyDate" style={{ marginBottom: 8 }}><DatePicker disabled={!buName} style={{ width: '100%' }} size="small" /></Form.Item></Col>
+            <Select disabled={!buName || !isDraftStatus} placeholder="Rate type" size="small" options={[{ value: 'Corporate', label: 'Corporate' }, { value: 'Spot', label: 'Spot' }, { value: 'User', label: 'User' }]} /></Form.Item></Col>
+          <Col xs={12} md={5}><Form.Item label="Currency Date" name="currencyDate" style={{ marginBottom: 8 }}><DatePicker disabled={!buName || !isDraftStatus} style={{ width: '100%' }} size="small" /></Form.Item></Col>
           <Col xs={12} md={5}><Form.Item label="Order Type" name="orderType" rules={req('Order type')} style={{ marginBottom: 8 }}>
-            <Select showSearch disabled={!buName} placeholder="Select order type" size="small" loading={orderTypeOpts.length === 0} onChange={onOrderTypeChange} options={orderTypeOpts} /></Form.Item></Col>
-          <Col xs={12} md={5}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')} style={{ marginBottom: 8 }}><DatePicker disabled={!buName} style={{ width: '100%' }} size="small" /></Form.Item></Col>
+            <Select showSearch disabled={!buName || !isDraftStatus} placeholder="Select order type" size="small" loading={orderTypeOpts.length === 0} onChange={onOrderTypeChange} options={orderTypeOpts} /></Form.Item></Col>
+          <Col xs={12} md={5}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')} style={{ marginBottom: 8 }}><DatePicker disabled={!buName || !isDraftStatus} style={{ width: '100%' }} size="small" /></Form.Item></Col>
           {isBranchSales && (
             <Col xs={12} md={12}><Form.Item label="Branch Business Unit" name="branchBU" rules={req('Branch BU')} style={{ marginBottom: 0 }}>
-              <Select showSearch disabled={isBranchBUDisabled} placeholder="Select Branch BU" size="small" optionFilterProp="label"
+              <Select showSearch disabled={isBranchBUDisabled || !isDraftStatus} placeholder="Select Branch BU" size="small" optionFilterProp="label"
                 options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item></Col>
           )}
         </Section>
 
         <Section icon={<ProfileOutlined />} title="Customer" color={REDWOOD.info}>
           <Col xs={24} md={16}><Form.Item label="Customer Name" name="customerName" rules={req('Customer')} style={{ marginBottom: 8, display: 'flex', alignItems: 'flex-end', gap: 8 }}>
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, opacity: !buName ? 0.5 : 1, pointerEvents: !buName ? 'none' : 'auto' }}>
-              <Input placeholder={buName ? "Select a customer..." : "Select BU first"} value={form.getFieldValue('customerName')} readOnly style={{ flex: 1, fontSize: '14px', fontWeight: '500' }} disabled={!buName} />
-              <Button type="primary" icon={<SearchOutlined />} onClick={() => setCustSearchModalOpen(true)} disabled={!buName} title={buName ? "Search Customer" : "Select BU first"} />
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, opacity: !buName || !isDraftStatus ? 0.5 : 1, pointerEvents: !buName || !isDraftStatus ? 'none' : 'auto' }}>
+              <Input placeholder={buName ? "Select a customer..." : "Select BU first"} value={form.getFieldValue('customerName')} readOnly style={{ flex: 1, fontSize: '14px', fontWeight: '500' }} disabled={!buName || !isDraftStatus} />
+              <Button type="primary" icon={<SearchOutlined />} onClick={() => setCustSearchModalOpen(true)} disabled={!buName || !isDraftStatus} title={!isDraftStatus ? "Order is confirmed - cannot change" : (buName ? "Search Customer" : "Select BU first")} />
             </div>
           </Form.Item></Col>
           <Col xs={24} md={8}><Form.Item label="Account #" name="accountNumber" style={{ marginBottom: 8 }}><Input placeholder="—" readOnly size="small" /></Form.Item></Col>
@@ -4256,14 +4256,14 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
 
         <Section icon={<ShoppingOutlined />} title="Terms & Fulfillment" color={REDWOOD.purple}>
           <Col xs={12} md={6}><Form.Item label="Payment Terms" name="paymentTerms" rules={req('Payment terms')} style={{ marginBottom: 8 }}>
-            <Select showSearch disabled={!buName} placeholder="Terms" size="small" optionFilterProp="label" options={payTermOpts} /></Form.Item></Col>
+            <Select showSearch disabled={!buName || !isDraftStatus} placeholder="Terms" size="small" optionFilterProp="label" options={payTermOpts} /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Sales Rep" name="salesRep" style={{ marginBottom: 8 }}>
-            <Select showSearch disabled={!buName} allowClear placeholder="Salesperson" size="small" optionFilterProp="label" options={salesRepOpts} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
+            <Select showSearch disabled={!buName || !isDraftStatus} allowClear placeholder="Salesperson" size="small" optionFilterProp="label" options={salesRepOpts} notFoundContent={salesRepOpts.length ? 'No match' : 'Loading…'} /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label={<WarehouseLabel />} name="warehouse" rules={req('Warehouse')} style={{ marginBottom: 8 }}>
-            <Select showSearch disabled={!buName} placeholder={buName ? 'Organization' : 'Select BU first'} size="small" onChange={onWarehouse} options={whOptions} optionFilterProp="label" /></Form.Item></Col>
+            <Select showSearch disabled={!buName || !isDraftStatus} placeholder={buName ? 'Organization' : 'Select BU first'} size="small" onChange={onWarehouse} options={whOptions} optionFilterProp="label" /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Sub Inventory" name="subinventory" style={{ marginBottom: 8 }}>
-            <Select showSearch disabled={!buName} placeholder="Subinventory" size="small" notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item></Col>
-          <Col xs={24}><Form.Item label="Remarks" name="remarks" style={{ marginBottom: 0 }}><Input.TextArea disabled={!buName} rows={1} placeholder="Optional notes…" size="small" /></Form.Item></Col>
+            <Select showSearch disabled={!buName || !isDraftStatus} placeholder="Subinventory" size="small" notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item></Col>
+          <Col xs={24}><Form.Item label="Remarks" name="remarks" style={{ marginBottom: 0 }}><Input.TextArea disabled={!buName || !isDraftStatus} rows={1} placeholder="Optional notes…" size="small" /></Form.Item></Col>
         </Section>
       </Form>
     </Modal>
