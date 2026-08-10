@@ -1160,82 +1160,82 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
   const currentUrl = buildUrl(searchParams, page);
 
   const columns: ColumnsType<RawPO> = [
-    { title: 'Created', dataIndex: 'CreationDate', width: 120, fixed: 'left', render: d => fmtDate(d),
+    { title: 'Created', dataIndex: 'CreationDate', width: 80, render: d => fmtDate(d),
       sorter: (a, b) => (a.CreationDate ?? '').localeCompare(b.CreationDate ?? ''),
       defaultSortOrder: 'descend' as const,
     },
     {
-      title: 'Order Number', dataIndex: 'OrderNumber', width: 140, fixed: 'left',
+      title: 'Order Number', dataIndex: 'OrderNumber', width: 90,
       render: (v, rec) => (
-        <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 13 }} onClick={() => onOpen(rec)}>
+        <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12 }} onClick={() => onOpen(rec)}>
           {v}
         </Button>
       ),
     },
     {
-      title: 'Legal Entity', dataIndex: 'SoldToLegalEntity', ellipsis: true, width: 200,
-      render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text>,
+      title: 'Legal Entity', dataIndex: 'SoldToLegalEntity', ellipsis: true, width: 120,
+      render: v => <Text style={{ fontSize: 11 }}>{v ?? '—'}</Text>,
     },
     {
-      title: 'Supplier', dataIndex: 'Supplier', ellipsis: true, width: 200,
-      render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text>,
+      title: 'Supplier', dataIndex: 'Supplier', ellipsis: true, width: 120,
+      render: v => <Text style={{ fontSize: 11 }}>{v ?? '—'}</Text>,
     },
     {
-      title: 'Ship To', key: 'shipTo', width: 150, ellipsis: true,
+      title: 'Ship To', key: 'shipTo', width: 100, ellipsis: true,
       render: (_: unknown, rec: RawPO) => {
         const st = shipToMap.get(rec.POHeaderId);
         if (st === undefined) return lineCountsLoading ? <Spin size="small" /> : <Text type="secondary">—</Text>;
-        return st ? <Tooltip title={`Ship-to location (from first schedule)`}><Text style={{ fontSize: 12, color: REDWOOD.info }}>{st}</Text></Tooltip> : <Text type="secondary">—</Text>;
+        return st ? <Tooltip title={`Ship-to location (from first schedule)`}><Text style={{ fontSize: 11, color: REDWOOD.info }}>{st}</Text></Tooltip> : <Text type="secondary">—</Text>;
       },
     },
-    { title: 'Status', dataIndex: 'StatusCode', width: 160, render: s => getStatusTag(s) },
+    { title: 'Status', dataIndex: 'StatusCode', width: 100, render: s => getStatusTag(s) },
     {
       title: 'Lines',
       key: 'linesCount',
-      width: 70,
+      width: 50,
       align: 'center' as const,
       render: (_: any, rec: RawPO) => {
         const cnt = lineCountMap.get(rec.POHeaderId);
         return lineCountsLoading && cnt === undefined
           ? <Spin size="small" />
-          : <Tag color="geekblue" style={{ fontSize: 11, fontWeight: 600, borderRadius: 10, minWidth: 28, textAlign: 'center' }}>
+          : <Tag color="geekblue" style={{ fontSize: 10, fontWeight: 600, borderRadius: 10, minWidth: 24, textAlign: 'center' }}>
               {cnt ?? '—'}
             </Tag>;
       },
     },
-    { title: 'CCY', dataIndex: 'CurrencyCode', width: 60, align: 'center', render: v => <Tag style={{ fontSize: 11 }}>{v}</Tag> },
+    { title: 'CCY', dataIndex: 'CurrencyCode', width: 50, align: 'center', render: v => <Tag style={{ fontSize: 10 }}>{v}</Tag> },
     {
-      title: 'Ordered', dataIndex: 'Ordered', width: 120, align: 'right',
-      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{fmtAmt(v)}</Text>,
+      title: 'Ordered', dataIndex: 'Ordered', width: 90, align: 'right',
+      render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 11 }}>{fmtAmt(v)}</Text>,
     },
     {
-      title: 'Total (incl. Tax)', dataIndex: 'Total', width: 140, align: 'right',
-      render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: REDWOOD.neutral900 }}>{fmtAmt(v)}</Text>,
+      title: 'Total', dataIndex: 'Total', width: 110, align: 'right',
+      render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 11, color: REDWOOD.primary }}>{fmtAmt(v)}</Text>,
     },
     {
-      title: 'Buyer', dataIndex: 'BuyerDisplayName', width: 160, ellipsis: true,
-      render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text>,
+      title: 'Buyer', dataIndex: 'BuyerDisplayName', width: 110, ellipsis: true,
+      render: v => <Text style={{ fontSize: 11 }}>{v ?? '—'}</Text>,
     },
-    { title: 'Order Date', dataIndex: 'OrderDate', width: 120, render: d => fmtDate(d),
+    { title: 'Order Date', dataIndex: 'OrderDate', width: 80, render: d => fmtDate(d),
       sorter: (a, b) => (a.OrderDate ?? '').localeCompare(b.OrderDate ?? ''),
     },
     {
       title: <Tooltip title="Has receipts — fills after opening Life Cycle">Rcpt</Tooltip>,
-      key: 'lcReceipts', width: 60, align: 'center',
+      key: 'lcReceipts', width: 50, align: 'center',
       render: (_: unknown, rec: RawPO) => <LcFlag state={lifecycleSummary?.[rec.POHeaderId]?.receipts} />,
     },
     {
       title: <Tooltip title="Has invoices — fills after opening Life Cycle">Inv</Tooltip>,
-      key: 'lcInvoices', width: 60, align: 'center',
+      key: 'lcInvoices', width: 50, align: 'center',
       render: (_: unknown, rec: RawPO) => <LcFlag state={lifecycleSummary?.[rec.POHeaderId]?.invoices} />,
     },
     {
       title: <Tooltip title="Has a paid invoice — fills after opening Life Cycle">Paid</Tooltip>,
-      key: 'lcPayment', width: 60, align: 'center',
+      key: 'lcPayment', width: 50, align: 'center',
       render: (_: unknown, rec: RawPO) => <LcFlag state={lifecycleSummary?.[rec.POHeaderId]?.payment} />,
     },
     {
-      title: '', key: 'actions', width: 230, fixed: 'right', align: 'center',
+      title: '', key: 'actions', width: 180, fixed: 'right', align: 'center',
       render: (_: unknown, rec: RawPO) => (
         <Space size={4}>
           {String(rec.StatusCode ?? '').toUpperCase().includes('INCOMPLETE') && (
@@ -1399,7 +1399,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
             <Table
               columns={columns} dataSource={data} rowKey="POHeaderId"
               rowSelection={{ selectedRowKeys: selectedKeys, onChange: setSelectedKeys, preserveSelectedRowKeys: true }}
-              loading={loading} size="small" scroll={{ x: 1400 }}
+              loading={loading} size="small" scroll={{ x: 1250 }}
               pagination={hasSearched && total > PAGE_SIZE ? {
                 current: page, pageSize: PAGE_SIZE, total, showSizeChanger: false,
                 onChange: async p => { setPage(p); const items = await fetchPOs(searchParams, p); fetchLineCounts(items); },
@@ -1432,7 +1432,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
             <Table
               columns={lineColumns} dataSource={expandedLines}
               rowKey={(_, i) => `line-${i}`}
-              loading={loading} size="small" scroll={{ x: 1600 }}
+              loading={loading} size="small" scroll={{ x: 1300 }}
               locale={{
                 emptyText: hasSearched
                   ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No lines found in search results" style={{ padding: 40 }} />
