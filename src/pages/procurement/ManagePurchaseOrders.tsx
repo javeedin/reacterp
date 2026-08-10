@@ -13,9 +13,10 @@ import {
   InfoCircleOutlined, UnorderedListOutlined, ApiOutlined, CopyOutlined,
   PlusOutlined, BankOutlined, UserOutlined, CalendarOutlined,
   DollarOutlined, FileTextOutlined, DownOutlined, FilePdfOutlined,
-  HistoryOutlined, FolderOpenOutlined, EditOutlined,
+  HistoryOutlined, FolderOpenOutlined, EditOutlined, FileExcelOutlined,
   CheckCircleTwoTone, CloseCircleTwoTone, CarOutlined, InboxOutlined,
 } from '@ant-design/icons';
+import * as XLSX from 'xlsx';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import CreatePurchaseOrder from './CreatePurchaseOrder';
 import POLifeCycleModal from './POLifeCycle';
@@ -1157,6 +1158,63 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
     } finally { setATL(false); }
   };
 
+  const exportOrdersToExcel = () => {
+    if (data.length === 0) { message.warning('No orders to export'); return; }
+    const rows = data.map(po => ({
+      'Created': fmtDate(po.CreationDate),
+      'Order Number': po.OrderNumber,
+      'Legal Entity': po.SoldToLegalEntity,
+      'Supplier': po.Supplier,
+      'Status': po.StatusCode,
+      'Currency': po.CurrencyCode,
+      'Ordered': po.Ordered,
+      'Total': po.Total,
+      'Buyer': po.BuyerDisplayName,
+      'Order Date': fmtDate(po.OrderDate),
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Orders');
+    ws['!cols'] = [
+      { wch: 12 }, { wch: 15 }, { wch: 18 }, { wch: 18 },
+      { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 12 },
+      { wch: 14 }, { wch: 12 },
+    ];
+    XLSX.writeFile(wb, `PurchaseOrders_${dayjs().format('YYYY-MM-DD_HHmmss')}.xlsx`);
+    message.success(`Exported ${data.length} order(s)`);
+  };
+
+  const exportLinesToExcel = () => {
+    if (expandedLines.length === 0) { message.warning('No lines to export'); return; }
+    const rows = expandedLines.map(line => ({
+      'PO Number': (line as any)._PONumber,
+      'Line #': line.LineNumber,
+      'Type': line.LineType,
+      'Item': line.Item,
+      'Description': line.Description,
+      'Category': line.Category,
+      'UOM': line.UOM,
+      'Quantity': line.Quantity,
+      'Base Price': line.BasePrice,
+      'Unit Price': line.Price,
+      'Ordered Amount': line.Ordered,
+      'Tax': line.TotalTax,
+      'Total': line.Total,
+      'Status': line.StatusCode ?? line.Status,
+      'Need-By Date': fmtDate(line.NeedByDate),
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Lines');
+    ws['!cols'] = [
+      { wch: 15 }, { wch: 8 }, { wch: 10 }, { wch: 12 }, { wch: 20 },
+      { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 12 }, { wch: 12 },
+      { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
+    ];
+    XLSX.writeFile(wb, `PurchaseOrderLines_${dayjs().format('YYYY-MM-DD_HHmmss')}.xlsx`);
+    message.success(`Exported ${expandedLines.length} line(s)`);
+  };
+
   const currentUrl = buildUrl(searchParams, page);
 
   const columns: ColumnsType<RawPO> = [
@@ -1381,20 +1439,28 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
                 Purchase Orders
                 {hasSearched && total > 0 && <Text type="secondary" style={{ fontWeight: 400, marginLeft: 8 }}>({total} result{total !== 1 ? 's' : ''})</Text>}
               </Text>
-              {selectedKeys.length > 0 && (
-                <Space style={{ marginLeft: 'auto' }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>{selectedKeys.length} selected</Text>
-                  <Button size="small" type="primary" icon={<CheckCircleOutlined />} loading={approving}
-                    onClick={submitSelectedForApproval}
-                    style={{ background: '#1D7B4D', borderColor: '#1D7B4D', fontWeight: 600 }}>
-                    Submit for Approval
+              <Space style={{ marginLeft: 'auto' }}>
+                <Tooltip title="Export orders to Excel">
+                  <Button size="small" icon={<FileExcelOutlined />} onClick={exportOrdersToExcel} disabled={data.length === 0}
+                    style={{ borderColor: '#52A043', color: '#52A043', borderRadius: 4, fontWeight: 600 }}>
+                    Export
                   </Button>
-                  <Tooltip title="View approval API URL & JSON body">
-                    <Button size="small" icon={<ApiOutlined />} onClick={() => setApproveApiOpen(true)}
-                      style={{ borderColor: REDWOOD.info, color: REDWOOD.info }} />
-                  </Tooltip>
-                </Space>
-              )}
+                </Tooltip>
+                {selectedKeys.length > 0 && (
+                  <>
+                    <Text type="secondary" style={{ fontSize: 12 }}>{selectedKeys.length} selected</Text>
+                    <Button size="small" type="primary" icon={<CheckCircleOutlined />} loading={approving}
+                      onClick={submitSelectedForApproval}
+                      style={{ background: '#1D7B4D', borderColor: '#1D7B4D', fontWeight: 600 }}>
+                      Submit for Approval
+                    </Button>
+                    <Tooltip title="View approval API URL & JSON body">
+                      <Button size="small" icon={<ApiOutlined />} onClick={() => setApproveApiOpen(true)}
+                        style={{ borderColor: REDWOOD.info, color: REDWOOD.info }} />
+                    </Tooltip>
+                  </>
+                )}
+              </Space>
             </div>
             <Table
               columns={columns} dataSource={data} rowKey="POHeaderId"
@@ -1423,11 +1489,17 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
               {hasSearched && expandedLines.length > 0 && <Text type="secondary" style={{ fontWeight: 400, fontSize: 12 }}>({expandedLines.length})</Text>}
             </span>}
           >
-            <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+            <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 12 }}>
               <Text strong style={{ fontSize: 13 }}>
                 Order Lines
                 {hasSearched && expandedLines.length > 0 && <Text type="secondary" style={{ fontWeight: 400, marginLeft: 8 }}>({expandedLines.length} line{expandedLines.length !== 1 ? 's' : ''})</Text>}
               </Text>
+              <Tooltip title="Export lines to Excel" style={{ marginLeft: 'auto' }}>
+                <Button size="small" icon={<FileExcelOutlined />} onClick={exportLinesToExcel} disabled={expandedLines.length === 0}
+                  style={{ borderColor: '#52A043', color: '#52A043', borderRadius: 4, fontWeight: 600 }}>
+                  Export
+                </Button>
+              </Tooltip>
             </div>
             <Table
               columns={lineColumns} dataSource={expandedLines}
