@@ -4235,7 +4235,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
           <Col xs={12} md={5}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')} style={{ marginBottom: 8 }}><DatePicker disabled={!buName} style={{ width: '100%' }} size="small" /></Form.Item></Col>
           {isBranchSales && (
             <Col xs={12} md={12}><Form.Item label="Branch Business Unit" name="branchBU" rules={req('Branch BU')} style={{ marginBottom: 0 }}>
-              <Select showSearch placeholder="Select Branch BU" size="small" optionFilterProp="label"
+              <Select showSearch disabled={isBranchBUDisabled} placeholder="Select Branch BU" size="small" optionFilterProp="label"
                 options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item></Col>
           )}
         </Section>
@@ -5044,6 +5044,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [hdrEffVoHref, setHdrEffVoHref] = useState('');   // nested EffB VO row (PATCH target)
   const [hdrEffAiHref, setHdrEffAiHref] = useState('');   // parent additionalInformation row
   const [hdrEffSaving, setHdrEffSaving] = useState(false);
+  const [isBranchBUDisabled, setIsBranchBUDisabled] = useState(false);  // disable branchBU field if it has a stored value
   useEffect(() => {
     const desc = (poly: string) => `${FUSION_BASE}/salesOrdersForOrderHub/describe?polymorphicType=${encodeURIComponent(poly)}`;
     fetch(desc('salesOrdersForOrderHub.lines.additionalInformation:DOO_FULFILL_LINES_ADD_INFO'), { headers: FUSION_HDRS })
@@ -5313,6 +5314,23 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       setIsBranchSales(isBranch);
     }
   }, [hdr.orderType, orderTypeLookup]);
+
+  // When editing a branch sales order, if branchBusinessUnit has a stored value in EFF, populate and disable the field
+  useEffect(() => {
+    if (editOrder && hdrEffVals && isBranchSales) {
+      const branchBuValue = hdrEffVals['branchBusinessUnit'];
+      if (branchBuValue) {
+        console.log('NewOrderTab: Populating branchBU from EFF and disabling:', branchBuValue);
+        form.setFieldsValue({ branchBU: branchBuValue });
+        setIsBranchBUDisabled(true);
+      } else {
+        setIsBranchBUDisabled(false);
+      }
+    } else {
+      // Reset disabled state when not editing or not a branch sales order
+      setIsBranchBUDisabled(false);
+    }
+  }, [editOrder, hdrEffVals, isBranchSales, form]);
 
   // Populate Branch BU and Branch Sales Order in EFF when values are selected
   useEffect(() => {
