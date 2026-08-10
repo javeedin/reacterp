@@ -6868,6 +6868,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         ? <Space size={4}>
             <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text>
             <Tooltip title="Select / change lot"><Button size="small" type="text" icon={<TagsOutlined />} style={{ color: REDWOOD.info }} onClick={() => reopenLotPick(r)} /></Tooltip>
+            {inventoryTransactionFlag && <Tooltip title="Allocate lot & serial"><Button size="small" type="text" icon={<TagsOutlined />} style={{ color: REDWOOD.success }} onClick={() => { setAllocationLine(r); setAllocationModalOpen(true); }} /></Tooltip>}
           </Space>
         : <Select showSearch size="small" style={{ width: 196 }} placeholder="Type 3+ chars — code / desc" value={undefined}
             filterOption={false} loading={lineSearch[r.key]?.loading} onSearch={t => onLineSearch(r.key, t)} onChange={val => pickInlineItem(r.key, val)}
@@ -7538,8 +7539,24 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               },
               {
                 key: 'lots', label: vTab(<TagsOutlined />, 'Lot Details', REDWOOD.info, lotRows.length),
-                children: <Table size="small" columns={lotCols} dataSource={lotRows} rowKey="key" pagination={false} scroll={{ x: 750, y: 360 }}
-                  locale={{ emptyText: 'No lot details on the selected items' }} />,
+                children: <div>
+                  {inventoryTransactionFlag && (
+                    <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', background: REDWOOD.neutral100, borderBottom: `1px solid ${REDWOOD.neutral200}`, marginBottom: 12 }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>📦 Direct Inventory Transaction — Select lots & serials:</Text>
+                      {lines.length > 0 && (
+                        <Button size="small" type="primary" icon={<TagsOutlined />} onClick={() => {
+                          const firstLine = lines[0];
+                          setAllocationLine(firstLine);
+                          setAllocationModalOpen(true);
+                        }} style={{ background: REDWOOD.info, borderColor: REDWOOD.info, marginLeft: 'auto' }}>
+                          Allocate Lots/Serials
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                  <Table size="small" columns={lotCols} dataSource={lotRows} rowKey="key" pagination={false} scroll={{ x: 750, y: 360 }}
+                    locale={{ emptyText: 'No lot details on the selected items' }} />
+                </div>,
               },
               {
                 key: 'fulfillment', label: vTab(<CarOutlined />, 'Fulfillment', REDWOOD.teal ?? '#00918A'),
