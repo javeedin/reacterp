@@ -7075,20 +7075,20 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                     <Form.Item label="Order No" style={{ marginBottom: 10 }}>
                       <Text strong style={{ color: REDWOOD.primary, fontVariantNumeric: 'tabular-nums' }}>{orderNumber}</Text></Form.Item>
                     <Form.Item label="Business Unit" name="businessUnit" style={{ marginBottom: 10 }}>
-                      <Select showSearch placeholder="Select" onChange={onBU} optionFilterProp="label" disabled={editMode}
+                      <Select showSearch placeholder="Select" onChange={onBU} optionFilterProp="label" disabled={editMode || !isDraftStatus}
                         options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} /></Form.Item>
-                    <Form.Item label="Order Date" name="orderDate" style={{ marginBottom: 10 }}><DatePicker style={{ width: '100%' }} disabled={editMode && !hdrUnlocked} /></Form.Item>
+                    <Form.Item label="Order Date" name="orderDate" style={{ marginBottom: 10 }}><DatePicker style={{ width: '100%' }} disabled={(editMode && !hdrUnlocked) || !isDraftStatus} /></Form.Item>
                     <Form.Item label="Order Type" name="orderType" style={{ marginBottom: 10 }}>
                       <Select
                         showSearch
                         placeholder="Select order type"
-                        disabled={editMode && !hdrUnlocked}
+                        disabled={(editMode && !hdrUnlocked) || !isDraftStatus}
                         onChange={onOrderTypeChange}
                         optionFilterProp="label"
                         options={orderTypeOpts}
                       />
                     </Form.Item>
-                    <Form.Item label="Customer PO" name="customerPONumber" style={{ marginBottom: 10 }}><Input placeholder="Customer PO number" disabled={editMode && !hdrUnlocked} /></Form.Item>
+                    <Form.Item label="Customer PO" name="customerPONumber" style={{ marginBottom: 10 }}><Input placeholder="Customer PO number" disabled={(editMode && !hdrUnlocked) || !isDraftStatus} /></Form.Item>
                     {isBranchSales && (
                       <>
                         <Form.Item label="Branch BU" name="branchBU" rules={[{ required: true, message: 'Select a branch BU' }]} style={{ marginBottom: 10, marginTop: 10 }}>
