@@ -811,6 +811,9 @@ const AutoShipConfirmModal: React.FC<{ orderNo?: string; org?: string; open: boo
   const [psRows, setPsRows] = useState<any[] | null>(null);
   const [psRow, setPsRow] = useState<any | null>(null);
   const [shipOpen, setShipOpen] = useState(false);
+  const [autoRunning, setAutoRunning] = useState(false);
+  const [autoStep, setAutoStep] = useState<'idle' | 'pick-release' | 'pick-confirm' | 'ship-confirm' | 'done'>('idle');
+  const [autoStatus, setAutoStatus] = useState<string>('');
   const load = useCallback(async () => {
     if (!orderNo) return;
     setLoading(true);
@@ -865,6 +868,159 @@ const AutoShipConfirmModal: React.FC<{ orderNo?: string; org?: string; open: boo
     else { message.success(`Shipment created for ${noShipLines.length} line(s)`); }
     load();
   };
+
+  // Automated workflow: Pick Release → Pick Confirm → Ship Confirm
+  const runAllSteps = async () => {
+    if (!orgCode || !orderNo) { message.error('Organization or order number missing'); return; }
+    setAutoRunning(true);
+    setAutoStep('pick-release');
+    setAutoStatus('Starting Pick Release...');
+
+    try {
+      // STEP 1: Pick Release
+      const body = { SourceSystemName: 'OPS', BatchPrefix: `PR-${orderNo}`, ShipFromOrganizationCode: orgCode, ReleaseStatus: 'All', OrderNumber: String(orderNo), PickReleaseFlag: 'true', AutoPickConfirmFlag: 'false', ShipConfirmRule: '002_Ship_Confirm_Rule', CreateShipmentsFlag: 'true', ShipmentCreationCriteria: 'Across orders' };
+      const r1 = await fetch(PICKWAVES_URL, { method: 'POST', headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const text1 = await r1.text(); let data1: any = null; try { data1 = JSON.parse(text1); } catch { /* raw */ }
+      const ret1 = String(data1?.ReturnStatus ?? data1?.returnStatus ?? '').toUpperCase();
+      if (!r1.ok || ret1 === 'E') { message.error('Pick Release failed'); setAutoRunning(false); setAutoStep('idle'); return; }
+      setAutoStatus('Pick Release completed, waiting for status update...');
+
+      // Poll until all lines show "Pick Released"
+      let pollCount = 0;
+      while (pollCount < 30) {
+        await new Promise(res => setTimeout(res, 1000));
+        const lines = await fetchAllPages(SHIPLINES_URL(orderNo));
+        const allReleased = lines.every(l => lineStage(l) >= 1);
+        if (allReleased) break;
+        pollCount++;
+        setAutoStatus(`Waiting for status update... (${pollCount}s)`);
+      }
+
+      // STEP 2: Pick Confirm (auto-allocate serials)
+      setAutoStep('pick-confirm');
+      setAutoStatus('Fetching pick slips...');
+      const slips = await fetchAllPages(PICKSLIPS_URL(orderNo));
+      if (!slips.length) { message.error('No pick slips found'); setAutoRunning(false); setAutoStep('idle'); return; }
+
+      // Auto-confirm picks with lot/serial allocation
+      const pickLinesUrl = (slip: any) => slip?.links?.find((l: any) => l.name === 'pickLines')?.href ?? `${FUSION_BASE}/pickSlipDetails/${slip.PickSlip}/child/pickLines`;
+      const ONHAND_URL = (org: string, item: string, subinv?: string) => {
+        const q = `OrganizationCode=${org};ItemNumber=${item}` + (subinv ? `;SubinventoryCode=${subinv}` : '');
+        return `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&expand=lots.lotSerials,serials&onlyData=true&limit=500`;
+      };
+
+      for (let si = 0; si < slips.length; si++) {
+        const slip = slips[si];
+        setAutoStatus(`Processing pick slip ${si + 1}/${slips.length}...`);
+        const pickLines = await fetchAllPages(pickLinesUrl(slip));
+        const allocations: Record<string, any> = {};
+
+        for (const pl of pickLines) {
+          const item = pl.Item;
+          const subinv = pf(pl, ['SourceSubinventory']);
+          const reqQty = num(pl.RequestedQuantity);
+          if (!item || reqQty <= 0) continue;
+
+          // Fetch on-hand balances
+          const onhands = await fetchAllPages(ONHAND_URL(orgCode, item, subinv));
+          const lots: Record<string, { qty: number; serials: string[] }> = {};
+          const serialOnly: string[] = [];
+
+          onhands.forEach(b => {
+            (b.lots ?? []).forEach((lot: any) => {
+              const ln = lot.LotNumber; if (!ln) return;
+              if (!lots[ln]) lots[ln] = { qty: 0, serials: [] };
+              lots[ln].qty += num(pf(lot, ['OnhandQuantity', 'PrimaryQuantity', 'Quantity', 'LotQuantity']));
+              (lot.lotSerials ?? []).forEach((s: any) => { const sn = pf(s, ['SerialNumber', 'FmSerialNumber']); if (sn) lots[ln].serials.push(sn); });
+            });
+            (b.serials ?? []).forEach((s: any) => { const sn = pf(s, ['SerialNumber', 'FmSerialNumber']); if (sn) serialOnly.push(sn); });
+          });
+
+          // Auto-allocate: prefer lot if available, otherwise use serial-only
+          const lotEntries = Object.values(lots).sort((a, b) => a.qty - b.qty).reverse();
+          let selectedSerials: string[] = [];
+          let selectedLot: string | undefined;
+
+          if (lotEntries.length > 0) {
+            // Lot-controlled: use first lot with enough serials
+            for (const lot of lotEntries) {
+              if (lot.serials.length >= reqQty) {
+                selectedLot = Object.keys(lots).find(k => lots[k] === lot);
+                selectedSerials = lot.serials.slice(0, reqQty);
+                break;
+              }
+            }
+            if (!selectedSerials.length) {
+              selectedLot = Object.keys(lots)[0];
+              selectedSerials = lotEntries[0].serials.slice(0, reqQty);
+            }
+          } else if (serialOnly.length > 0) {
+            selectedSerials = serialOnly.slice(0, reqQty);
+          }
+
+          if (selectedSerials.length > 0) {
+            allocations[String(pl.PickSlipLine)] = { item, lot: selectedLot, serials: selectedSerials };
+          }
+        }
+
+        // Submit confirm payload
+        if (Object.keys(allocations).length > 0) {
+          const confirmPayload = { pickLines: Object.entries(allocations).map(([lineKey, a]) => {
+            const qty = a.serials.length;
+            const subinv = pf(pickLines.find((l: any) => String(l.PickSlipLine) === lineKey), ['SourceSubinventory']);
+            const base: any = {
+              PickSlip: String(slip.PickSlip ?? ''),
+              PickSlipLine: String(lineKey),
+              PickedQuantity: String(qty),
+              ...(subinv ? { SubinventoryCode: subinv } : {}),
+            };
+            const serials = a.serials.map((s: string) => ({ FromSerialNumber: s, ToSerialNumber: s }));
+            if (a.lot) {
+              base.lotSerialItemLots = [{ Lot: a.lot, Quantity: String(qty), lotSerialItemSerials: serials }];
+            } else if (serials.length) {
+              base.serialItemSerials = serials;
+            }
+            return base;
+          }) };
+
+          const r2 = await fetch(`${FUSION_BASE}/pickTransactions`, {
+            method: 'POST',
+            headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
+            body: JSON.stringify(confirmPayload),
+          });
+          if (!r2.ok) { message.error(`Pick confirm failed for slip ${slip.PickSlip}`); }
+        }
+      }
+
+      // STEP 3: Ship Confirm
+      setAutoStep('ship-confirm');
+      setAutoStatus('Performing Ship Confirm...');
+
+      const shipName = shipmentName;
+      const shipPayload = { ShipmentName: shipName, Action: 'CONFIRM', Organization: orgCode };
+      const r3 = await fetch(`${FUSION_BASE}/shipConfirmations`, {
+        method: 'POST',
+        headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
+        body: JSON.stringify(shipPayload),
+      });
+
+      if (r3.ok) {
+        setAutoStep('done');
+        setAutoStatus('All steps completed successfully!');
+        message.success('Automated workflow completed');
+        setTimeout(() => { setAutoRunning(false); setAutoStep('idle'); load(); }, 2000);
+      } else {
+        message.error('Ship Confirm failed');
+        setAutoRunning(false);
+        setAutoStep('idle');
+      }
+    } catch (e: any) {
+      message.error(`Automation error: ${e.message}`);
+      setAutoRunning(false);
+      setAutoStep('idle');
+    }
+  };
+
   const cols: ColumnsType<any> = [
     { title: 'Line', dataIndex: 'OrderLine', width: 55, align: 'center', fixed: 'left' as const, render: v => <Tag color="blue">{v ?? '—'}</Tag> },
     { title: 'Item', dataIndex: 'Item', width: 150, fixed: 'left' as const, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v ?? '—'}</Text> },
@@ -882,22 +1038,39 @@ const AutoShipConfirmModal: React.FC<{ orderNo?: string; org?: string; open: boo
       title={<Space><CarOutlined style={{ color: REDWOOD.success }} /> Auto Ship Confirm — order {orderNo}
         <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {SHIPLINES_URL(String(orderNo ?? ''))}</span>}>
           <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info }} /></Tooltip></Space>}>
-      <Steps size="small" current={stage} style={{ marginBottom: 16 }}
+      <Steps size="small" current={autoRunning ? (autoStep === 'pick-release' ? 0 : autoStep === 'pick-confirm' ? 1 : autoStep === 'ship-confirm' ? 2 : 3) : stage} style={{ marginBottom: 16 }}
         items={[{ title: 'Open' }, { title: 'Pick Released' }, { title: 'Pick Confirmed' }, { title: 'Ship Confirmed' }]} />
+
+      {/* Automation Status */}
+      {autoRunning && (
+        <Card style={{ marginBottom: 12, background: REDWOOD.neutral100, borderColor: REDWOOD.info }}>
+          <Space direction="vertical" style={{ width: '100%' }} size="small">
+            <Space>
+              <Spin size="small" />
+              <Text strong>Automated Workflow Running</Text>
+            </Space>
+            <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>{autoStatus}</Text>
+          </Space>
+        </Card>
+      )}
+
       <Space wrap style={{ marginBottom: 10 }}>
+        <Button type="primary" icon={<ThunderboltOutlined />} loading={autoRunning} disabled={autoRunning || stage >= 1 || !lines.length} onClick={runAllSteps}
+          style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Run All Steps (Auto)</Button>
+        <Divider type="vertical" />
         <Button icon={<ReloadOutlined />} loading={loading} onClick={load}>Check Status</Button>
-        <Button type="primary" icon={<ThunderboltOutlined />} loading={releasing} disabled={stage >= 1 || !lines.length} onClick={pickRelease}
+        <Button type="primary" icon={<ThunderboltOutlined />} loading={releasing} disabled={autoRunning || stage >= 1 || !lines.length} onClick={pickRelease}
           style={stage >= 1 || !lines.length ? undefined : { background: REDWOOD.success, borderColor: REDWOOD.success }}>Pick Release</Button>
-        <Button icon={<InboxOutlined />} disabled={stage < 1} onClick={openPickConfirm}>Pick Confirm — assign lots / serials</Button>
+        <Button icon={<InboxOutlined />} disabled={autoRunning || stage < 1} onClick={openPickConfirm}>Pick Confirm — assign lots / serials</Button>
         <Tooltip title={noShipLines.length
           ? <span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>POST</b> {SHIPASSIGN_URL}<br />{JSON.stringify(assignBody(noShipLines[0]))} · per line</span>
           : 'No lines without a shipment'}>
-          <Button icon={<InboxOutlined />} loading={creatingShip} disabled={!noShipLines.length} onClick={createShipment}
+          <Button icon={<InboxOutlined />} loading={creatingShip} disabled={autoRunning || !noShipLines.length} onClick={createShipment}
             style={noShipLines.length ? { borderColor: REDWOOD.primary, color: REDWOOD.primary } : undefined}>
             Create Shipment{noShipLines.length ? ` (${noShipLines.length})` : ''}
           </Button>
         </Tooltip>
-        <Button icon={<CarOutlined />} disabled={stage < 2} onClick={() => setShipOpen(true)}>Ship Confirm</Button>
+        <Button icon={<CarOutlined />} disabled={autoRunning || stage < 2} onClick={() => setShipOpen(true)}>Ship Confirm</Button>
       </Space>
       {loading ? <div style={{ textAlign: 'center', padding: 30 }}><Spin /></div>
         : lines.length === 0 ? <Empty description="No shipment lines yet for this order — confirm the order first, then Check Status" style={{ padding: 24 }} />
