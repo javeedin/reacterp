@@ -6237,7 +6237,6 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       ...(hdr.subinventory && !(returnMode && l.returnLine) ? { SubinventoryCode: hdr.subinventory } : {}),
       ...(hdr.paymentTerms ? { PaymentTerms: hdr.paymentTerms } : {}),
       InventoryTransactionFlag: inventoryTransactionFlag,
-      InventoryInterfacedFlag: false,
       TransactionCategoryCode: (returnMode && l.returnLine) ? 'RETURN' : 'ORDER',
       // Return (RMA) line — LineCategoryCode RETURN + reference the original
       // fulfillment line via the originalOrderReference child (referenced return;
