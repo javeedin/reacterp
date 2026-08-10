@@ -6253,7 +6253,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         // Lot/serial being returned (from the original shipment) — one entry per
         // serial (Quantity 1, From==To); lot-only items carry LotNumber + Quantity.
         ...((l.retLots && l.retLots.length) ? {
-          lotSerials: l.retLots.map(x => ({
+          lotSerials: l.retLots.map((x, xi) => ({
+            SourceLotSerialId: `LS${i + 1}-${xi + 1}`,
             ...(x.lot ? { LotNumber: x.lot } : {}),
             ...(x.serial ? { ItemSerialNumberFrom: x.serial, ItemSerialNumberTo: x.serial } : {}),
             Quantity: x.serial ? 1 : (x.qty || 1),
@@ -6263,12 +6264,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       // For direct inventory transactions (InventoryTransactionFlag=true): include lotSerials allocation.
       // For regular outbound lines (InventoryTransactionFlag=false): lot goes to the EFF (FOM-4515328).
       ...(!returnMode && inventoryTransactionFlag && (l.selectedLot || l.selectedSerials?.length) ? {
-        lotSerials: l.selectedSerials && l.selectedSerials.length ? l.selectedSerials.map(s => ({
+        lotSerials: l.selectedSerials && l.selectedSerials.length ? l.selectedSerials.map((s, si) => ({
+          SourceLotSerialId: `LS${i + 1}-${si + 1}`,
           ...(l.selectedLot ? { LotNumber: l.selectedLot } : {}),
           ItemSerialNumberFrom: s,
           ItemSerialNumberTo: s,
           Quantity: 1,
-        })) : l.selectedLot ? [{ LotNumber: l.selectedLot, Quantity: qty }] : [],
+        })) : l.selectedLot ? [{ SourceLotSerialId: `LS${i + 1}-1`, LotNumber: l.selectedLot, Quantity: qty }] : [],
       } : {}),
       ...(effLineChild(l) ? { additionalInformation: [effLineChild(l)] } : {}),
       ...((returnMode && l.returnLine) ? {} : { charges: [{
