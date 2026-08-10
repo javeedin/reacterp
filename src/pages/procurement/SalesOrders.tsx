@@ -4281,7 +4281,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
             <Select showSearch disabled={!buName} placeholder="Subinventory" size="small" notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item label="Inventory Transaction" name="inventoryTransactionFlag" style={{ marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input type="checkbox" checked={inventoryTransactionFlag} onChange={(e) => setInventoryTransactionFlag(e.target.checked)} disabled={isBranchSales} style={{ cursor: isBranchSales ? 'not-allowed' : 'pointer' }} />
+              <input type="checkbox" checked={inventoryTransactionFlag} onChange={(e) => setInventoryTransactionFlag(e.target.checked)} style={{ cursor: 'pointer' }} />
               <span style={{ fontSize: 12, color: inventoryTransactionFlag ? REDWOOD.primary : REDWOOD.neutral600 }}>{inventoryTransactionFlag ? 'Direct inventory transaction' : 'Standard fulfillment flow'}</span>
             </div>
           </Form.Item></Col>
@@ -7379,7 +7379,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                       <Select showSearch notFoundContent="Pick a warehouse" options={subs.map(s => ({ value: s, label: s }))} /></Form.Item>
                     <div style={{ fontSize: 12, color: REDWOOD.neutral600, marginBottom: 8 }}>Inventory Transaction</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                      <input type="checkbox" checked={inventoryTransactionFlag} onChange={(e) => setInventoryTransactionFlag(e.target.checked)} disabled={isBranchSales} style={{ cursor: isBranchSales ? 'not-allowed' : 'pointer' }} />
+                      <input type="checkbox" checked={inventoryTransactionFlag} onChange={(e) => setInventoryTransactionFlag(e.target.checked)} style={{ cursor: 'pointer' }} />
                       <span style={{ fontSize: 12, color: inventoryTransactionFlag ? REDWOOD.primary : REDWOOD.neutral600 }}>{inventoryTransactionFlag ? 'Direct inventory transaction' : 'Standard fulfillment flow'}</span>
                     </div>
                     <Form.Item label="Base Currency" name="baseCurrency" style={{ marginBottom: 10 }}><Input readOnly placeholder="—" /></Form.Item>
