@@ -4968,6 +4968,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [branchBUData, setBranchBUData] = useState<{ baseCurrency?: string; conversionRate?: number }>({});
   const [branchPoPayload, setBranchPoPayload] = useState<string>('');
   const [branchApiDrawerOpen, setBranchApiDrawerOpen] = useState(false);
+  const [branchSupplierSearchOpen, setBranchSupplierSearchOpen] = useState(false);
+  const [branchSupplierSearchTerm, setBranchSupplierSearchTerm] = useState('');
+  const [branchSupplierSearchLoading, setBranchSupplierSearchLoading] = useState(false);
   const [branchPoNeedByDate, setBranchPoNeedByDate] = useState<any>(dayjs().add(7, 'days'));
   const [orderTypeOpts, setOrderTypeOpts] = useState<any[]>([]);
   const [orderTypeLookup, setOrderTypeLookup] = useState<Map<string, any>>(new Map());
@@ -7896,7 +7899,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
       {/* Branch Sales Modal — capture branch details and create PO */}
       <Modal open={branchSalesModalOpen} onCancel={() => { setBranchSalesModalOpen(false); branchSalesForm.resetFields(); setSavedOrderNumber(null); }}
-        maskClosable={false} width={1100} title={<Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /> Create Branch Purchase Order (BRNS) — Sales Order {savedOrderNumber}</Space>}
+        maskClosable={false} width={1100} title={<Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /> Create Branch Purchase Order (BRNS) — Sales Order <span style={{ color: REDWOOD.info, fontWeight: 'bold' }}>{createdOrderNumber || orderNumber}</span></Space>}
         footer={<Space>
           <Button icon={<ApiOutlined />} onClick={() => setBranchApiDrawerOpen(true)}>View API</Button>
           <Button onClick={() => { setBranchSalesModalOpen(false); branchSalesForm.resetFields(); setSavedOrderNumber(null); }}>Cancel</Button>
@@ -7925,15 +7928,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             </Col>
           </Row>
           <Form.Item label={<span>Branch Supplier <SearchOutlined style={{ color: REDWOOD.info, marginLeft: 4 }} /></span>} name="branchSupplierName" rules={[{ required: true, message: 'Select a supplier' }]}>
-            <Select showSearch placeholder="Search supplier by name..." optionFilterProp="label" allowClear
-              onSearch={(term) => fetchBranchSuppliers(term)}
-              notFoundContent={branchSuppliers.length === 0 ? 'Type to search suppliers...' : undefined}
-              options={branchSuppliers.map(s => ({
-                value: s.Supplier ?? s.SupplierName ?? s.SupplierNumber,
-                label: `${s.Supplier ?? s.SupplierName ?? 'Unknown'}${s.SupplierNumber ? ` (${s.SupplierNumber})` : ''}`
-              }))} />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Input placeholder="Search supplier by name..." readOnly value={branchSalesForm.getFieldValue('branchSupplierName') ?? ''} disabled style={{ flex: 1 }} />
+              <Button type="primary" icon={<SearchOutlined />} onClick={() => setBranchSupplierSearchOpen(true)} style={{ background: REDWOOD.info, borderColor: REDWOOD.info }} />
+            </div>
           </Form.Item>
-          <Form.Item label="Ship-To Location (Inventory Org)" name="shipToLocation" rules={[{ required: true, message: 'Select a location' }]}>
+          <Form.Item label={<span>Ship-To Location (Inventory Org) <Tooltip title={`Web Service: GET /organizations?q=BusinessUnitId EQ ${form.getFieldValue('branchBU') ? "'" + form.getFieldValue('branchBU') + "'" : 'N/A'}`}><ApiOutlined style={{ color: REDWOOD.info, marginLeft: 4, cursor: 'pointer' }} /></Tooltip></span>} name="shipToLocation" rules={[{ required: true, message: 'Select a location' }]}>
             <Select showSearch placeholder="Select Ship-To Location" optionFilterProp="label" allowClear
               options={branchShipToOrgs.map((o: any) => ({ value: pf(o, ['OrganizationCode']), label: `${pf(o, ['OrganizationCode'])}${pf(o, ['OrganizationName']) ? ' — ' + pf(o, ['OrganizationName']) : ''}` }))} />
           </Form.Item>
@@ -8089,6 +8089,61 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           </div>
         </div>
       </Drawer>
+
+      {/* Branch Supplier Search Dialog */}
+      <Modal
+        open={branchSupplierSearchOpen}
+        onCancel={() => {
+          setBranchSupplierSearchOpen(false);
+          setBranchSupplierSearchTerm('');
+        }}
+        width={700}
+        title={<Space><SearchOutlined style={{ color: REDWOOD.info }} /> Search Suppliers</Space>}
+        footer={null}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Input.Search
+            placeholder="Search by supplier name or number..."
+            value={branchSupplierSearchTerm}
+            onChange={(e) => setBranchSupplierSearchTerm(e.target.value)}
+            onSearch={(term) => {
+              if (term.length >= 2) {
+                setBranchSupplierSearchLoading(true);
+                fetchBranchSuppliers(term).finally(() => setBranchSupplierSearchLoading(false));
+              }
+            }}
+            enterButton="Search"
+            loading={branchSupplierSearchLoading}
+            size="large"
+          />
+        </div>
+        <Table
+          size="small"
+          loading={branchSupplierSearchLoading}
+          columns={[
+            { title: 'Supplier #', dataIndex: 'SupplierNumber', width: 100 },
+            { title: 'Supplier Name', dataIndex: 'SupplierName', render: (v: any) => v || 'Unknown' },
+            { title: 'Status', dataIndex: 'SupplierStatus', width: 80, render: (v: any) => v ? <Tag color="green">{v}</Tag> : <Tag>—</Tag> },
+          ]}
+          dataSource={branchSuppliers.map((s, i) => ({
+            key: i,
+            SupplierNumber: s.SupplierNumber,
+            SupplierName: s.SupplierName || s.Supplier,
+            SupplierStatus: s.SupplierStatus,
+            _source: s,
+          }))}
+          pagination={false}
+          onRow={(record) => ({
+            onClick: () => {
+              branchSalesForm.setFieldsValue({ branchSupplierName: record.SupplierName });
+              setBranchSupplierSearchOpen(false);
+              setBranchSupplierSearchTerm('');
+            },
+            style: { cursor: 'pointer' },
+          })}
+          locale={{ emptyText: branchSupplierSearchTerm.length < 2 ? 'Type at least 2 characters to search' : 'No suppliers found' }}
+        />
+      </Modal>
 
       <CustomerSearchBipModal
         open={custSearchModalOpen}
