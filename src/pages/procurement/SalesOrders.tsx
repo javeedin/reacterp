@@ -2845,6 +2845,8 @@ interface NewLine { key: string; itemNumber: string; description?: string; uom?:
   orgCode?: string; subinventory?: string;
   // lotSerials rows fetched from Fusion (shown in the Lot Details tab).
   lineLots?: any[];
+  // Selected lot and serials for InventoryTransactionFlag allocation (direct inventory transactions).
+  selectedLot?: string; selectedSerials?: string[];
   // Return (RMA) line: references the original order line being returned.
   returnLine?: boolean; returnReason?: string; maxQty?: number;
   refHeaderId?: string | number; refLineId?: string | number; refFulfillLineId?: string | number;
@@ -4983,6 +4985,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [createdPONumber, setCreatedPONumber] = useState<string | null>(null);
   const [creatingBranchPO, setCreatingBranchPO] = useState(false);
   const [isBranchSales, setIsBranchSales] = useState(false);
+  // Allocation modal for lot/serial selection (InventoryTransactionFlag)
+  const [allocationModalOpen, setAllocationModalOpen] = useState(false);
+  const [allocationLine, setAllocationLine] = useState<NewLine | null>(null);
   const [branchSuppliers, setBranchSuppliers] = useState<any[]>([]);
   const [branchShipToOrgs, setBranchShipToOrgs] = useState<any[]>([]);
   const [branchBUData, setBranchBUData] = useState<{ baseCurrency?: string; conversionRate?: number }>({});
@@ -6255,7 +6260,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           })),
         } : {}),
       } : {}),
-      // lotSerials is NOT sent on outbound lines (FOM-4515328); lot goes to the EFF.
+      // For direct inventory transactions (InventoryTransactionFlag=true): include lotSerials allocation.
+      // For regular outbound lines (InventoryTransactionFlag=false): lot goes to the EFF (FOM-4515328).
+      ...(!returnMode && inventoryTransactionFlag && (l.selectedLot || l.selectedSerials?.length) ? {
+        lotSerials: l.selectedSerials && l.selectedSerials.length ? l.selectedSerials.map(s => ({
+          ...(l.selectedLot ? { LotNumber: l.selectedLot } : {}),
+          ItemSerialNumberFrom: s,
+          ItemSerialNumberTo: s,
+          Quantity: 1,
+        })) : l.selectedLot ? [{ LotNumber: l.selectedLot, Quantity: qty }] : [],
+      } : {}),
       ...(effLineChild(l) ? { additionalInformation: [effLineChild(l)] } : {}),
       ...((returnMode && l.returnLine) ? {} : { charges: [{
         SourceChargeId: `C${i + 1}`,
@@ -6969,6 +6983,21 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     { title: 'Serial', width: 160, render: (_, r) => r.serialFrom ? <Text style={{ fontSize: 11.5 }}>{r.serialFrom}{r.serialTo && r.serialTo !== r.serialFrom ? ` → ${r.serialTo}` : ''}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
     { title: 'Subinventory', dataIndex: 'subinventory', width: 130, render: v => v ? <Text style={{ fontSize: 11.5 }}>{v}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
     { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: v => fmtQty(num(v)) },
+    {
+      title: 'Action',
+      width: 110,
+      fixed: 'right',
+      render: (_, r) => {
+        const line = lines.find(l => l.key === r.key.split('-')[0]);
+        if (!line) return null;
+        const isFirstRow = lotRows.findIndex(lr => lr.key.startsWith(r.key.split('-')[0])) === lotRows.indexOf(r);
+        return isFirstRow && inventoryTransactionFlag ? (
+          <Button size="small" type="primary" icon={<TagsOutlined />} onClick={() => { setAllocationLine(line); setAllocationModalOpen(true); }} style={{ background: REDWOOD.info, borderColor: REDWOOD.info }}>
+            Allocate
+          </Button>
+        ) : null;
+      },
+    },
   ];
 
   // Fulfillment tab — item + warehouse (org) + subinventory per line.
@@ -7008,6 +7037,150 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       </span>
     </Tooltip>
   );
+
+  // Allocation Modal — select lots and serials for InventoryTransactionFlag
+  const AllocationModalComponent = () => {
+    if (!allocationLine) return null;
+    const [balances, setBalances] = useState<any[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [selLot, setSelLot] = useState<string | undefined>(allocationLine.selectedLot);
+    const [selSerials, setSelSerials] = useState<string[]>(allocationLine.selectedSerials ?? []);
+
+    const url = useMemo(() => {
+      const org = hdr.warehouse;
+      const item = allocationLine.itemNumber;
+      const subinv = allocationLine.subinventory || hdr.subinventory;
+      if (!org || !item) return '';
+      const q = `OrganizationCode=${org};ItemNumber=${item}` + (subinv ? `;SubinventoryCode=${subinv}` : '');
+      return `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&expand=lots.lotSerials,serials&onlyData=true&limit=500`;
+    }, [allocationLine, hdr.warehouse, hdr.subinventory]);
+
+    const load = useCallback(async () => {
+      if (!url) return;
+      setLoading(true);
+      setError('');
+      setSelLot(allocationLine.selectedLot);
+      setSelSerials(allocationLine.selectedSerials ?? []);
+      try {
+        setBalances(await fetchAllPages(url));
+      } catch (e: any) {
+        setError(e.message);
+        setBalances([]);
+      } finally {
+        setLoading(false);
+      }
+    }, [url]);
+
+    useEffect(() => {
+      if (allocationModalOpen) load();
+    }, [allocationModalOpen, load]);
+
+    const lots = useMemo(() => {
+      const map: Record<string, { lot: string; qty: number; serials: string[] }> = {};
+      balances.forEach(b => (b.lots ?? []).forEach((lot: any) => {
+        const ln = pf(lot, ['LotNumber', 'Lot']);
+        if (!ln) return;
+        if (!map[ln]) map[ln] = { lot: ln, qty: 0, serials: [] };
+        map[ln].qty += num(pf(lot, ['OnhandQuantity', 'PrimaryQuantity', 'Quantity', 'LotQuantity']));
+        (lot.lotSerials ?? []).forEach((s: any) => {
+          const sn = pf(s, ['SerialNumber', 'FmSerialNumber']);
+          if (sn) map[ln].serials.push(sn);
+        });
+      }));
+      return Object.values(map).sort((a, b) => a.lot.localeCompare(b.lot));
+    }, [balances]);
+
+    const serialOnly = useMemo(() =>
+      Array.from(new Set(balances.flatMap(b => (b.serials ?? []).map((s: any) => pf(s, ['SerialNumber', 'FmSerialNumber'])).filter(Boolean)))),
+      [balances]
+    );
+
+    const availSerials: string[] = useMemo(() => {
+      if (selLot) return lots.find(l => l.lot === selLot)?.serials ?? [];
+      return serialOnly as string[];
+    }, [selLot, lots, serialOnly]);
+
+    const isLotControlled = lots.length > 0;
+
+    const handleApply = () => {
+      upd(allocationLine.key, { selectedLot: selLot, selectedSerials: selSerials });
+      message.success(`Allocated ${selLot ? `lot ${selLot}` : 'serial'}${selSerials.length ? ` with ${selSerials.length} serial(s)` : ''}`);
+      setAllocationModalOpen(false);
+      setAllocationLine(null);
+    };
+
+    return (
+      <Modal
+        open={allocationModalOpen && !!allocationLine}
+        onCancel={() => {
+          setAllocationModalOpen(false);
+          setAllocationLine(null);
+        }}
+        maskClosable={false}
+        width={720}
+        title={<Space><ProfileOutlined style={{ color: REDWOOD.primary }} /> Allocate Lot/Serial — <Text strong>{allocationLine.itemNumber}</Text></Space>}
+        footer={<Space>
+          <Text type={selSerials.length === 0 ? 'warning' : undefined} style={{ marginRight: 'auto', fontSize: 12 }}>
+            Allocated <b>{selSerials.length}</b> serial(s){selLot ? ` from lot ${selLot}` : ''}
+          </Text>
+          <Button onClick={() => { setAllocationModalOpen(false); setAllocationLine(null); }}>Cancel</Button>
+          <Button type="primary" disabled={!isLotControlled && serialOnly.length === 0} style={{ background: REDWOOD.success, borderColor: REDWOOD.success }} onClick={handleApply}>
+            Apply Allocation
+          </Button>
+        </Space>}
+      >
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 12, fontSize: 12 }}>
+          <span><Text type="secondary">Org: </Text><Tag>{hdr.warehouse}</Tag></span>
+          <span><Text type="secondary">Item: </Text><Tag color="geekblue">{allocationLine.itemNumber}</Tag></span>
+          {(allocationLine.subinventory || hdr.subinventory) && <span><Text type="secondary">Subinventory: </Text>{allocationLine.subinventory || hdr.subinventory}</span>}
+          <Tooltip title={<span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}><b>GET</b> {url}</span>}>
+            <Button size="small" type="text" icon={<ApiOutlined />} style={{ color: REDWOOD.info, marginLeft: 'auto' }} />
+          </Tooltip>
+          <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>Reload</Button>
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <Spin />
+          </div>
+        ) : error ? (
+          <div style={{ color: REDWOOD.error, fontSize: 12 }}>
+            <InfoCircleOutlined style={{ marginRight: 6 }} />
+            {error}
+          </div>
+        ) : (
+          <>
+            {isLotControlled && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                  Lot <span style={{ color: REDWOOD.error }}>*</span> <Text type="secondary" style={{ fontWeight: 400 }}>(change lot for this line)</Text>
+                </div>
+                <Select showSearch style={{ width: '100%' }} placeholder="Select a lot from on-hand" value={selLot} onChange={v => { setSelLot(v); setSelSerials([]); }} options={lots.map(l => ({ value: l.lot, label: `${l.lot} — on-hand ${fmtQty(l.qty)}${l.serials.length ? ` · ${l.serials.length} serial(s)` : ''}` }))} notFoundContent="No lots on hand" />
+              </div>
+            )}
+            {!isLotControlled && serialOnly.length === 0 ? (
+              <Empty description="No lots or serials on hand for this item / subinventory" style={{ padding: 24 }} />
+            ) : (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                  Available Serial Numbers {selLot ? <Text type="secondary" style={{ fontWeight: 400 }}>for lot {selLot}</Text> : ''}
+                  {availSerials.length > 0 && <Tag style={{ marginLeft: 6 }}>{availSerials.length}</Tag>}
+                </div>
+                {isLotControlled && !selLot ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Select a lot to see its serials" style={{ padding: 20 }} />
+                ) : availSerials.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No serials on hand" style={{ padding: 20 }} />
+                ) : (
+                  <Table size="small" scroll={{ y: 300 }} pagination={false} dataSource={availSerials.map((s, i) => ({ key: `${s}-${i}`, SerialNumber: s }))} rowKey="SerialNumber" rowSelection={{ selectedRowKeys: selSerials, onChange: (keys) => setSelSerials(keys as string[]) }} columns={[{ title: 'Serial Number', dataIndex: 'SerialNumber', render: v => <Text strong style={{ fontSize: 12 }}>{v}</Text> }]} />
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </Modal>
+    );
+  };
 
   return (
     <div style={{ padding: '4px 2px' }}>
@@ -7624,6 +7797,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           </div>
         )}
       </Modal>
+
+      {/* Allocation Modal — lot/serial selection for InventoryTransactionFlag */}
+      <AllocationModalComponent />
 
       {/* Line error detail (opened from the red ✗ in the Status column) */}
       <Modal open={!!errModal} onCancel={() => setErrModal(null)} width={640}
