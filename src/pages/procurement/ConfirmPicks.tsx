@@ -212,6 +212,14 @@ const AllocateModal: React.FC<{ line: any | null; org?: string; onClose: () => v
     return serialOnly as string[];
   }, [selLot, lots, serialOnly]);
 
+  // Auto-select serials based on requested quantity
+  useEffect(() => {
+    if (availSerials.length > 0 && selSerials.length === 0) {
+      const toSelect = availSerials.slice(0, reqQty);
+      setSelSerials(toSelect);
+    }
+  }, [availSerials, reqQty]);
+
   const isLotControlled = lots.length > 0;
   const overAllocated = selSerials.length > reqQty;
 
