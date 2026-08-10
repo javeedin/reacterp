@@ -5315,13 +5315,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     }
   }, [hdr.orderType, orderTypeLookup]);
 
-  // When editing a branch sales order, if branchBusinessUnit has a stored value in EFF, populate and disable the field
+  // When editing a branch sales order, if branchBusinessUnit has a stored value in EFF or hdr.branchBU, disable the field
   useEffect(() => {
-    if (editOrder && hdrEffVals && isBranchSales) {
-      const branchBuValue = hdrEffVals['branchBusinessUnit'];
+    if (editOrder && isBranchSales) {
+      // Check if branchBU has a value from EFF or current form state
+      const branchBuValue = hdrEffVals?.['branchBusinessUnit'] || hdr.branchBU;
       if (branchBuValue) {
-        console.log('NewOrderTab: Populating branchBU from EFF and disabling:', branchBuValue);
-        form.setFieldsValue({ branchBU: branchBuValue });
+        console.log('NewOrderTab: Disabling branchBU - already has value:', branchBuValue);
+        if (hdrEffVals?.['branchBusinessUnit']) {
+          form.setFieldsValue({ branchBU: hdrEffVals['branchBusinessUnit'] });
+        }
         setIsBranchBUDisabled(true);
       } else {
         setIsBranchBUDisabled(false);
@@ -5330,7 +5333,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       // Reset disabled state when not editing or not a branch sales order
       setIsBranchBUDisabled(false);
     }
-  }, [editOrder, hdrEffVals, isBranchSales, form]);
+  }, [editOrder, hdrEffVals, hdr.branchBU, isBranchSales, form]);
 
   // Populate Branch BU and Branch Sales Order in EFF when values are selected
   useEffect(() => {
@@ -7091,6 +7094,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                         <Form.Item label="Branch BU" name="branchBU" rules={[{ required: true, message: 'Select a branch BU' }]} style={{ marginBottom: 10, marginTop: 10 }}>
                           <Select
                             showSearch
+                            disabled={editMode && hdr.branchBU}
                             placeholder="Select Branch Business Unit"
                             optionFilterProp="label"
                             options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))}
@@ -7110,7 +7114,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                     <Form.Item label="Customer Name" name="customerName" layout="vertical" labelCol={{ span: 24 }} wrapperCol={{ span: 24 }} style={{ marginBottom: 10 }}>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                         <Input readOnly placeholder="Select a customer" value={hdr.customerName || ''} style={{ flex: 1 }} />
-                        <Button type="primary" icon={<SearchOutlined />} onClick={() => setCustSearchModalOpen(true)} disabled={!hdr.businessUnit} title={hdr.businessUnit ? "Search Customer (BIP)" : "Select Business Unit first"} style={{ background: REDWOOD.info, borderColor: REDWOOD.info }} />
+                        <Button type="primary" icon={<SearchOutlined />} onClick={() => setCustSearchModalOpen(true)} disabled={!hdr.businessUnit || (editMode && hdr.customerName)} title={editMode && hdr.customerName ? "Customer cannot be changed in edit mode" : (hdr.businessUnit ? "Search Customer (BIP)" : "Select Business Unit first")} style={{ background: REDWOOD.info, borderColor: REDWOOD.info }} />
                       </div>
                     </Form.Item>
                     <Form.Item label="Cust Number" name="accountNumber" style={{ marginBottom: 10 }}><Input readOnly placeholder="—" /></Form.Item>
