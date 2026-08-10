@@ -168,8 +168,17 @@ interface SearchParams {
   orderNumber?: string;
   supplier?: string;
   statusCode?: string;
+  procurementBU?: string;
+  procurementBUId?: number | string;
   dateOp?: DateOp;
   creationDate?: Dayjs | null;
+}
+
+interface BusinessUnit {
+  businessUnitId: number | string;
+  businessUnitName: string;
+  paymentCurrency?: string;
+  ledgerCurrency?: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -204,6 +213,7 @@ const buildQParam = (p: SearchParams): string => {
   if (p.orderNumber) parts.push(`OrderNumber like "${p.orderNumber}*"`);
   if (p.supplier)    parts.push(`Supplier like "${p.supplier}*"`);
   if (p.statusCode)  parts.push(`StatusCode="${p.statusCode}"`);
+  if (p.procurementBUId) parts.push(`ProcurementBUId=${String(p.procurementBUId)}`);
   if (p.creationDate) parts.push(`CreationDate${p.dateOp || '>'}${dayjs(p.creationDate).format('YYYY-MM-DD')}`);
   return parts.join(';');
 };
@@ -943,6 +953,8 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
   // Which Fusion resource to describe. draftPurchaseOrders exposes `submit`;
   // purchaseOrders exposes the lifecycle actions (cancel/change/close/hold…).
   const [describeResource, setDescribeResource] = useState('draftPurchaseOrders');
+  const [busUnits, setBusUnits] = useState<BusinessUnit[]>([]);
+  const [busUnitsLoading, setBusUnitsLoading] = useState(false);
 
   const approveBody = { name: approveAction, parameters: [] as any[] };
 
@@ -1077,7 +1089,12 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
 
   const handleSearch = async () => {
     const vals = form.getFieldsValue();
-    const params: SearchParams = { orderNumber: vals.orderNumber, supplier: vals.supplier, statusCode: vals.statusCode, dateOp: vals.dateOp, creationDate: vals.creationDate ?? null };
+    if (!vals.procurementBUId) {
+      message.error('Procurement Business Unit is mandatory');
+      return;
+    }
+    const buRow = busUnits.find(bu => bu.businessUnitId === vals.procurementBUId);
+    const params: SearchParams = { orderNumber: vals.orderNumber, supplier: vals.supplier, statusCode: vals.statusCode, procurementBUId: vals.procurementBUId, procurementBU: buRow?.businessUnitName, dateOp: vals.dateOp, creationDate: vals.creationDate ?? null };
     setSearchParams(params); setPage(1); setHasSearched(true);
     const items = await fetchPOs(params, 1);
     fetchLineCounts(items);
@@ -1085,26 +1102,46 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
 
   const handleReset = () => { form.resetFields(); setSearchParams({}); setPage(1); setData([]); setExpandedLines([]); setTotal(0); setHasSearched(false); setLineCountMap(new Map()); setShipToMap(new Map()); };
 
+  // Fetch business units from payablesOptions
+  useEffect(() => {
+    const fetchBusUnits = async () => {
+      setBusUnitsLoading(true);
+      try {
+        const res = await fetch(`${BASE_URL}/payablesOptions?onlyData=true&limit=500&fields=businessUnitId,businessUnitName,paymentCurrency,ledgerCurrency`, { headers: { Authorization: AUTH_HEADER, Accept: 'application/json' } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        const json = await res.json();
+        const items: BusinessUnit[] = (json.items ?? []);
+        setBusUnits(items);
+      } catch (e: any) {
+        message.error(`Failed to load business units: ${e.message}`, 3);
+        setBusUnits([]);
+      } finally { setBusUnitsLoading(false); }
+    };
+    fetchBusUnits();
+  }, []);
+
   // Deep-link: ?orderNumber=<PO> (e.g. drill-down from cost-distribution reference)
   // prefills the form and runs the search automatically.
   const [urlParams] = useSearchParams();
   useEffect(() => {
+    if (busUnits.length === 0) return;
+    const defaultBU = busUnits[0];
     const on = urlParams.get('orderNumber');
     if (on) {
-      form.setFieldsValue({ orderNumber: on });
-      const params: SearchParams = { orderNumber: on };
+      form.setFieldsValue({ orderNumber: on, procurementBUId: defaultBU.businessUnitId });
+      const params: SearchParams = { orderNumber: on, procurementBUId: defaultBU.businessUnitId, procurementBU: defaultBU.businessUnitName };
       setSearchParams(params); setPage(1); setHasSearched(true);
       fetchPOs(params, 1).then(items => fetchLineCounts(items));
       return;
     }
     // Default: recent orders — CreationDate > (sysdate - 2). Prefill + auto-run.
     const defaultDate = dayjs().subtract(2, 'day');
-    form.setFieldsValue({ dateOp: '>', creationDate: defaultDate });
-    const params: SearchParams = { dateOp: '>', creationDate: defaultDate };
+    form.setFieldsValue({ dateOp: '>', creationDate: defaultDate, procurementBUId: defaultBU.businessUnitId });
+    const params: SearchParams = { dateOp: '>', creationDate: defaultDate, procurementBUId: defaultBU.businessUnitId, procurementBU: defaultBU.businessUnitName };
     setSearchParams(params); setPage(1); setHasSearched(true);
     fetchPOs(params, 1).then(items => fetchLineCounts(items));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [busUnits]);
 
   const handleApiTest = async () => {
     const url = buildUrl(form.getFieldsValue(), page);
@@ -1268,17 +1305,24 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
       <Card styles={{ body: { padding: '14px 18px' } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
         <Form form={form} layout="vertical">
           <Row gutter={[10, 0]}>
-            <Col xs={24} sm={12} md={5}>
+            <Col xs={24} sm={12} md={6}>
+              <Form.Item name="procurementBUId" label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Procurement BU <Text type="danger" style={{ fontSize: 12 }}>*</Text></Text>} rules={[{ required: true, message: 'Required' }]} style={{ marginBottom: 8 }}>
+                <Select placeholder="Select business unit" loading={busUnitsLoading}>
+                  {busUnits.map(bu => <Option key={bu.businessUnitId} value={bu.businessUnitId}>{bu.businessUnitName}</Option>)}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
               <Form.Item name="orderNumber" label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Order Number</Text>} style={{ marginBottom: 8 }}>
                 <Input placeholder="e.g. 2026020223" allowClear onPressEnter={handleSearch} />
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12} md={5}>
+            <Col xs={24} sm={12} md={6}>
               <Form.Item name="supplier" label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Supplier</Text>} style={{ marginBottom: 8 }}>
                 <Input placeholder="Supplier name" allowClear onPressEnter={handleSearch} />
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12} md={5}>
+            <Col xs={24} sm={12} md={6}>
               <Form.Item name="statusCode" label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Status</Text>} style={{ marginBottom: 8 }}>
                 <Select placeholder="All statuses" allowClear>
                   <Option value="OPEN">Open</Option>
@@ -1290,7 +1334,9 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12} md={7}>
+          </Row>
+          <Row gutter={[10, 0]}>
+            <Col xs={24} md={10}>
               <Form.Item label={<Text style={{ fontSize: 12, fontWeight: 600 }}>Creation Date</Text>} style={{ marginBottom: 8 }}>
                 <Space.Compact block>
                   <Form.Item name="dateOp" noStyle initialValue=">">
