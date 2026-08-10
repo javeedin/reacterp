@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Modal, Input, Button, Spin, Empty, Tag, Card, Row, Col, Typography } from 'antd';
-import { SearchOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { Modal, Input, Button, Spin, Empty, Tag, Card, Row, Col, Typography, Drawer, Divider, Space, Input as AntInput } from 'antd';
+import { SearchOutlined, CheckCircleOutlined, ApiOutlined, CopyOutlined } from '@ant-design/icons';
 import { searchCustomersByBIP, CustomerSearchResult } from '../services/customerSearchBip.service';
 import { ORACLE_SOAP_CONFIG } from '../config/api.config';
+import { message } from 'antd';
 
 const { Text } = Typography;
 
@@ -32,6 +33,8 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
   const [allCustomers, setAllCustomers] = useState<CustomerSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [apiDrawerOpen, setApiDrawerOpen] = useState(false);
+  const [lastApiDetails, setLastApiDetails] = useState<{ url?: string; envelope?: string }>({});
 
   // Reset state when modal closes
   useEffect(() => {
@@ -60,6 +63,12 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
         username,
         password
       );
+
+      // Capture API details for debugging
+      setLastApiDetails({
+        url: response.soapUrl,
+        envelope: response.soapEnvelope,
+      });
 
       if (response.success && response.customers) {
         setAllCustomers(response.customers);
@@ -94,18 +103,39 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
     onClose();
   };
 
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      message.success('Copied to clipboard');
+    }).catch(() => {
+      message.error('Failed to copy');
+    });
+  };
+
   return (
-    <Modal
-      title={<div style={{ fontSize: '18px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: 10 }}>
-        <SearchOutlined style={{ color: '#1890ff' }} />
-        Find Customer {businessUnitName && <span style={{ fontSize: '14px', fontWeight: '500', color: '#666' }}>({businessUnitName})</span>}
-      </div>}
-      open={open}
-      onCancel={onClose}
-      width={900}
-      footer={null}
-      bodyStyle={{ padding: '24px' }}
-    >
+    <>
+      <Modal
+        title={<div style={{ fontSize: '18px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <SearchOutlined style={{ color: '#1890ff' }} />
+            <span>Find Customer {businessUnitName && <span style={{ fontSize: '14px', fontWeight: '500', color: '#666' }}>({businessUnitName})</span>}</span>
+          </div>
+          {lastApiDetails.url && (
+            <Button
+              type="text"
+              size="small"
+              icon={<ApiOutlined style={{ color: '#1890ff' }} />}
+              onClick={() => setApiDrawerOpen(true)}
+              title="View API Details"
+              style={{ marginRight: '-8px' }}
+            />
+          )}
+        </div>}
+        open={open}
+        onCancel={onClose}
+        width={900}
+        footer={null}
+        bodyStyle={{ padding: '24px' }}
+      >
       {!businessUnitId && (
         <Empty description="Select a business unit first to search customers" />
       )}
@@ -241,6 +271,109 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
         </>
       )}
     </Modal>
+
+    {/* API Details Drawer */}
+    <Drawer
+      title="API Details"
+      placement="right"
+      onClose={() => setApiDrawerOpen(false)}
+      open={apiDrawerOpen}
+      width={600}
+      bodyStyle={{ padding: '24px' }}
+    >
+      {lastApiDetails.url || lastApiDetails.envelope ? (
+        <Space direction="vertical" style={{ width: '100%' }} size="large">
+          {/* SOAP Endpoint URL */}
+          <div>
+            <div style={{ fontSize: '14px', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ApiOutlined />
+              SOAP Endpoint
+            </div>
+            <div style={{
+              backgroundColor: '#f5f5f5',
+              padding: '12px',
+              borderRadius: '6px',
+              fontFamily: 'monospace',
+              fontSize: '12px',
+              wordBreak: 'break-all',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: '8px'
+            }}>
+              <span style={{ flex: 1 }}>{lastApiDetails.url || 'N/A'}</span>
+              <Button
+                type="text"
+                size="small"
+                icon={<CopyOutlined />}
+                onClick={() => copyToClipboard(lastApiDetails.url || '')}
+              />
+            </div>
+          </div>
+
+          <Divider style={{ margin: '16px 0' }} />
+
+          {/* SOAP Envelope Payload */}
+          <div>
+            <div style={{ fontSize: '14px', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>📦</span>
+              SOAP Envelope Payload
+            </div>
+            <div style={{
+              backgroundColor: '#f5f5f5',
+              padding: '12px',
+              borderRadius: '6px',
+              fontFamily: 'monospace',
+              fontSize: '11px',
+              overflow: 'auto',
+              maxHeight: '400px',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              border: '1px solid #e0e0e0',
+              lineHeight: '1.5'
+            }}>
+              {lastApiDetails.envelope || 'N/A'}
+            </div>
+            {lastApiDetails.envelope && (
+              <Button
+                type="text"
+                size="small"
+                icon={<CopyOutlined />}
+                onClick={() => copyToClipboard(lastApiDetails.envelope || '')}
+                style={{ marginTop: '8px' }}
+              >
+                Copy Payload
+              </Button>
+            )}
+          </div>
+
+          <Divider style={{ margin: '16px 0' }} />
+
+          {/* Service Information */}
+          <div>
+            <div style={{ fontSize: '14px', fontWeight: '700', marginBottom: '8px' }}>Service Information</div>
+            <div style={{ fontSize: '12px', color: '#666', lineHeight: '1.8' }}>
+              <div><strong>Service:</strong> Oracle BI Publisher (BIP) SOAP API</div>
+              <div><strong>Report Path:</strong> /Custom/fusion_client/AR/CUSTOMER_SEARCH_BY_NAME_BIP.xdo</div>
+              <div><strong>Method:</strong> runReport</div>
+              <div style={{ marginTop: '8px', padding: '8px', backgroundColor: '#e6f7ff', borderRadius: '4px', border: '1px solid #b3d9ff' }}>
+                <strong>Search Parameters:</strong>
+                <div style={{ marginTop: '4px', marginLeft: '8px' }}>
+                  • businessunitid: {businessUnitId || 'N/A'}
+                  <br />
+                  • customer: {searchText || 'N/A'}
+                  <br />
+                  • p_user: {username || 'N/A'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </Space>
+      ) : (
+        <Empty description="No API details available. Perform a search first." />
+      )}
+    </Drawer>
+    </>
   );
 };
 
