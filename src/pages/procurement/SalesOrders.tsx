@@ -6972,6 +6972,24 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         source: 'fusion' as const,
       }));
     }
+    // Selected allocations (from modal) take priority over manually entered lots
+    if (l.selectedLot || l.selectedSerials?.length) {
+      const rows: any[] = [];
+      if (l.selectedSerials && l.selectedSerials.length) {
+        l.selectedSerials.forEach((serial, i) => {
+          rows.push({
+            key: `${l.key}-sel-${i}`, itemNumber: l.itemNumber, description: l.description,
+            lot: l.selectedLot, serialFrom: serial, serialTo: serial, qty: 1, source: 'selected' as const,
+          });
+        });
+      } else if (l.selectedLot) {
+        rows.push({
+          key: `${l.key}-sel-lot`, itemNumber: l.itemNumber, description: l.description,
+          lot: l.selectedLot, qty: l.qty, source: 'selected' as const,
+        });
+      }
+      return rows.length ? rows : [{ key: `${l.key}-nolot`, itemNumber: l.itemNumber, description: l.description, lot: undefined as string | undefined, qty: l.qty, source: 'local' as const }];
+    }
     const ls = (l.lots && l.lots.length) ? l.lots : (l.lot ? [l.lot] : []);
     return ls.length
       ? ls.map((lot, i) => ({ key: `${l.key}-lot-${i}`, itemNumber: l.itemNumber, description: l.description, lot, qty: l.qty, source: 'local' as const }))
@@ -6980,7 +6998,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const lotCols: ColumnsType<any> = [
     { title: 'Item', dataIndex: 'itemNumber', width: 150, render: v => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{v}</Text> },
     { title: 'Description', dataIndex: 'description', width: 240, ellipsis: true, render: v => <Text style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Lot', dataIndex: 'lot', width: 180, render: v => v ? <Tag color="geekblue">{v}</Tag> : <Text type="secondary">— no lot —</Text> },
+    { title: 'Lot', dataIndex: 'lot', width: 180, render: (v, r) => v ? <Space size={4}><Tag color={r.source === 'selected' ? 'green' : 'geekblue'}>{v}</Tag>{r.source === 'selected' && <Tag color="cyan" style={{ fontSize: 10 }}>allocated</Tag>}</Space> : <Text type="secondary">— no lot —</Text> },
     { title: 'Serial', width: 160, render: (_, r) => r.serialFrom ? <Text style={{ fontSize: 11.5 }}>{r.serialFrom}{r.serialTo && r.serialTo !== r.serialFrom ? ` → ${r.serialTo}` : ''}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
     { title: 'Subinventory', dataIndex: 'subinventory', width: 130, render: v => v ? <Text style={{ fontSize: 11.5 }}>{v}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>—</Text> },
     { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: v => fmtQty(num(v)) },
@@ -7101,6 +7119,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       if (selLot) return lots.find(l => l.lot === selLot)?.serials ?? [];
       return serialOnly as string[];
     }, [selLot, lots, serialOnly]);
+
+    // Auto-select serials when lot is selected (based on line quantity)
+    useEffect(() => {
+      if (selLot && availSerials.length > 0 && selSerials.length === 0) {
+        const reqQty = num(allocationLine.qty);
+        const autoSelected = availSerials.slice(0, Math.min(reqQty, availSerials.length));
+        setSelSerials(autoSelected);
+      }
+    }, [selLot]);
 
     const isLotControlled = lots.length > 0;
 
