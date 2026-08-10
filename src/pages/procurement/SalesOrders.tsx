@@ -5606,7 +5606,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       return;
     }
     try {
-      const url = `${FUSION_BASE}/suppliers?q=SupplierName LIKE '%${term}%' OR SupplierNumber LIKE '%${term}%'&limit=30`;
+      const url = `${FUSION_BASE}/suppliers?q=Supplier LIKE '*${term}*' OR SupplierNumber LIKE '*${term}*'&limit=20`;
       const r = await fetch(url, { headers: FUSION_HDRS });
       if (r.ok) {
         const data = await r.json();
@@ -8117,7 +8117,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         footer={null}
       >
         <div style={{ marginBottom: 16, padding: '8px 12px', background: REDWOOD.neutral100, borderRadius: 4, fontSize: 11, color: REDWOOD.neutral600 }}>
-          <Text code>GET /suppliers?q=SupplierName LIKE '%{'{term}'}%' OR SupplierNumber LIKE '%{'{term}'}%'</Text>
+          <Text code>GET /suppliers?q=Supplier LIKE '*{'{term}'}*' OR SupplierNumber LIKE '*{'{term}'}*'&limit=20</Text>
         </div>
         <div style={{ marginBottom: 16 }}>
           <Input.Search
