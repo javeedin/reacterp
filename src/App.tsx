@@ -44,6 +44,7 @@ const IncomeStatementTemplates= lazy(() => import('./pages/gl/IncomeStatementTem
 const Currencies              = lazy(() => import('./pages/gl/Currencies'));
 const GLManageCategories      = lazy(() => import('./pages/gl/ManageCategories'));
 const JournalReconciliation   = lazy(() => import('./pages/gl/JournalReconciliation'));
+const DeleteJournals          = lazy(() => import('./pages/gl/DeleteJournals'));
 const ARModule                = lazy(() => import('./pages/ar/ARModule'));
 const ARManageInvoices        = lazy(() => import('./pages/ar/ManageInvoices'));
 const ARInvoiceDetail         = lazy(() => import('./pages/ar/InvoiceDetail'));
@@ -228,6 +229,7 @@ function App() {
               <Route path="gl/currencies" element={<Currencies />} />
               <Route path="gl/journal-reconciliation" element={<JournalReconciliation />} />
               <Route path="gl/categories" element={<GLManageCategories />} />
+              <Route path="gl/delete-journals" element={<DeleteJournals />} />
               <Route path="gl/revaluation" element={<ManageRevaluation />} />
               <Route path="gl/financial-intelligence" element={<GLFinancialIntelligence />} />
               {/* Fixed Assets */}

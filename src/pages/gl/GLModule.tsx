@@ -27,6 +27,7 @@ import {
   WarningOutlined,
   TagsOutlined,
   RobotOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -69,6 +70,7 @@ const taskMenuItems: MenuItemType[] = [
   { key: 'journal-entry', icon: <FileTextOutlined />, label: 'Create Journal', description: 'Create manual journal entry', color: REDWOOD.taskBlue, path: '/gl/create-journal' },
   { key: 'import-journals', icon: <SwapOutlined />, label: 'Import Journals', description: 'Import from spreadsheet', color: REDWOOD.info },
   { key: 'reverse-journal', icon: <ReconciliationOutlined />, label: 'Reverse Journal', description: 'Reverse posted journals', color: REDWOOD.warning },
+  { key: 'delete-journals', icon: <DeleteOutlined />, label: 'Delete Journals', description: 'Delete SLA & GL journals (test cleanup)', color: REDWOOD.primary, path: '/gl/delete-journals' },
   { key: 'accounting-periods', icon: <CalendarOutlined />, label: 'Manage Accounting Periods', description: 'View and manage accounting periods', color: REDWOOD.success, path: '/gl/accounting-periods' },
   { key: 'revaluation', icon: <DollarOutlined />, label: 'Run Revaluation', description: 'Foreign currency revaluation', color: REDWOOD.primary },
   { key: 'journal-reconciliation', icon: <ReconciliationOutlined />, label: 'Fusion Journal Reconciliation', description: 'Reconcile batch ↔ header ↔ line totals', color: REDWOOD.primaryDark, path: '/gl/journal-reconciliation' },
