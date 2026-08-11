@@ -258,6 +258,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
   const [fxRate, setFxRate] = useState<{ rate: number; inverseRate: number; rateDate: string; rateType: string } | null>(null);
   const [fxRateLoading, setFxRateLoading] = useState(false);
   const [inventoryOrgs, setInventoryOrgs] = useState<any[]>([]);
+  const [filteredInventoryOrgs, setFilteredInventoryOrgs] = useState<any[]>([]);
   const [subinventories, setSubinventories] = useState<any[]>([]);
   const [allSubinventories, setAllSubinventories] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
@@ -388,8 +389,29 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
       // Auto-populate currency from ledgerCurrency of the selected Business Unit
       if (bu.ledgerCurrency) headerForm.setFieldValue('currency', bu.ledgerCurrency);
       setSelectedBuCompanyCode(bu.bu_code ? String(bu.bu_code) : '');
+
+      // Filter inventory orgs based on the selected BU code
+      const buCode = bu.bu_code ? String(bu.bu_code) : '';
+      if (buCode && inventoryOrgs.length > 0) {
+        // Filter inventory orgs that are associated with this BU code
+        // Typically, inventory org codes contain the BU code as a prefix or have a matching relationship
+        const filtered = inventoryOrgs.filter((org: any) => {
+          const orgCode = org.OrganizationCode ?? '';
+          // Match by prefix or by BU association — adjust based on your naming convention
+          return orgCode.includes(buCode) || org.BusinessUnitCode === buCode || org.bu_code === buCode;
+        });
+        setFilteredInventoryOrgs(filtered.length > 0 ? filtered : inventoryOrgs);
+      } else {
+        setFilteredInventoryOrgs(inventoryOrgs);
+      }
+
+      // Clear shipToOrg and subinventory when BU changes
+      headerForm.setFieldValue('shipToOrg', undefined);
+      headerForm.setFieldValue('subinventory', undefined);
+      setSubinventories([]);
     } else {
       setSelectedBuCompanyCode('');
+      setFilteredInventoryOrgs([]);
     }
   };
 
@@ -458,6 +480,13 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     headerForm.setFieldValue('subinventory', undefined);
     setSubinventories(allSubinventories.filter((s: any) => s.warehouse_code === orgCode));
   };
+
+  // Initialize filtered inventory orgs when inventoryOrgs are loaded
+  useEffect(() => {
+    if (inventoryOrgs.length > 0) {
+      setFilteredInventoryOrgs(inventoryOrgs);
+    }
+  }, [inventoryOrgs]);
 
   // Keep the subinventory dropdown populated for the current ship-to org — needed
   // after loading a PO from JSON (header is set before/without the org's subinv
@@ -2732,14 +2761,14 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                 <Col span={12}>
                   <Form.Item name="shipToOrg" label="Ship To Organization" rules={[{ required: true }]}>
                     <Select showSearch allowClear placeholder="Select organization" optionFilterProp="children" onChange={handleShipToOrgChange}>
-                      {inventoryOrgs.map(org => <Option key={org.OrganizationCode} value={org.OrganizationCode}>{org.OrganizationCode}{org.OrganizationName ? ` — ${org.OrganizationName}` : ''}</Option>)}
+                      {filteredInventoryOrgs.map(org => <Option key={org.OrganizationCode} value={org.OrganizationCode}>{org.OrganizationCode}{org.OrganizationName ? ` — ${org.OrganizationName}` : ''}</Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
                 <Col span={12}>
-                  <Form.Item name="subinventory" label="Subinventory">
+                  <Form.Item name="subinventory" label="Subinventory" rules={[{ required: true }]}>
                     <Select showSearch allowClear placeholder="Select subinventory" optionFilterProp="children">
-                      {subinventories.map(sub => <Option key={sub.subinventory_code} value={sub.subinventory_code}>{sub.subinventory_code}</Option>)}
+                      {subinventories.map(sub => <Option key={sub.subinventory_code} value={sub.subinventory_code}>{sub.subinventory_code}{sub.subinventory_name ? ` — ${sub.subinventory_name}` : ''}</Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
