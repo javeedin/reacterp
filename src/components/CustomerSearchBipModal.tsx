@@ -16,9 +16,9 @@ const buildPreviewSoapEnvelope = (reportPath: string, businessUnitId: string, cu
   ];
 
   const paramXml = parameters
-    .map(([key, value]) => `
+    .map(({ name, value }) => `
             <v2:item>
-              <v2:name>${key}</v2:name>
+              <v2:name>${name}</v2:name>
               <v2:values><v2:item>${value}</v2:item></v2:values>
             </v2:item>`)
     .join('');
