@@ -125,16 +125,21 @@ export const searchCustomersByBIP = async (
   customerName: string,
   soapBaseUrl: string,
   username: string,
-  password: string
+  password: string,
+  searchType: 'name' | 'account' = 'name'
 ): Promise<CustomerSearchResponse> => {
   try {
     const reportPath = '/Custom/fusion_client/AR/CUSTOMER_SEARCH_BY_NAME_BIP.xdo';
 
-    const parameters: BIPSearchParams = {
-      CUSTOMER_NAME: customerName,
-      account_number: customerName,
+    const parameters: any = {
       BUSINESS_UNIT_ID: businessUnitId,
     };
+
+    if (searchType === 'name') {
+      parameters.CUSTOMER_NAME = customerName;
+    } else {
+      parameters.account_number = customerName;
+    }
 
     const envelope = buildCustomerSearchSoapEnvelope(reportPath, parameters, username, password);
 

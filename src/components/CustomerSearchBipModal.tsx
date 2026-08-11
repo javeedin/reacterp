@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Modal, Input, Button, Spin, Empty, Tag, Card, Row, Col, Typography, Drawer, Divider, Space, Input as AntInput } from 'antd';
+import { Modal, Input, Button, Spin, Empty, Tag, Card, Row, Col, Typography, Drawer, Divider, Space, Input as AntInput, Segmented } from 'antd';
 import { SearchOutlined, CheckCircleOutlined, ApiOutlined, CopyOutlined } from '@ant-design/icons';
 import { searchCustomersByBIP, CustomerSearchResult, buildCustomerSearchSoapEnvelope } from '../services/customerSearchBip.service';
 import { ORACLE_SOAP_CONFIG } from '../config/api.config';
@@ -8,12 +8,16 @@ import { message } from 'antd';
 const { Text } = Typography;
 
 // Helper to build SOAP envelope for preview
-const buildPreviewSoapEnvelope = (reportPath: string, businessUnitId: string, customer: string, username: string, password: string): string => {
-  const parameters = {
-    CUSTOMER_NAME: customer,
-    account_number: customer,
+const buildPreviewSoapEnvelope = (reportPath: string, businessUnitId: string, customer: string, username: string, password: string, searchType: 'name' | 'account' = 'name'): string => {
+  const parameters: Record<string, string> = {
     BUSINESS_UNIT_ID: businessUnitId,
   };
+
+  if (searchType === 'name') {
+    parameters.CUSTOMER_NAME = customer;
+  } else {
+    parameters.account_number = customer;
+  }
 
   const paramXml = Object.entries(parameters)
     .map(([key, value]) => `
@@ -72,6 +76,7 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
   const [searched, setSearched] = useState(false);
   const [apiDrawerOpen, setApiDrawerOpen] = useState(false);
   const [lastApiDetails, setLastApiDetails] = useState<{ url?: string; envelope?: string }>({});
+  const [searchType, setSearchType] = useState<'name' | 'account'>('name');
 
   // Reset state when modal closes
   useEffect(() => {
@@ -98,7 +103,8 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
         searchText,
         soapBaseUrl,
         username,
-        password
+        password,
+        searchType
       );
 
       // Capture API details for debugging
@@ -179,10 +185,24 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
 
       {businessUnitId && (
         <>
+          {/* Search Type Toggle */}
+          <div style={{ marginBottom: '16px' }}>
+            <Segmented
+              value={searchType}
+              onChange={(value) => setSearchType(value as 'name' | 'account')}
+              options={[
+                { label: 'Search by Name', value: 'name' },
+                { label: 'Search by Account Number', value: 'account' },
+              ]}
+              block
+              size="large"
+            />
+          </div>
+
           {/* Search Input with Button */}
           <div style={{ marginBottom: '24px', display: 'flex', gap: '12px' }}>
             <Input
-              placeholder="Enter customer name, account number, or party number..."
+              placeholder={searchType === 'name' ? 'Enter customer name...' : 'Enter account number...'}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               onPressEnter={handleSearch}
@@ -374,7 +394,8 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
                 businessUnitId || '',
                 searchText,
                 username || '',
-                password || ''
+                password || '',
+                searchType
               ) : 'N/A')}
             </div>
             {(lastApiDetails.envelope || searchText.trim()) && (
@@ -387,7 +408,8 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
                   businessUnitId || '',
                   searchText,
                   username || '',
-                  password || ''
+                  password || '',
+                  searchType
                 ) : ''))}
                 style={{ marginTop: '8px' }}
               >
@@ -410,9 +432,11 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
                 <div style={{ marginTop: '4px', marginLeft: '8px' }}>
                   • BUSINESS_UNIT_ID: {businessUnitId || 'N/A'}
                   <br />
-                  • CUSTOMER_NAME: {searchText || 'N/A'}
-                  <br />
-                  • account_number: {searchText || 'N/A'}
+                  {searchType === 'name' ? (
+                    <>• CUSTOMER_NAME: {searchText || 'N/A'}</>
+                  ) : (
+                    <>• account_number: {searchText || 'N/A'}</>
+                  )}
                 </div>
               </div>
             </div>
