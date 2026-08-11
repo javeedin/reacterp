@@ -413,6 +413,10 @@ const ManageJournals: React.FC = () => {
     { visible: false, tabKey: '', lineIdx: -1, initial: '' }
   );
 
+  // Track modified lines: { "tabKey-lineIdx": newAccountCode }
+  const [modifiedLines, setModifiedLines] = useState<Record<string, { original: string; current: string; lineId?: number }>>({});
+  const [updatingLineKey, setUpdatingLineKey] = useState<string | null>(null);
+
   // Floating panel state
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
   const [autopilotOpen, setAutopilotOpen] = useState(false);
@@ -2462,6 +2466,54 @@ const ManageJournals: React.FC = () => {
       setSelectedLinesByTab(prev => ({ ...prev, [tabKey]: [] }));
     };
 
+    // Update single journal line account combination in DB
+    const handleUpdateJournalLineAccount = async (modKey: string, modifiedInfo: { original: string; current: string; lineId?: number }) => {
+      setUpdatingLineKey(modKey);
+      try {
+        const [, lineIdx] = modKey.split('-');
+        const lineIdxNum = parseInt(lineIdx);
+        const currentLine = lines[lineIdxNum];
+
+        if (!currentLine) {
+          message.error('Line not found');
+          return;
+        }
+
+        const payload = {
+          jeHeaderId: journal.jeHeaderId,
+          lineId: modifiedInfo.lineId || currentLine.lineId,
+          accountCombination: modifiedInfo.current,
+          description: currentLine.description,
+          enteredDr: currentLine.enteredDr || 0,
+          enteredCr: currentLine.enteredCr || 0,
+          currency: currentLine.currency || journal.currencyCode,
+        };
+
+        const response = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines/update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.status === 'SUCCESS') {
+          message.success(`Journal line account updated to ${modifiedInfo.current}`);
+          setModifiedLines(prev => {
+            const updated = { ...prev };
+            delete updated[modKey];
+            return updated;
+          });
+        } else {
+          message.error(`Update failed: ${result.message || result.error || `HTTP ${response.status}`}`);
+        }
+      } catch (error) {
+        message.error(`Update failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      } finally {
+        setUpdatingLineKey(null);
+      }
+    };
+
     // Save handler — calls PUT gl/journals/:jeHeaderId
     const handleSave = async (): Promise<boolean> => {
       if (!headerFields.effectiveDate) {
@@ -4033,18 +4085,38 @@ const ManageJournals: React.FC = () => {
                 {
                   title: '',
                   key: 'editAcctComb',
-                  width: 40,
-                  render: (_: any, _line: JournalLine, rowIdx: number) => (
-                    <Tooltip title="Edit Account Combination">
-                      <Button
-                        size="small"
-                        type="text"
-                        icon={<EditOutlined />}
-                        onClick={() => setTabAccSel({ visible: true, tabKey, lineIdx: rowIdx, initial: _line.account || '' })}
-                        style={{ fontSize: 11, color: REDWOOD.info }}
-                      />
-                    </Tooltip>
-                  ),
+                  width: 90,
+                  render: (_: any, _line: JournalLine, rowIdx: number) => {
+                    const modKey = `${tabKey}-${rowIdx}`;
+                    const isModified = modKey in modifiedLines;
+                    const isUpdating = updatingLineKey === modKey;
+                    return (
+                      <Space size={2}>
+                        <Tooltip title="Edit Account Combination">
+                          <Button
+                            size="small"
+                            type="text"
+                            icon={<EditOutlined />}
+                            onClick={() => setTabAccSel({ visible: true, tabKey, lineIdx: rowIdx, initial: _line.account || '' })}
+                            style={{ fontSize: 11, color: REDWOOD.info }}
+                          />
+                        </Tooltip>
+                        {isModified && (
+                          <Tooltip title="Update this line in database">
+                            <Button
+                              size="small"
+                              type="primary"
+                              loading={isUpdating}
+                              onClick={() => handleUpdateJournalLineAccount(modKey, modifiedLines[modKey])}
+                              style={{ fontSize: 10, height: 20, padding: '0 6px' }}
+                            >
+                              Update
+                            </Button>
+                          </Tooltip>
+                        )}
+                      </Space>
+                    );
+                  },
                 },
               ] : []),
               ...(isEditable ? [{
@@ -4257,6 +4329,21 @@ const ManageJournals: React.FC = () => {
           const desc = accountSegment
             ? `${accountSegment[1].value} - ${accountSegment[1].description}`
             : '';
+
+          // Track modified line if account changed
+          const currentLine = lines[tabAccSel.lineIdx];
+          if (currentLine && code !== tabAccSel.initial) {
+            const modKey = `${tabAccSel.tabKey}-${tabAccSel.lineIdx}`;
+            setModifiedLines(prev => ({
+              ...prev,
+              [modKey]: {
+                original: tabAccSel.initial,
+                current: code,
+                lineId: (currentLine as any).lineId
+              }
+            }));
+          }
+
           handleLineChange(tabAccSel.lineIdx, 'account', code);
           handleLineChange(tabAccSel.lineIdx, 'accountDescription', desc);
           if (desc) setAccountDescMap(prev => ({ ...prev, [code]: desc }));
