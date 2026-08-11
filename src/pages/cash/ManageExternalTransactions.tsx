@@ -289,6 +289,16 @@ const ViewAcctModal: React.FC<{
   }, [lines, txn]);
   const acctDescMap = useAccountDescriptions(acctCodes);
 
+  // Capture and set actual API URLs on mount
+  useEffect(() => {
+    if (open && txn && apiUrls.headers === '') {
+      const srcNum = encodeURIComponent(String(txn.externalTransactionId));
+      const hdUrl = `${APEX_BASE}/sla/journals?moduleName=CASH&sourceNumber=${srcNum}`;
+      const lnUrl = `${APEX_BASE}/sla/journals/lines?moduleName=CASH&sourceNumber=${srcNum}`;
+      setApiUrls({ headers: hdUrl, lines: lnUrl });
+    }
+  }, [open, txn]);
+
   // Refresh API call
   const refreshApi = useCallback(async () => {
     if (!txn) return;
@@ -302,9 +312,6 @@ const ViewAcctModal: React.FC<{
         fetch(hdUrl).then(x => x.json()),
         fetch(lnUrl).then(x => x.json()),
       ]);
-      const headers: any[] = hRes.items || [];
-      const linesData: any[] = lRes.items || [];
-      // Update parent state would happen here - for now just show API worked
       message.success('API refreshed successfully');
     } catch (e: any) {
       message.error('API refresh failed: ' + e.message);
