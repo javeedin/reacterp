@@ -3656,6 +3656,99 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       message.warning('Some transactions are missing cash/offset accounts — cannot create accounting.');
       return;
     }
+
+    // ── Check for existing GL journals ────────────────────────────────────
+    const journalsExistList: { txn: ExternalTxnRecord; hasJournal: boolean }[] = [];
+    for (const txn of txnArray) {
+      try {
+        const glResult = await getGlJournalLines({
+          reference2: String(txn.externalTransactionId),
+          reference5: 'BANK_EXTERNAL_TRANSACTIONS',
+        });
+        journalsExistList.push({
+          txn,
+          hasJournal: glResult.items && glResult.items.length > 0,
+        });
+      } catch (err) {
+        journalsExistList.push({ txn, hasJournal: false });
+      }
+    }
+
+    const withJournals = journalsExistList.filter(j => j.hasJournal);
+    if (withJournals.length > 0) {
+      Modal.confirm({
+        title: 'Journals Already Exist',
+        content: (
+          <div>
+            <p>
+              The following {withJournals.length} transaction(s) already have GL journals posted:
+            </p>
+            <ul style={{ marginTop: 8 }}>
+              {withJournals.map(j => (
+                <li key={j.txn.externalTransactionId}>
+                  Transaction {j.txn.transactionId} (Ext ID: {j.txn.externalTransactionId})
+                </li>
+              ))}
+            </ul>
+            <p style={{ marginTop: 12, marginBottom: 0, fontWeight: 500 }}>
+              Mark these as accounted and skip from create accounting?
+            </p>
+          </div>
+        ),
+        okText: 'Mark as Accounted',
+        cancelText: 'Cancel',
+        onOk: async () => {
+          const flagErrors: string[] = [];
+
+          for (const item of withJournals) {
+            try {
+              const flagUrl = `${APEX_BASE}/cash/externaltransactions/${item.txn.externalTransactionId}/acctflag?updated_by=${encodeURIComponent(currentUser)}`;
+              const flagRes = await fetch(flagUrl, {
+                method: 'PUT',
+                headers: { Accept: 'application/json' },
+              });
+              const flagData = (await flagRes.json().catch(() => ({}))) as { success?: boolean; message?: string };
+              if (!flagRes.ok || !flagData.success) {
+                flagErrors.push(`Transaction ${item.txn.externalTransactionId}: ${flagData.message || `HTTP ${flagRes.status}`}`);
+              } else {
+                // Update local state
+                setTransactions(prev => prev.map(t =>
+                  t.externalTransactionId === item.txn.externalTransactionId
+                    ? { ...t, accountingFlag: 'Y' }
+                    : t
+                ));
+              }
+            } catch (e: any) {
+              flagErrors.push(`Transaction ${item.txn.externalTransactionId}: ${e.message}`);
+            }
+          }
+
+          if (flagErrors.length > 0) {
+            message.error(`Failed to mark ${flagErrors.length} transaction(s) as accounted. Check console for details.`);
+            console.error('Flag update errors:', flagErrors);
+          } else {
+            message.success(`${withJournals.length} transaction(s) marked as accounted.`);
+          }
+
+          // Continue with remaining pending transactions
+          const remainingTxns = txnArray.filter(
+            t => !withJournals.some(j => j.txn.externalTransactionId === t.externalTransactionId)
+          );
+          if (remainingTxns.length === 0) {
+            message.info('No pending transactions to create accounting for.');
+            return;
+          }
+          proceedToSingleAcctModal(remainingTxns);
+        },
+      });
+    } else {
+      // No existing journals, proceed directly
+      proceedToSingleAcctModal(txnArray);
+    }
+  };
+
+  // Helper to proceed with single-row Create Accounting modal for selected transactions
+  const proceedToSingleAcctModal = (txnArray: ExternalTxnRecord[]) => {
     const acctDesc = (code: string) =>
       acctCombinations.find(c => c.glAccountDesc === code)?.description ?? '';
     const rows: BankAcctProgressRow[] = txnArray.map(txn => {
