@@ -364,8 +364,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
               }));
           }),
         fetch(`${GL_ORDS_BASE}/currencies?enabled=Y`).then(r => r.json()).then(d => d.items ?? d.data ?? (Array.isArray(d) ? d : [])),
-        fetchLOV(`${FUSION_BASE}/inventoryOrganizations`),
-        fetch(`${ORDS_BASE}/inventory/inventorywarehousesubinventory`).then(r => r.json()).then(d => d.items ?? (Array.isArray(d) ? d : [])),
+        fetch(`${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`, { headers: FUSION_HDRS }).then(r => r.ok ? r.json() : Promise.reject()).then(d => d.items ?? []),
       ]);
       if (buRes.status === 'fulfilled') {
         setBusUnits(buRes.value);
@@ -373,33 +372,32 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
       }
       if (ccyRes.status === 'fulfilled') setCurrencies(ccyRes.value);
       if (orgRes.status === 'fulfilled') setInventoryOrgs(orgRes.value);
-      if (subRes.status === 'fulfilled') {
-        const all = subRes.value;
-        setAllSubinventories(all);
-        setSubinventories([]); // Empty until user selects Ship To Organization
-      }
     } finally { setLovLoading(false); }
   };
 
   const handleProcurementBuChange = (buName: string) => {
-    const bu = busUnits.find((b: any) => (b.bu_name ?? '') === buName);
+    const bu = busUnits.find((b: any) => (b.bu_name ?? b.BusinessUnitName ?? '') === buName);
     if (bu) {
       // Auto-populate Bill To BU with same value as Procurement BU
       headerForm.setFieldValue('billTo', buName);
       // Auto-populate currency from ledgerCurrency of the selected Business Unit
-      if (bu.ledgerCurrency) headerForm.setFieldValue('currency', bu.ledgerCurrency);
+      if (bu.ledgerCurrency || bu.functional_currency) headerForm.setFieldValue('currency', bu.ledgerCurrency || bu.functional_currency);
       setSelectedBuCompanyCode(bu.bu_code ? String(bu.bu_code) : '');
 
-      // Filter inventory orgs based on the selected BU code
-      const buCode = bu.bu_code ? String(bu.bu_code) : '';
-      if (buCode && inventoryOrgs.length > 0) {
-        // Filter inventory orgs that are associated with this BU code
-        // Typically, inventory org codes contain the BU code as a prefix or have a matching relationship
+      // Filter inventory orgs based on the selected BU (BusinessUnitId or BusinessUnitName)
+      if (inventoryOrgs.length > 0) {
+        const buId = bu.businessUnitId || bu.bu_id;
+        const buNameFromBU = bu.bu_name || bu.BusinessUnitName;
+
         const filtered = inventoryOrgs.filter((org: any) => {
-          const orgCode = org.OrganizationCode ?? '';
-          // Match by prefix or by BU association — adjust based on your naming convention
-          return orgCode.includes(buCode) || org.BusinessUnitCode === buCode || org.bu_code === buCode;
+          const orgBUId = org.BusinessUnitId || org.ManagementBusinessUnitId || org.ProfitCenterBusinessUnitId;
+          const orgBUName = org.BusinessUnitName || org.ManagementBusinessUnitName || org.ProfitCenterBusinessUnitName;
+
+          // Match by BU ID or BU Name
+          return (buId != null && String(orgBUId) === String(buId)) ||
+                 (buNameFromBU && orgBUName && orgBUName === buNameFromBU);
         });
+
         setFilteredInventoryOrgs(filtered.length > 0 ? filtered : inventoryOrgs);
       } else {
         setFilteredInventoryOrgs(inventoryOrgs);
@@ -478,7 +476,18 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
 
   const handleShipToOrgChange = (orgCode: string) => {
     headerForm.setFieldValue('subinventory', undefined);
-    setSubinventories(allSubinventories.filter((s: any) => s.warehouse_code === orgCode));
+    setSubinventories([]);
+
+    if (!orgCode) return;
+
+    // Fetch subinventories for the selected organization from Fusion API
+    fetch(`${FUSION_BASE}/subinventories?q=OrganizationCode=${encodeURIComponent(orgCode)}&onlyData=true&limit=500`, { headers: FUSION_HDRS })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        const subs = Array.from(new Set((d.items ?? []).map((s: any) => s.SecondaryInventoryName).filter(Boolean))).sort() as string[];
+        setSubinventories(subs.map(sub => ({ subinventory_code: sub, subinventory_name: sub })));
+      })
+      .catch(() => setSubinventories([]));
   };
 
   // Initialize filtered inventory orgs when inventoryOrgs are loaded
@@ -2678,6 +2687,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                 <Col span={12}>
                   <Form.Item name="billTo" label="Bill To BU" rules={[{ required: true }]}>
                     <Select showSearch allowClear placeholder="Select Bill To" optionFilterProp="label"
+                      disabled={!selectedBuCompanyCode}
                       options={busUnits.map(bu => ({ value: bu.bu_name ?? '', label: bu.bu_name ?? '' }))}
                     />
                   </Form.Item>
@@ -2693,12 +2703,12 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                 )}
                 <Col span={8}>
                   <Form.Item name="orderDate" label="Order Date" rules={[{ required: true }]}>
-                    <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" />
+                    <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={!selectedBuCompanyCode} />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
                   <Form.Item name="docType" label="Document Type" rules={[{ required: true }]}>
-                    <Select showSearch allowClear placeholder="Select type" optionFilterProp="children">
+                    <Select showSearch allowClear placeholder="Select type" optionFilterProp="children" disabled={!selectedBuCompanyCode}>
                       <Option value="LPON">LPON</Option>
                       <Option value="IPON">IPON</Option>
                       <Option value="STANDARD">STANDARD</Option>
@@ -2709,6 +2719,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                 <Col span={8}>
                   <Form.Item name="currency" label="Currency" rules={[{ required: true }]}>
                     <Select showSearch allowClear placeholder="Select or type currency" filterOption={false}
+                      disabled={!selectedBuCompanyCode}
                       onSearch={val => setCurrencyInput(val)} onBlur={() => setCurrencyInput('')}
                       onChange={v => { if (v) fetchFxRate(String(v)); else setFxRate(null); }}>
                       {currencyInput.trim() && !currencies.find(c => String(c.code ?? '').toLowerCase() === currencyInput.trim().toLowerCase()) && (
@@ -2731,6 +2742,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                       placeholder="Leave blank to auto-generate"
                       style={{ fontFamily: 'monospace', fontWeight: 600 }}
                       allowClear
+                      disabled={!selectedBuCompanyCode}
                     />
                   </Form.Item>
                 </Col>
@@ -2741,6 +2753,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                   <Form.Item label="Supplier" required>
                     <Space>
                       <Button size="small" icon={<SearchOutlined />}
+                        disabled={!selectedBuCompanyCode}
                         onClick={() => { setSupplierModalOpen(true); setSupplierSearch(''); setSupplierResults([]); }}>
                         Select Supplier
                       </Button>
@@ -2750,7 +2763,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                 </Col>
                 <Col span={12}>
                   <Form.Item name="supplierSite" label="Supplier Site">
-                    <Select showSearch allowClear placeholder="Select supplier site" loading={sitesLoading} optionFilterProp="children">
+                    <Select showSearch allowClear placeholder="Select supplier site" loading={sitesLoading} optionFilterProp="children" disabled={!selectedBuCompanyCode}>
                       {supplierSites.map(ss => <Option key={ss.SupplierSiteId ?? ss.SupplierSite} value={ss.SupplierSite}>{ss.SupplierSite}</Option>)}
                     </Select>
                   </Form.Item>
@@ -2760,21 +2773,21 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
               <Row gutter={[12, 0]}>
                 <Col span={12}>
                   <Form.Item name="shipToOrg" label="Ship To Organization" rules={[{ required: true }]}>
-                    <Select showSearch allowClear placeholder="Select organization" optionFilterProp="children" onChange={handleShipToOrgChange}>
+                    <Select showSearch allowClear placeholder="Select organization" optionFilterProp="children" onChange={handleShipToOrgChange} disabled={!selectedBuCompanyCode}>
                       {filteredInventoryOrgs.map(org => <Option key={org.OrganizationCode} value={org.OrganizationCode}>{org.OrganizationCode}{org.OrganizationName ? ` — ${org.OrganizationName}` : ''}</Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
                 <Col span={12}>
                   <Form.Item name="subinventory" label="Subinventory" rules={[{ required: true }]}>
-                    <Select showSearch allowClear placeholder="Select subinventory" optionFilterProp="children">
+                    <Select showSearch allowClear placeholder="Select subinventory" optionFilterProp="children" disabled={!selectedBuCompanyCode}>
                       {subinventories.map(sub => <Option key={sub.subinventory_code} value={sub.subinventory_code}>{sub.subinventory_code}{sub.subinventory_name ? ` — ${sub.subinventory_name}` : ''}</Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
                 <Col span={24}>
                   <Form.Item name="noteToSupplier" label="Note to Supplier">
-                    <Input.TextArea rows={2} placeholder="Optional note…" />
+                    <Input.TextArea rows={2} placeholder="Optional note…" disabled={!selectedBuCompanyCode} />
                   </Form.Item>
                 </Col>
               </Row>
