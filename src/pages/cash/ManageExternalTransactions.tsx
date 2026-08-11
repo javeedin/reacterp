@@ -27,6 +27,7 @@ import {
   buildPcBankTxnSlaPayload, fetchLedgerByBusinessUnit, derivePeriodName, createAccounting,
 } from '../../services/sla.service';
 import { getGlJournalLines } from '../../services/glPosting.service';
+import { APEX_DB_CONFIG } from '../../config/api.config';
 import { searchCombinations, type DistCombination } from '../../services/distCombinations.service';
 import { validateGlPayload, persistValidationLog, type GlJournalPayload } from '../../services/glValidation.service';
 import { useGlValidation } from '../../context/GlValidationContext';
@@ -294,7 +295,7 @@ const ViewAcctModal: React.FC<{
   // Capture and set actual API URLs on mount
   useEffect(() => {
     if (open && txn && apiUrls.headers === '') {
-      const lnUrl = `/gl/journals/lines?reference2=${encodeURIComponent(String(txn.externalTransactionId))}&reference5=BANK_EXTERNAL_TRANSACTIONS`;
+      const lnUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(String(txn.externalTransactionId))}&reference5=BANK_EXTERNAL_TRANSACTIONS`;
       setApiUrls({ headers: lnUrl, lines: lnUrl });
     }
   }, [open, txn]);
@@ -304,7 +305,7 @@ const ViewAcctModal: React.FC<{
     if (!txn) return;
     setApiRefreshing(true);
     try {
-      const lnUrl = `/gl/journals/lines?reference2=${encodeURIComponent(String(txn.externalTransactionId))}&reference5=BANK_EXTERNAL_TRANSACTIONS`;
+      const lnUrl = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(String(txn.externalTransactionId))}&reference5=BANK_EXTERNAL_TRANSACTIONS`;
       setApiUrls({ headers: lnUrl, lines: lnUrl });
       const lRes = await getGlJournalLines({
         reference2: txn.externalTransactionId,
@@ -612,10 +613,10 @@ const ViewAcctModal: React.FC<{
             <Tag color="blue">GET</Tag> GL Journal Lines
           </div>
           <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
-            {apiUrls.lines || `/gl/journals/lines?reference2=${encodeURIComponent(String(txn?.externalTransactionId || ''))}&reference5=BANK_EXTERNAL_TRANSACTIONS`}
+            {apiUrls.lines || `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(String(txn?.externalTransactionId || ''))}&reference5=BANK_EXTERNAL_TRANSACTIONS`}
           </div>
           <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginTop: 6 }}
-            onClick={() => { navigator.clipboard.writeText(apiUrls.lines || `/gl/journals/lines?reference2=${encodeURIComponent(String(txn?.externalTransactionId || ''))}&reference5=BANK_EXTERNAL_TRANSACTIONS`); message.success('Copied'); }}>
+            onClick={() => { navigator.clipboard.writeText(apiUrls.lines || `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines?reference2=${encodeURIComponent(String(txn?.externalTransactionId || ''))}&reference5=BANK_EXTERNAL_TRANSACTIONS`); message.success('Copied'); }}>
             Copy URL
           </Button>
         </div>
