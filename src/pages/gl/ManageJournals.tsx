@@ -1883,17 +1883,17 @@ const ManageJournals: React.FC = () => {
 
     // Derive locked company segment from the first line that already has an account code
     const lockedCompanySegment = (() => {
-      const allLines = editableLines[tabKey] || journal.lines || [];
+      const allLines = (editableLines[tabKey] || journal.lines || []).filter(Boolean);
       for (const l of allLines) {
-        if (l.account && l.account.includes('-')) return l.account.split('-')[0];
+        if (l?.account && l.account.includes('-')) return l.account.split('-')[0];
       }
       return undefined;
     })();
 
     // Company segment consistency check — true when all coded lines share the same first segment
     const companySegmentErrors = (() => {
-      const allLines = editableLines[tabKey] || journal.lines || [];
-      const coded = allLines.map(l => l.account?.split('-')[0]).filter(Boolean) as string[];
+      const allLines = (editableLines[tabKey] || journal.lines || []).filter(Boolean);
+      const coded = allLines.map(l => l?.account?.split('-')[0]).filter(Boolean) as string[];
       const unique = [...new Set(coded)];
       return unique.length > 1 ? unique : [];
     })();
