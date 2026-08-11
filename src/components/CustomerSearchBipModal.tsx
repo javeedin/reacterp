@@ -1,11 +1,48 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Modal, Input, Button, Spin, Empty, Tag, Card, Row, Col, Typography, Drawer, Divider, Space, Input as AntInput } from 'antd';
 import { SearchOutlined, CheckCircleOutlined, ApiOutlined, CopyOutlined } from '@ant-design/icons';
-import { searchCustomersByBIP, CustomerSearchResult } from '../services/customerSearchBip.service';
+import { searchCustomersByBIP, CustomerSearchResult, buildCustomerSearchSoapEnvelope } from '../services/customerSearchBip.service';
 import { ORACLE_SOAP_CONFIG } from '../config/api.config';
 import { message } from 'antd';
 
 const { Text } = Typography;
+
+// Helper to build SOAP envelope for preview
+const buildPreviewSoapEnvelope = (reportPath: string, businessUnitId: string, customer: string, username: string, password: string): string => {
+  const parameters = [
+    { name: 'businessunitid', value: businessUnitId },
+    { name: 'customer', value: customer },
+    { name: 'p_user', value: username },
+  ];
+
+  const paramXml = parameters
+    .map(([key, value]) => `
+            <v2:item>
+              <v2:name>${key}</v2:name>
+              <v2:values><v2:item>${value}</v2:item></v2:values>
+            </v2:item>`)
+    .join('');
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:v2="http://xmlns.oracle.com/oxp/service/v2">
+  <soapenv:Header/>
+  <soapenv:Body>
+    <v2:runReport>
+      <v2:reportRequest>
+        <v2:reportAbsolutePath>${reportPath}</v2:reportAbsolutePath>
+        <v2:parameterNameValues>
+          <v2:listOfParamNameValues>${paramXml}
+          </v2:listOfParamNameValues>
+        </v2:parameterNameValues>
+        <v2:reportData/>
+        <v2:reportOutputPath/>
+      </v2:reportRequest>
+      <v2:userID>${username}</v2:userID>
+      <v2:password>${password}</v2:password>
+    </v2:runReport>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+};
 
 interface CustomerSearchBipModalProps {
   open: boolean;
@@ -119,13 +156,13 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
             <SearchOutlined style={{ color: '#1890ff' }} />
             <span>Find Customer {businessUnitName && <span style={{ fontSize: '14px', fontWeight: '500', color: '#666' }}>({businessUnitName})</span>}</span>
           </div>
-          {lastApiDetails.url && (
+          {(lastApiDetails.url || searchText.trim()) && (
             <Button
               type="text"
               size="small"
               icon={<ApiOutlined style={{ color: '#1890ff' }} />}
               onClick={() => setApiDrawerOpen(true)}
-              title="View API Details"
+              title={searchText.trim() ? "View API Payload Preview" : "View API Details"}
               style={{ marginRight: '-8px' }}
             />
           )}
@@ -274,14 +311,14 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
 
     {/* API Details Drawer */}
     <Drawer
-      title="API Details"
+      title={searchText.trim() && !searched ? "API Payload Preview" : "API Details"}
       placement="right"
       onClose={() => setApiDrawerOpen(false)}
       open={apiDrawerOpen}
       width={600}
       bodyStyle={{ padding: '24px' }}
     >
-      {lastApiDetails.url || lastApiDetails.envelope ? (
+      {lastApiDetails.url || lastApiDetails.envelope || searchText.trim() ? (
         <Space direction="vertical" style={{ width: '100%' }} size="large">
           {/* SOAP Endpoint URL */}
           <div>
@@ -301,12 +338,12 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
               alignItems: 'flex-start',
               gap: '8px'
             }}>
-              <span style={{ flex: 1 }}>{lastApiDetails.url || 'N/A'}</span>
+              <span style={{ flex: 1 }}>{lastApiDetails.url || soapBaseUrl || 'N/A'}</span>
               <Button
                 type="text"
                 size="small"
                 icon={<CopyOutlined />}
-                onClick={() => copyToClipboard(lastApiDetails.url || '')}
+                onClick={() => copyToClipboard(lastApiDetails.url || soapBaseUrl || '')}
               />
             </div>
           </div>
@@ -317,7 +354,7 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
           <div>
             <div style={{ fontSize: '14px', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span>📦</span>
-              SOAP Envelope Payload
+              SOAP Envelope Payload {searchText.trim() && !searched && <Tag color="blue">Preview</Tag>}
             </div>
             <div style={{
               backgroundColor: '#f5f5f5',
@@ -332,14 +369,26 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
               border: '1px solid #e0e0e0',
               lineHeight: '1.5'
             }}>
-              {lastApiDetails.envelope || 'N/A'}
+              {lastApiDetails.envelope || (searchText.trim() ? buildPreviewSoapEnvelope(
+                '/Custom/fusion_client/AR/CUSTOMER_SEARCH_BY_NAME_BIP.xdo',
+                businessUnitId || '',
+                searchText,
+                username || '',
+                password || ''
+              ) : 'N/A')}
             </div>
-            {lastApiDetails.envelope && (
+            {(lastApiDetails.envelope || searchText.trim()) && (
               <Button
                 type="text"
                 size="small"
                 icon={<CopyOutlined />}
-                onClick={() => copyToClipboard(lastApiDetails.envelope || '')}
+                onClick={() => copyToClipboard(lastApiDetails.envelope || (searchText.trim() ? buildPreviewSoapEnvelope(
+                  '/Custom/fusion_client/AR/CUSTOMER_SEARCH_BY_NAME_BIP.xdo',
+                  businessUnitId || '',
+                  searchText,
+                  username || '',
+                  password || ''
+                ) : ''))}
                 style={{ marginTop: '8px' }}
               >
                 Copy Payload
@@ -370,7 +419,7 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
           </div>
         </Space>
       ) : (
-        <Empty description="No API details available. Perform a search first." />
+        <Empty description="Enter a customer name and the API payload will appear here." />
       )}
     </Drawer>
     </>
