@@ -538,6 +538,14 @@ const ViewAcctModal: React.FC<{
             <Typography.Text type="secondary" style={{ fontSize: 11 }}>Ledger Currency</Typography.Text>
             <div style={{ fontSize: 13, fontFamily: 'monospace' }}>{ledgerCcy}</div>
           </Col>
+          <Col xs={12} md={6}>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>SLA Header ID</Typography.Text>
+            <div style={{ fontWeight: 600, fontSize: 13, fontFamily: 'monospace', color: REDWOOD.info }}>{hdr?.headerId || '—'}</div>
+          </Col>
+          <Col xs={12} md={6}>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>GL Batch ID</Typography.Text>
+            <div style={{ fontWeight: 600, fontSize: 13, fontFamily: 'monospace', color: REDWOOD.info }}>{hdr?.glBatchId || '—'}</div>
+          </Col>
         </Row>
       </div>
 
@@ -588,9 +596,12 @@ const ViewAcctModal: React.FC<{
       open={apiOpen} onCancel={() => setApiOpen(false)} footer={null} width={900}
       bodyStyle={{ maxHeight: '70vh', overflow: 'auto' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <Alert type="info" message="These are the APIs used to fetch the GL journal data displayed above"
+          style={{ marginBottom: 8 }} showIcon />
+
         <div>
           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-            <Tag color="blue">GET</Tag> Journal Headers
+            <Tag color="blue">GET</Tag> Journal Headers (by Source Number)
           </div>
           <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
             {apiUrls.headers || `${APEX_BASE}/sla/journals?moduleName=CASH&sourceNumber=${encodeURIComponent(String(txn?.externalTransactionId || ''))}`}
@@ -605,7 +616,7 @@ const ViewAcctModal: React.FC<{
 
         <div>
           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-            <Tag color="blue">GET</Tag> Journal Lines
+            <Tag color="blue">GET</Tag> Journal Lines (by Source Number)
           </div>
           <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
             {apiUrls.lines || `${APEX_BASE}/sla/journals/lines?moduleName=CASH&sourceNumber=${encodeURIComponent(String(txn?.externalTransactionId || ''))}`}
@@ -619,10 +630,30 @@ const ViewAcctModal: React.FC<{
         <Divider />
 
         <div>
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Parameters</div>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
+            <Tag color="cyan">GET</Tag> Alternative: By Header ID
+          </div>
+          <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
+            {hdr?.headerId ? `${APEX_BASE}/sla/journals/lines?headerId=${hdr.headerId}&limit=500` : '(No Header ID available)'}
+          </div>
+          {hdr?.headerId && (
+            <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginTop: 6 }}
+              onClick={() => { navigator.clipboard.writeText(`${APEX_BASE}/sla/journals/lines?headerId=${hdr.headerId}&limit=500`); message.success('Copied'); }}>
+              Copy URL
+            </Button>
+          )}
+        </div>
+
+        <Divider />
+
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Identifiers</div>
           <div style={{ background: '#f9fafb', borderRadius: 6, padding: 12, fontSize: 12 }}>
-            <div><Text type="secondary">Module:</Text> <Text code>CASH</Text></div>
-            <div style={{ marginTop: 6 }}><Text type="secondary">External Transaction ID:</Text> <Text code>{txn?.externalTransactionId}</Text></div>
+            <div><Text type="secondary">External Transaction ID:</Text> <Text code>{txn?.externalTransactionId}</Text></div>
+            <div style={{ marginTop: 6 }}><Text type="secondary">SLA Header ID (headerId):</Text> <Text code>{hdr?.headerId || '—'}</Text></div>
+            <div style={{ marginTop: 6 }}><Text type="secondary">GL Batch ID:</Text> <Text code>{hdr?.glBatchId || '—'}</Text></div>
+            <div style={{ marginTop: 6 }}><Text type="secondary">GL Header ID:</Text> <Text code>{hdr?.glHeaderId || '—'}</Text></div>
+            <div style={{ marginTop: 6 }}><Text type="secondary">Module:</Text> <Text code>CASH</Text></div>
           </div>
         </div>
       </div>
