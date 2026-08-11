@@ -417,6 +417,10 @@ const ManageJournals: React.FC = () => {
   const [modifiedLines, setModifiedLines] = useState<Record<string, { original: string; current: string; lineId?: number }>>({});
   const [updatingLineKey, setUpdatingLineKey] = useState<string | null>(null);
 
+  // API payload inspector state
+  const [apiPayloadVisible, setApiPayloadVisible] = useState(false);
+  const [apiPayload, setApiPayload] = useState<{ url: string; method: string; body: string } | null>(null);
+
   // Floating panel state
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
   const [autopilotOpen, setAutopilotOpen] = useState(false);
@@ -2474,8 +2478,17 @@ const ManageJournals: React.FC = () => {
         const lineIdxNum = parseInt(lineIdx);
         const currentLine = lines[lineIdxNum];
 
+        console.log('[Update Account] Debug Info:', {
+          modKey,
+          lineIdx: lineIdxNum,
+          currentLine,
+          modifiedInfo,
+          lineIdFromLine: currentLine?.lineId,
+          lineIdFromModified: modifiedInfo.lineId,
+        });
+
         if (!currentLine) {
-          message.error('Line not found');
+          message.error('Line not found in current lines array');
           return;
         }
 
@@ -2486,13 +2499,28 @@ const ManageJournals: React.FC = () => {
           accountCombination: modifiedInfo.current,
         };
 
-        const response = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines/update-account`, {
+        const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines/update-account`;
+        const payloadStr = JSON.stringify(payload, null, 2);
+
+        console.log('[Update Account] Sending Request:', { url, payload });
+
+        // Show API payload inspector
+        setApiPayload({
+          url,
+          method: 'POST',
+          body: payloadStr,
+        });
+        setApiPayloadVisible(true);
+
+        const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(payload),
+          body: payloadStr,
         });
 
         const result = await response.json();
+
+        console.log('[Update Account] Response:', result);
 
         if (response.ok && result.status === 'SUCCESS') {
           message.success(`Account combination updated: ${modifiedInfo.current}`);
@@ -2505,6 +2533,7 @@ const ManageJournals: React.FC = () => {
           message.error(`Update failed: ${result.message || 'Unknown error'}`);
         }
       } catch (error) {
+        console.error('[Update Account] Error:', error);
         message.error(`Update failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       } finally {
         setUpdatingLineKey(null);
@@ -4080,9 +4109,20 @@ const ManageJournals: React.FC = () => {
                     : <span style={{ color: '#bbb' }}>—</span>,
                 },
                 {
+                  title: 'Line ID',
+                  dataIndex: 'lineId',
+                  key: 'lineId',
+                  width: 70,
+                  render: (val: number) => (
+                    <Text code style={{ fontSize: 10, background: '#f5f5f5', padding: '2px 4px', borderRadius: 2 }}>
+                      {val || '-'}
+                    </Text>
+                  ),
+                },
+                {
                   title: '',
                   key: 'editAcctComb',
-                  width: 90,
+                  width: 130,
                   render: (_: any, _line: JournalLine, rowIdx: number) => {
                     const modKey = `${tabKey}-${rowIdx}`;
                     const isModified = modKey in modifiedLines;
@@ -4099,17 +4139,40 @@ const ManageJournals: React.FC = () => {
                           />
                         </Tooltip>
                         {isModified && (
-                          <Tooltip title="Update this line in database">
-                            <Button
-                              size="small"
-                              type="primary"
-                              loading={isUpdating}
-                              onClick={() => handleUpdateJournalLineAccount(modKey, modifiedLines[modKey])}
-                              style={{ fontSize: 10, height: 20, padding: '0 6px' }}
-                            >
-                              Update
-                            </Button>
-                          </Tooltip>
+                          <>
+                            <Tooltip title="View API request details">
+                              <Button
+                                size="small"
+                                type="text"
+                                icon={<ApiOutlined />}
+                                onClick={() => {
+                                  const payload = {
+                                    jeHeaderId: journal.jeHeaderId,
+                                    lineId: modifiedLines[modKey].lineId || _line.lineId,
+                                    accountCombination: modifiedLines[modKey].current,
+                                  };
+                                  setApiPayload({
+                                    url: `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines/update-account`,
+                                    method: 'POST',
+                                    body: JSON.stringify(payload, null, 2),
+                                  });
+                                  setApiPayloadVisible(true);
+                                }}
+                                style={{ fontSize: 11, color: REDWOOD.warning }}
+                              />
+                            </Tooltip>
+                            <Tooltip title="Update this line in database">
+                              <Button
+                                size="small"
+                                type="primary"
+                                loading={isUpdating}
+                                onClick={() => handleUpdateJournalLineAccount(modKey, modifiedLines[modKey])}
+                                style={{ fontSize: 10, height: 20, padding: '0 6px' }}
+                              >
+                                Update
+                              </Button>
+                            </Tooltip>
+                          </>
                         )}
                       </Space>
                     );
@@ -6276,6 +6339,79 @@ const ManageJournals: React.FC = () => {
       >
         {pdfDataUrl && (
           <iframe src={pdfDataUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="PDF Preview" />
+        )}
+      </Modal>
+
+      {/* API Payload Inspector Modal */}
+      <Modal
+        title={
+          <Space>
+            <ApiOutlined style={{ color: REDWOOD.info }} />
+            <span>API Request Inspector - Update Account Combination</span>
+          </Space>
+        }
+        open={apiPayloadVisible}
+        onCancel={() => setApiPayloadVisible(false)}
+        width={900}
+        footer={
+          <Button onClick={() => setApiPayloadVisible(false)}>Close</Button>
+        }
+        destroyOnClose
+      >
+        {apiPayload && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* URL */}
+            <div>
+              <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Endpoint URL:</Text>
+              <div style={{ background: '#f5f5f5', border: '1px solid #d9d9d9', borderRadius: 4, padding: 12, maxHeight: 100, overflow: 'auto' }}>
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Tag color="red">{apiPayload.method}</Tag>
+                    <Text code style={{ fontSize: 11, flex: 1, wordBreak: 'break-all' }}>
+                      {apiPayload.url}
+                    </Text>
+                    <Button
+                      size="small"
+                      icon={<CopyOutlined />}
+                      onClick={() => {
+                        navigator.clipboard.writeText(apiPayload.url);
+                        message.success('URL copied');
+                      }}
+                    />
+                  </div>
+                </Space>
+              </div>
+            </div>
+
+            {/* Request Body */}
+            <div>
+              <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Request Body (JSON):</Text>
+              <div style={{ background: '#f5f5f5', border: '1px solid #d9d9d9', borderRadius: 4, padding: 12, maxHeight: 200, overflow: 'auto' }}>
+                <pre style={{ margin: 0, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {apiPayload.body}
+                </pre>
+              </div>
+              <Button
+                size="small"
+                style={{ marginTop: 8 }}
+                icon={<CopyOutlined />}
+                onClick={() => {
+                  navigator.clipboard.writeText(apiPayload.body);
+                  message.success('Payload copied');
+                }}
+              >
+                Copy Payload
+              </Button>
+            </div>
+
+            {/* Debug Info */}
+            <Alert
+              message="Debug Information"
+              description="Check the browser console (F12) for detailed debug logs including lineId values and full response from the server."
+              type="info"
+              showIcon
+            />
+          </div>
         )}
       </Modal>
     </Layout>
