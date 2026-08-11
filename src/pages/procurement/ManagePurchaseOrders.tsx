@@ -35,6 +35,11 @@ const REDWOOD = {
   neutral600: '#6B6B6B', neutral900: '#1A1A1A', surface: '#FFFFFF',
 };
 
+const CHART_COLORS = [
+  '#C74634', '#0572CE', '#1D7B4D', '#B07700', '#722ED1',
+  '#00918A', '#D93025', '#FF6B6B', '#4ECDC4', '#95E1D3',
+];
+
 // ── Oracle Fusion API config ─────────────────────────────────────────────────
 const BASE_URL = `${FUSION_POD_HOST}/fscmRestApi/resources/11.13.18.05`;
 const AUTH_HEADER = FUSION_POD_AUTH;
@@ -1245,6 +1250,98 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
     );
   }, [expandedLines, linesFilterText]);
 
+  const kpis = useMemo(() => {
+    const totalPOs = data.length;
+    const totalLines = expandedLines.length;
+    const suppliers = new Set(data.map(p => p.Supplier)).size;
+    const byCcy = new Map<string, number>();
+    data.forEach(po => {
+      const c = po.CurrencyCode ?? '?';
+      byCcy.set(c, (byCcy.get(c) ?? 0) + (po.Total ?? 0));
+    });
+    return { totalPOs, totalLines, suppliers, byCcy };
+  }, [data, expandedLines]);
+
+  const byCurrency = useMemo(() => {
+    const map = new Map<string, { total: number; count: number }>();
+    data.forEach(po => {
+      const c = po.CurrencyCode ?? '?';
+      const ex = map.get(c) ?? { total: 0, count: 0 };
+      map.set(c, { total: ex.total + (po.Total ?? 0), count: ex.count + 1 });
+    });
+    return Array.from(map.entries()).map(([ccy, d]) => ({ ccy, ...d })).sort((a, b) => b.total - a.total);
+  }, [data]);
+
+  const byStatus = useMemo(() => {
+    const map = new Map<string, number>();
+    data.forEach(po => { const s = po.StatusCode ?? 'UNKNOWN'; map.set(s, (map.get(s) ?? 0) + 1); });
+    return Array.from(map.entries()).map(([status, count]) => ({ status, count })).sort((a, b) => b.count - a.count);
+  }, [data]);
+
+  const monthlyTrend = useMemo(() => {
+    const map = new Map<string, { total: number; count: number }>();
+    data.forEach(po => {
+      if (!po.OrderDate) return;
+      const key = dayjs(po.OrderDate).format('YYYY-MM');
+      const ex = map.get(key) ?? { total: 0, count: 0 };
+      map.set(key, { total: ex.total + (po.Total ?? 0), count: ex.count + 1 });
+    });
+    return Array.from(map.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-12)
+      .map(([key, d]) => ({ label: dayjs(key, 'YYYY-MM').format("MMM 'YY"), ...d }));
+  }, [data]);
+
+  const topSuppliers = useMemo(() => {
+    const map = new Map<string, { total: number; count: number }>();
+    data.forEach(po => {
+      const sup = po.Supplier ?? 'Unknown';
+      const ex = map.get(sup) ?? { total: 0, count: 0 };
+      map.set(sup, { total: ex.total + (po.Total ?? 0), count: ex.count + 1 });
+    });
+    return Array.from(map.entries()).map(([supplier, d]) => ({ supplier, ...d })).sort((a, b) => b.total - a.total).slice(0, 10);
+  }, [data]);
+
+  const topItemsByAmt = useMemo(() => {
+    const map = new Map<string, { total: number; qty: number; desc: string }>();
+    expandedLines.forEach(l => {
+      if (!l.Item) return;
+      const ex = map.get(l.Item) ?? { total: 0, qty: 0, desc: l.Description ?? '' };
+      map.set(l.Item, { total: ex.total + (l.Total ?? 0), qty: ex.qty + (l.Quantity ?? 0), desc: ex.desc || (l.Description ?? '') });
+    });
+    return Array.from(map.entries()).map(([item, d]) => ({ item, ...d })).sort((a, b) => b.total - a.total).slice(0, 10);
+  }, [expandedLines]);
+
+  const byCategory = useMemo(() => {
+    const map = new Map<string, { total: number; qty: number; count: number }>();
+    expandedLines.forEach(l => {
+      const cat = l.Category ?? 'Uncategorized';
+      const ex = map.get(cat) ?? { total: 0, qty: 0, count: 0 };
+      map.set(cat, { total: ex.total + (l.Total ?? 0), qty: ex.qty + (l.Quantity ?? 0), count: ex.count + 1 });
+    });
+    return Array.from(map.entries()).map(([category, d]) => ({ category, ...d })).sort((a, b) => b.total - a.total).slice(0, 10);
+  }, [expandedLines]);
+
+  const maxSupplier  = topSuppliers[0]?.total  ?? 1;
+  const maxItemAmt   = topItemsByAmt[0]?.total  ?? 1;
+  const maxCat       = byCategory[0]?.total     ?? 1;
+  const maxMonthly   = Math.max(...monthlyTrend.map(m => m.total), 1);
+
+  const STATUS_COLORS: Record<string, string> = {
+    OPEN: REDWOOD.info, APPROVED: REDWOOD.success, CLOSED: REDWOOD.neutral600,
+    'CLOSED FOR RECEIVING': REDWOOD.warning, INCOMPLETE: REDWOOD.error, 'IN PROCESS': '#722ED1',
+  };
+
+  const SectionTitle: React.FC<{ icon: React.ReactNode; title: string }> = ({ icon, title }) => (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      borderBottom: `2px solid ${REDWOOD.primary}22`, paddingBottom: 8, marginBottom: 16,
+    }}>
+      <span style={{ color: REDWOOD.primary, fontSize: 15 }}>{icon}</span>
+      <Text strong style={{ fontSize: 14, color: REDWOOD.neutral900 }}>{title}</Text>
+    </div>
+  );
+
   const columns: ColumnsType<RawPO> = [
     { title: 'Created', dataIndex: 'CreationDate', width: 80, render: d => fmtDate(d),
       sorter: (a, b) => (a.CreationDate ?? '').localeCompare(b.CreationDate ?? ''),
@@ -1580,6 +1677,178 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
                 </>
               ),
             },
+            {
+              key: 'analytics',
+              label: <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <HistoryOutlined style={{ fontSize: 13 }} /> Analytics
+              </span>,
+              children: (
+                <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16, background: REDWOOD.neutral100 }}>
+                  {data.length === 0 && !loading
+                    ? <Empty description="Search for orders to see analytics" style={{ padding: 60 }} />
+                    : (<>
+                      {/* ── KPI Cards ──────────────────────────────────────────────────── */}
+                      <Row gutter={[12, 12]}>
+                        {[
+                          { label: 'Total POs',    value: kpis.totalPOs,  color: REDWOOD.primary },
+                          { label: 'Total Lines',  value: kpis.totalLines, color: REDWOOD.info },
+                          { label: 'Suppliers',    value: kpis.suppliers,  color: REDWOOD.success },
+                          { label: 'Avg Lines/PO', value: kpis.totalPOs > 0 ? +(kpis.totalLines / kpis.totalPOs).toFixed(1) : 0, color: '#722ED1' },
+                        ].map(k => (
+                          <Col xs={12} sm={6} key={k.label}>
+                            <Card styles={{ body: { padding: '16px 20px' } }}
+                              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, borderTop: `3px solid ${k.color}` }}>
+                              <Statistic title={k.label} value={k.value}
+                                valueStyle={{ color: k.color, fontSize: 26, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }} />
+                            </Card>
+                          </Col>
+                        ))}
+                      </Row>
+
+                      {/* ── Total by Currency ──────────────────────────────────────────── */}
+                      <Row gutter={[12, 12]}>
+                        {byCurrency.map((c, i) => (
+                          <Col key={c.ccy} xs={24} sm={12} md={8} lg={6}>
+                            <Card styles={{ body: { padding: '14px 18px' } }}
+                              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, borderLeft: `4px solid ${CHART_COLORS[i % CHART_COLORS.length]}` }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: REDWOOD.neutral600, letterSpacing: '0.06em' }}>
+                                Total Ordered · {c.ccy}
+                              </div>
+                              <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: REDWOOD.neutral900, marginTop: 4, lineHeight: 1.2 }}>
+                                {fmtAmt(c.total)}
+                              </div>
+                              <Text type="secondary" style={{ fontSize: 11 }}>{c.count} purchase order{c.count !== 1 ? 's' : ''}</Text>
+                            </Card>
+                          </Col>
+                        ))}
+                      </Row>
+
+                      <Row gutter={[12, 12]}>
+                        {/* ── Status Distribution ─────────────────────────────────────── */}
+                        <Col xs={24} md={8}>
+                          <Card styles={{ body: { padding: '16px 20px' } }}
+                            style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, height: '100%' }}>
+                            <SectionTitle icon={<CheckCircleOutlined />} title="Status Distribution" />
+                            {byStatus.map(s => {
+                              const cfg = statusConfig[s.status.toUpperCase()] ?? { label: s.status, tagColor: 'default' };
+                              const color = STATUS_COLORS[s.status.toUpperCase()] ?? REDWOOD.neutral600;
+                              const pct = kpis.totalPOs > 0 ? ((s.count / kpis.totalPOs) * 100).toFixed(1) : '0';
+                              return (
+                                <div key={s.status} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                                  <Text style={{ fontSize: 12, flex: 1 }}>{cfg.label}</Text>
+                                  <Tag color={cfg.tagColor} style={{ fontSize: 11, fontWeight: 700, margin: 0, minWidth: 30, textAlign: 'center' }}>{s.count}</Tag>
+                                  <Text type="secondary" style={{ fontSize: 11, minWidth: 38, textAlign: 'right' }}>{pct}%</Text>
+                                </div>
+                              );
+                            })}
+                          </Card>
+                        </Col>
+
+                        {/* ── Monthly Trend ────────────────────────────────────────────── */}
+                        <Col xs={24} md={16}>
+                          <Card styles={{ body: { padding: '16px 20px' } }}
+                            style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, height: '100%' }}>
+                            <SectionTitle icon={<HistoryOutlined />} title="Monthly Purchasing Trend (last 12 months)" />
+                            {monthlyTrend.length === 0
+                              ? <Empty description="No order date data" />
+                              : (
+                                <div>
+                                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height: 130, paddingBottom: 4 }}>
+                                    {monthlyTrend.map((m, i) => {
+                                      const pct = (m.total / maxMonthly) * 100;
+                                      const isRecent = i >= monthlyTrend.length - 3;
+                                      return (
+                                        <Tooltip key={m.label}
+                                          title={<><div style={{ fontWeight: 700 }}>{m.label}</div><div>{fmtAmt(m.total)}</div><div>{m.count} PO{m.count !== 1 ? 's' : ''}</div></>}>
+                                          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'default' }}>
+                                            <div style={{ width: '100%', height: 110, display: 'flex', alignItems: 'flex-end' }}>
+                                              <div style={{ width: '100%', height: `${pct}%`, background: isRecent ? REDWOOD.primary : REDWOOD.neutral300, borderRadius: '4px 4px 0 0', transition: 'all 0.3s' }} />
+                                            </div>
+                                            <Text type="secondary" style={{ fontSize: 10, marginTop: 4, fontWeight: 600 }}>{m.label}</Text>
+                                          </div>
+                                        </Tooltip>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                          </Card>
+                        </Col>
+                      </Row>
+
+                      {/* ── Top Suppliers & Items ──────────────────────────────────────– */}
+                      <Row gutter={[12, 12]}>
+                        <Col xs={24} md={12}>
+                          <Card styles={{ body: { padding: '16px 20px' } }}
+                            style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+                            <SectionTitle icon={<BankOutlined />} title="Top 10 Suppliers by Spend" />
+                            {topSuppliers.map((s, i) => {
+                              const pct = (s.total / maxSupplier) * 100;
+                              return (
+                                <div key={s.supplier} style={{ marginBottom: 10 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                    <Text style={{ flex: 1, fontSize: 12, fontWeight: 600 }}>{s.supplier}</Text>
+                                    <Text type="secondary" style={{ fontSize: 11 }}>{fmtAmt(s.total)}</Text>
+                                  </div>
+                                  <div style={{ width: '100%', height: 6, background: REDWOOD.neutral200, borderRadius: 3 }}>
+                                    <div style={{ height: '100%', width: `${pct}%`, background: REDWOOD.primary, borderRadius: 3 }} />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </Card>
+                        </Col>
+
+                        <Col xs={24} md={12}>
+                          <Card styles={{ body: { padding: '16px 20px' } }}
+                            style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+                            <SectionTitle icon={<ShoppingCartOutlined />} title="Top 10 Items by Spend" />
+                            {topItemsByAmt.map((i, idx) => {
+                              const pct = (i.total / maxItemAmt) * 100;
+                              return (
+                                <div key={i.item} style={{ marginBottom: 10 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                    <Text style={{ flex: 1, fontSize: 12, fontWeight: 600 }}>{i.item}</Text>
+                                    <Text type="secondary" style={{ fontSize: 11 }}>{fmtAmt(i.total)}</Text>
+                                  </div>
+                                  <div style={{ width: '100%', height: 6, background: REDWOOD.neutral200, borderRadius: 3 }}>
+                                    <div style={{ height: '100%', width: `${pct}%`, background: REDWOOD.info, borderRadius: 3 }} />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </Card>
+                        </Col>
+                      </Row>
+
+                      {/* ── Categories ──────────────────────────────────────────────────── */}
+                      <Card styles={{ body: { padding: '16px 20px' } }}
+                        style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
+                        <SectionTitle icon={<UnorderedListOutlined />} title="Top 10 Categories by Spend" />
+                        <Row gutter={[12, 12]}>
+                          {byCategory.map((c, i) => {
+                            const pct = (c.total / maxCat) * 100;
+                            return (
+                              <Col xs={24} sm={12} md={8} key={c.category}>
+                                <div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                                    <Text strong style={{ fontSize: 12, flex: 1 }}>{c.category}</Text>
+                                  </div>
+                                  <div style={{ width: '100%', height: 8, background: REDWOOD.neutral200, borderRadius: 4 }}>
+                                    <div style={{ height: '100%', width: `${pct}%`, background: CHART_COLORS[i % CHART_COLORS.length], borderRadius: 4 }} />
+                                  </div>
+                                  <Text type="secondary" style={{ fontSize: 10, marginTop: 4, display: 'block' }}>{fmtAmt(c.total)} · {c.count} line{c.count !== 1 ? 's' : ''}</Text>
+                                </div>
+                              </Col>
+                            );
+                          })}
+                        </Row>
+                      </Card>
+                    </>)}
+                </div>
+              ),
+            },
           ]}
         />
       </Card>
@@ -1690,424 +1959,6 @@ Content-Type: application/vnd.oracle.adf.action+json`}
   );
 };
 
-// ── Analytics Tab ─────────────────────────────────────────────────────────────
-const AnalyticsTab: React.FC = () => {
-  const [loading, setLoading] = useState(false);
-  const [rawPos, setRawPos] = useState<any[]>([]);
-  const [rawLines, setRawLines] = useState<any[]>([]);
-  const [fetchedAt, setFetchedAt] = useState('');
-  const didMount = useRef(false);
-
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const up = new URLSearchParams({ limit: '500', expand: 'lines' });
-      const res = await fetch(`${BASE_URL}/purchaseOrders?${up}`, {
-        headers: { Authorization: AUTH_HEADER, Accept: 'application/json' },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      const json = await res.json();
-      const poList: any[] = json.items ?? [];
-      setRawPos(poList);
-      const allLines: any[] = [];
-      poList.forEach(po => {
-        const ls: any[] = po.lines?.items ?? (Array.isArray(po.lines) ? po.lines : []);
-        ls.forEach(l => allLines.push({ ...l, _po: po }));
-      });
-      setRawLines(allLines);
-      setFetchedAt(new Date().toLocaleString('en-AE', { dateStyle: 'medium', timeStyle: 'short' }));
-    } catch (e: any) {
-      message.error(`Analytics load failed: ${e.message}`, 6);
-    } finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => {
-    if (didMount.current) return;
-    didMount.current = true;
-    loadData();
-  }, [loadData]);
-
-  // ── Aggregations ──────────────────────────────────────────────────────────
-  const kpis = useMemo(() => {
-    const totalPOs = rawPos.length;
-    const totalLines = rawLines.length;
-    const suppliers = new Set(rawPos.map(p => p.Supplier)).size;
-    const byCcy = new Map<string, number>();
-    rawPos.forEach(po => {
-      const c = po.CurrencyCode ?? '?';
-      byCcy.set(c, (byCcy.get(c) ?? 0) + (po.Total ?? 0));
-    });
-    return { totalPOs, totalLines, suppliers, byCcy };
-  }, [rawPos, rawLines]);
-
-  const byCurrency = useMemo(() => {
-    const map = new Map<string, { total: number; count: number }>();
-    rawPos.forEach(po => {
-      const c = po.CurrencyCode ?? '?';
-      const ex = map.get(c) ?? { total: 0, count: 0 };
-      map.set(c, { total: ex.total + (po.Total ?? 0), count: ex.count + 1 });
-    });
-    return Array.from(map.entries()).map(([ccy, d]) => ({ ccy, ...d })).sort((a, b) => b.total - a.total);
-  }, [rawPos]);
-
-  const byStatus = useMemo(() => {
-    const map = new Map<string, number>();
-    rawPos.forEach(po => { const s = po.StatusCode ?? 'UNKNOWN'; map.set(s, (map.get(s) ?? 0) + 1); });
-    return Array.from(map.entries()).map(([status, count]) => ({ status, count })).sort((a, b) => b.count - a.count);
-  }, [rawPos]);
-
-  const monthlyTrend = useMemo(() => {
-    const map = new Map<string, { total: number; count: number }>();
-    rawPos.forEach(po => {
-      if (!po.OrderDate) return;
-      const key = dayjs(po.OrderDate).format('YYYY-MM');
-      const ex = map.get(key) ?? { total: 0, count: 0 };
-      map.set(key, { total: ex.total + (po.Total ?? 0), count: ex.count + 1 });
-    });
-    return Array.from(map.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .slice(-12)
-      .map(([key, d]) => ({ label: dayjs(key, 'YYYY-MM').format("MMM 'YY"), ...d }));
-  }, [rawPos]);
-
-  const topSuppliers = useMemo(() => {
-    const map = new Map<string, { total: number; count: number; lineCount: number }>();
-    rawPos.forEach(po => {
-      const sup = po.Supplier ?? 'Unknown';
-      const ex = map.get(sup) ?? { total: 0, count: 0, lineCount: 0 };
-      const lc = (po.lines?.items ?? []).length;
-      map.set(sup, { total: ex.total + (po.Total ?? 0), count: ex.count + 1, lineCount: ex.lineCount + lc });
-    });
-    return Array.from(map.entries()).map(([supplier, d]) => ({ supplier, ...d })).sort((a, b) => b.total - a.total).slice(0, 10);
-  }, [rawPos]);
-
-  const topItemsByAmt = useMemo(() => {
-    const map = new Map<string, { total: number; qty: number; desc: string }>();
-    rawLines.forEach(l => {
-      if (!l.Item) return;
-      const ex = map.get(l.Item) ?? { total: 0, qty: 0, desc: l.Description ?? '' };
-      map.set(l.Item, { total: ex.total + (l.Total ?? 0), qty: ex.qty + (l.Quantity ?? 0), desc: ex.desc || (l.Description ?? '') });
-    });
-    return Array.from(map.entries()).map(([item, d]) => ({ item, ...d })).sort((a, b) => b.total - a.total).slice(0, 10);
-  }, [rawLines]);
-
-  const topItemsByQty = useMemo(() => {
-    const map = new Map<string, { qty: number; total: number; desc: string }>();
-    rawLines.forEach(l => {
-      if (!l.Item) return;
-      const ex = map.get(l.Item) ?? { qty: 0, total: 0, desc: l.Description ?? '' };
-      map.set(l.Item, { qty: ex.qty + (l.Quantity ?? 0), total: ex.total + (l.Total ?? 0), desc: ex.desc || (l.Description ?? '') });
-    });
-    return Array.from(map.entries()).map(([item, d]) => ({ item, ...d })).sort((a, b) => b.qty - a.qty).slice(0, 10);
-  }, [rawLines]);
-
-  const byCategory = useMemo(() => {
-    const map = new Map<string, { total: number; qty: number; count: number }>();
-    rawLines.forEach(l => {
-      const cat = l.Category ?? 'Uncategorized';
-      const ex = map.get(cat) ?? { total: 0, qty: 0, count: 0 };
-      map.set(cat, { total: ex.total + (l.Total ?? 0), qty: ex.qty + (l.Quantity ?? 0), count: ex.count + 1 });
-    });
-    return Array.from(map.entries()).map(([category, d]) => ({ category, ...d })).sort((a, b) => b.total - a.total).slice(0, 10);
-  }, [rawLines]);
-
-  const maxSupplier  = topSuppliers[0]?.total  ?? 1;
-  const maxItemAmt   = topItemsByAmt[0]?.total  ?? 1;
-  const maxItemQty   = topItemsByQty[0]?.qty    ?? 1;
-  const maxCat       = byCategory[0]?.total     ?? 1;
-  const maxMonthly   = Math.max(...monthlyTrend.map(m => m.total), 1);
-
-  const STATUS_COLORS: Record<string, string> = {
-    OPEN: REDWOOD.info, APPROVED: REDWOOD.success, CLOSED: REDWOOD.neutral600,
-    'CLOSED FOR RECEIVING': REDWOOD.warning, INCOMPLETE: REDWOOD.error, 'IN PROCESS': '#722ED1',
-  };
-
-  const SectionTitle: React.FC<{ icon: React.ReactNode; title: string }> = ({ icon, title }) => (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 8,
-      borderBottom: `2px solid ${REDWOOD.primary}22`, paddingBottom: 8, marginBottom: 16,
-    }}>
-      <span style={{ color: REDWOOD.primary, fontSize: 15 }}>{icon}</span>
-      <Text strong style={{ fontSize: 14, color: REDWOOD.neutral900 }}>{title}</Text>
-    </div>
-  );
-
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400, flexDirection: 'column', gap: 16 }}>
-        <Spin size="large" />
-        <Text type="secondary" style={{ fontSize: 13 }}>Loading analytics data…</Text>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16, background: REDWOOD.neutral100, minHeight: '100%' }}>
-
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <Title level={5} style={{ margin: 0, color: REDWOOD.neutral900 }}>Purchasing Analytics</Title>
-          {fetchedAt && (
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              {rawPos.length} POs · {rawLines.length} lines · refreshed {fetchedAt}
-            </Text>
-          )}
-        </div>
-        <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}
-          style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary, fontWeight: 600 }}>
-          Refresh
-        </Button>
-      </div>
-
-      {rawPos.length === 0 && !loading && <Empty description="No purchase order data found" style={{ padding: 60 }} />}
-
-      {rawPos.length > 0 && (<>
-
-        {/* ── KPI Cards ──────────────────────────────────────────────────── */}
-        <Row gutter={[12, 12]}>
-          {[
-            { label: 'Total POs',    value: kpis.totalPOs,  color: REDWOOD.primary },
-            { label: 'Total Lines',  value: kpis.totalLines, color: REDWOOD.info },
-            { label: 'Suppliers',    value: kpis.suppliers,  color: REDWOOD.success },
-            { label: 'Avg Lines/PO', value: kpis.totalPOs > 0 ? +(kpis.totalLines / kpis.totalPOs).toFixed(1) : 0, color: '#722ED1' },
-          ].map(k => (
-            <Col xs={12} sm={6} key={k.label}>
-              <Card styles={{ body: { padding: '16px 20px' } }}
-                style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, borderTop: `3px solid ${k.color}` }}>
-                <Statistic title={k.label} value={k.value}
-                  valueStyle={{ color: k.color, fontSize: 26, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }} />
-              </Card>
-            </Col>
-          ))}
-        </Row>
-
-        {/* ── Total by Currency ──────────────────────────────────────────── */}
-        <Row gutter={[12, 12]}>
-          {byCurrency.map((c, i) => (
-            <Col key={c.ccy} xs={24} sm={12} md={8} lg={6}>
-              <Card styles={{ body: { padding: '14px 18px' } }}
-                style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, borderLeft: `4px solid ${CHART_COLORS[i % CHART_COLORS.length]}` }}>
-                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: REDWOOD.neutral600, letterSpacing: '0.06em' }}>
-                  Total Ordered · {c.ccy}
-                </div>
-                <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: REDWOOD.neutral900, marginTop: 4, lineHeight: 1.2 }}>
-                  {fmtAmt(c.total)}
-                </div>
-                <Text type="secondary" style={{ fontSize: 11 }}>{c.count} purchase order{c.count !== 1 ? 's' : ''}</Text>
-              </Card>
-            </Col>
-          ))}
-        </Row>
-
-        <Row gutter={[12, 12]}>
-          {/* ── Status Distribution ─────────────────────────────────────── */}
-          <Col xs={24} md={8}>
-            <Card styles={{ body: { padding: '16px 20px' } }}
-              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, height: '100%' }}>
-              <SectionTitle icon={<CheckCircleOutlined />} title="Status Distribution" />
-              {byStatus.map(s => {
-                const cfg = statusConfig[s.status.toUpperCase()] ?? { label: s.status, tagColor: 'default' };
-                const color = STATUS_COLORS[s.status.toUpperCase()] ?? REDWOOD.neutral600;
-                const pct = kpis.totalPOs > 0 ? ((s.count / kpis.totalPOs) * 100).toFixed(1) : '0';
-                return (
-                  <div key={s.status} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
-                    <Text style={{ fontSize: 12, flex: 1 }}>{cfg.label}</Text>
-                    <Tag color={cfg.tagColor} style={{ fontSize: 11, fontWeight: 700, margin: 0, minWidth: 30, textAlign: 'center' }}>{s.count}</Tag>
-                    <Text type="secondary" style={{ fontSize: 11, minWidth: 38, textAlign: 'right' }}>{pct}%</Text>
-                  </div>
-                );
-              })}
-            </Card>
-          </Col>
-
-          {/* ── Monthly Trend ────────────────────────────────────────────── */}
-          <Col xs={24} md={16}>
-            <Card styles={{ body: { padding: '16px 20px' } }}
-              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, height: '100%' }}>
-              <SectionTitle icon={<HistoryOutlined />} title="Monthly Purchasing Trend (last 12 months)" />
-              {monthlyTrend.length === 0
-                ? <Empty description="No order date data" />
-                : (
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height: 130, paddingBottom: 4 }}>
-                      {monthlyTrend.map((m, i) => {
-                        const pct = (m.total / maxMonthly) * 100;
-                        const isRecent = i >= monthlyTrend.length - 3;
-                        return (
-                          <Tooltip key={m.label}
-                            title={<><div style={{ fontWeight: 700 }}>{m.label}</div><div>{fmtAmt(m.total)}</div><div>{m.count} PO{m.count !== 1 ? 's' : ''}</div></>}>
-                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'default' }}>
-                              <div style={{ width: '100%', height: 110, display: 'flex', alignItems: 'flex-end' }}>
-                                <div style={{
-                                  width: '100%',
-                                  height: `${Math.max(pct, 3)}%`,
-                                  background: isRecent ? REDWOOD.primary : REDWOOD.info,
-                                  borderRadius: '3px 3px 0 0', opacity: isRecent ? 1 : 0.7,
-                                  transition: 'height 0.8s ease',
-                                }} />
-                              </div>
-                              <Text style={{ fontSize: 9, color: REDWOOD.neutral600, marginTop: 3, textAlign: 'center', lineHeight: 1.2 }}>
-                                {m.label}
-                              </Text>
-                            </div>
-                          </Tooltip>
-                        );
-                      })}
-                    </div>
-                    <div style={{ display: 'flex', gap: 24, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${REDWOOD.neutral200}` }}>
-                      {monthlyTrend.slice(-3).map(m => (
-                        <div key={m.label}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: REDWOOD.neutral600, textTransform: 'uppercase' }}>{m.label}</div>
-                          <div style={{ fontSize: 14, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtAmt(m.total)}</div>
-                          <Text type="secondary" style={{ fontSize: 11 }}>{m.count} PO{m.count !== 1 ? 's' : ''}</Text>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-            </Card>
-          </Col>
-        </Row>
-
-        <Row gutter={[12, 12]}>
-          {/* ── Top Suppliers ─────────────────────────────────────────────── */}
-          <Col xs={24} md={12}>
-            <Card styles={{ body: { padding: '16px 20px' } }}
-              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-              <SectionTitle icon={<BankOutlined />} title="Top 10 Suppliers by Amount" />
-              {topSuppliers.map((s, i) => (
-                <HBar key={s.supplier}
-                  value={s.total} max={maxSupplier}
-                  color={CHART_COLORS[i % CHART_COLORS.length]}
-                  label={s.supplier} count={s.count}
-                  rightLabel={fmtAmt(s.total)}
-                />
-              ))}
-            </Card>
-          </Col>
-
-          {/* ── Top Items by Amount ───────────────────────────────────────── */}
-          <Col xs={24} md={12}>
-            <Card styles={{ body: { padding: '16px 20px' } }}
-              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-              <SectionTitle icon={<DollarOutlined />} title="Top 10 Items by Amount" />
-              {topItemsByAmt.length === 0
-                ? <Empty description="No item codes on lines" style={{ padding: 20 }} />
-                : topItemsByAmt.map((it, i) => (
-                  <HBar key={it.item}
-                    value={it.total} max={maxItemAmt}
-                    color={CHART_COLORS[i % CHART_COLORS.length]}
-                    label={it.item}
-                    sub={it.desc ? `${it.desc}` : undefined}
-                    rightLabel={fmtAmt(it.total)}
-                  />
-                ))}
-            </Card>
-          </Col>
-        </Row>
-
-        <Row gutter={[12, 12]}>
-          {/* ── Top Items by Quantity ─────────────────────────────────────── */}
-          <Col xs={24} md={12}>
-            <Card styles={{ body: { padding: '16px 20px' } }}
-              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-              <SectionTitle icon={<ShoppingCartOutlined />} title="Top 10 Items by Quantity" />
-              {topItemsByQty.length === 0
-                ? <Empty description="No item codes on lines" style={{ padding: 20 }} />
-                : topItemsByQty.map((it, i) => (
-                  <HBar key={it.item}
-                    value={it.qty} max={maxItemQty}
-                    color={i % 2 === 0 ? REDWOOD.success : '#00918A'}
-                    label={it.item}
-                    sub={it.desc || undefined}
-                    rightLabel={`${it.qty.toLocaleString()} units`}
-                  />
-                ))}
-            </Card>
-          </Col>
-
-          {/* ── Category Breakdown ────────────────────────────────────────── */}
-          <Col xs={24} md={12}>
-            <Card styles={{ body: { padding: '16px 20px' } }}
-              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-              <SectionTitle icon={<UnorderedListOutlined />} title="Top Categories by Amount" />
-              {byCategory.length === 0
-                ? <Empty description="No category data on lines" style={{ padding: 20 }} />
-                : byCategory.map((c, i) => (
-                  <HBar key={c.category}
-                    value={c.total} max={maxCat}
-                    color={CHART_COLORS[(i + 4) % CHART_COLORS.length]}
-                    label={c.category}
-                    rightLabel={fmtAmt(c.total)}
-                  />
-                ))}
-            </Card>
-          </Col>
-        </Row>
-
-        {/* ── Supplier vs Item Pivot ─────────────────────────────────────── */}
-        <Row gutter={[12, 12]}>
-          <Col xs={24} md={12}>
-            <Card styles={{ body: { padding: '16px 20px' } }}
-              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-              <SectionTitle icon={<UserOutlined />} title="Supplier Summary Table" />
-              <Table
-                size="small"
-                pagination={false}
-                scroll={{ x: 420 }}
-                rowKey="supplier"
-                dataSource={topSuppliers}
-                columns={[
-                  { title: 'Supplier', dataIndex: 'supplier', ellipsis: true,
-                    render: v => <Text style={{ fontSize: 12, fontWeight: 600 }}>{v}</Text> },
-                  { title: 'POs', dataIndex: 'count', width: 52, align: 'center',
-                    render: v => <Tag color="blue" style={{ fontSize: 11 }}>{v}</Tag> },
-                  { title: 'Lines', dataIndex: 'lineCount', width: 58, align: 'center',
-                    render: v => <Tag color="geekblue" style={{ fontSize: 11 }}>{v}</Tag> },
-                  { title: 'Total', dataIndex: 'total', width: 130, align: 'right',
-                    render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: REDWOOD.primary }}>{fmtAmt(v)}</Text> },
-                ]}
-                rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
-              />
-            </Card>
-          </Col>
-
-          <Col xs={24} md={12}>
-            <Card styles={{ body: { padding: '16px 20px' } }}
-              style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}` }}>
-              <SectionTitle icon={<FileTextOutlined />} title="Item Summary Table (by Amount)" />
-              {topItemsByAmt.length === 0
-                ? <Empty description="No item codes on lines" style={{ padding: 20 }} />
-                : (
-                  <Table
-                    size="small"
-                    pagination={false}
-                    scroll={{ x: 420 }}
-                    rowKey="item"
-                    dataSource={topItemsByAmt}
-                    columns={[
-                      { title: 'Item', dataIndex: 'item', width: 120,
-                        render: v => <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info }}>{v}</Text> },
-                      { title: 'Description', dataIndex: 'desc', ellipsis: true,
-                        render: v => <Text style={{ fontSize: 12 }}>{v || '—'}</Text> },
-                      { title: 'Qty', dataIndex: 'qty', width: 70, align: 'right',
-                        render: v => <Text style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{v?.toLocaleString() ?? '—'}</Text> },
-                      { title: 'Total', dataIndex: 'total', width: 120, align: 'right',
-                        render: v => <Text strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: REDWOOD.primary }}>{fmtAmt(v)}</Text> },
-                    ]}
-                    rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
-                  />
-                )}
-            </Card>
-          </Col>
-        </Row>
-
-      </>)}
-    </div>
-  );
-};
 
 // ── Main Page with Tabs ──────────────────────────────────────────────────────
 const ManagePurchaseOrders: React.FC = () => {
@@ -2195,16 +2046,6 @@ const ManagePurchaseOrders: React.FC = () => {
         </span>
       ),
       children: <SearchTab onOpen={handleOpen} onEdit={openEditPO} onLifeCycle={handleOpenLifecycle} lifecycleSummary={lifecycleSummary} />,
-      closable: false,
-    },
-    {
-      key: 'analytics',
-      label: (
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <HistoryOutlined style={{ fontSize: 13 }} /> Analytics
-        </span>
-      ),
-      children: <AnalyticsTab />,
       closable: false,
     },
     ...createTabs.map((id, idx) => {
