@@ -795,9 +795,23 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
     setVoidDone(false);
     setVoidStepMap(initVoidSteps());
 
-    for (const key of VOID_STEP_KEYS) {
+    for (let i = 0; i < VOID_STEP_KEYS.length; i++) {
+      const key = VOID_STEP_KEYS[i];
       const ok = await execVoidStep(key, values);
       if (!ok) { setVoidRunning(false); return; }
+
+      // After Step 2 (get_lines): if no reversal lines, skip Steps 3-6 and jump to Step 7 (void)
+      if (key === 'get_lines' && !voidCtxRef.current.reverseLines.length) {
+        // Mark steps 3-6 as skipped
+        setVoidStep('sla', { status: 'success', response: { skipped: true, reason: 'No GL lines to reverse' } });
+        setVoidStep('gl_create', { status: 'success', response: { skipped: true, reason: 'No GL lines to reverse' } });
+        setVoidStep('gl_post', { status: 'success', response: { skipped: true, reason: 'No GL lines to reverse' } });
+        setVoidStep('sla_stamp', { status: 'success', response: { skipped: true, reason: 'No GL lines to reverse' } });
+        // Now execute final step 7 (void)
+        const voidOk = await execVoidStep('void', values);
+        if (!voidOk) { setVoidRunning(false); return; }
+        break; // Exit the loop after void step
+      }
     }
 
     setVoidRunning(false);
@@ -2465,6 +2479,15 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             return <Alert type="error" showIcon message={failed.error || 'A step failed'} style={{ marginBottom: 10 }} />;
           })()}
 
+          {/* ── Info when accounting steps are skipped (no GL lines) ──────────── */}
+          {(() => {
+            const slaStep = voidStepMap['sla'];
+            if (slaStep.status === 'success' && (slaStep.response as any)?.skipped) {
+              return <Alert type="info" showIcon message="No GL journal found — accounting reversal steps skipped. Payment will be marked as voided directly." style={{ marginBottom: 10 }} />;
+            }
+            return null;
+          })()}
+
           {/* ── API Details (collapsible) ───────────────────────────────────── */}
           {(() => {
             const STEPS: { key: VoidStepKey; step: number; method: string; methodColor: string; label: string; url: string }[] = [
@@ -2498,12 +2521,14 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                   {STEPS.map(s => {
                     const st = voidStepMap[s.key];
                     if (st.status === 'idle') return null;
-                    const statusIcon = st.status === 'running' ? <LoadingOutlined style={{ color: '#1677ff' }} spin />
+                    const isSkipped = (st.response as any)?.skipped === true;
+                    const statusIcon = isSkipped ? <Tag color="orange" style={{ fontSize: 10, margin: 0 }}>Skipped</Tag>
+                      : st.status === 'running' ? <LoadingOutlined style={{ color: '#1677ff' }} spin />
                       : st.status === 'success' ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
                       : <CloseCircleOutlined style={{ color: '#ff4d4f' }} />;
                     return (
-                      <div key={s.key} style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 4, padding: '6px 10px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: st.error || st.response ? 4 : 0 }}>
+                      <div key={s.key} style={{ background: isSkipped ? '#fffbe6' : '#fafafa', border: isSkipped ? '1px solid #ffe58f' : '1px solid #f0f0f0', borderRadius: 4, padding: '6px 10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: st.error || (st.response && !isSkipped) ? 4 : 0 }}>
                           <Space size={4}>
                             <Tag color={s.methodColor} style={{ minWidth: 40, textAlign: 'center', margin: 0, fontSize: 10 }}>{s.method}</Tag>
                             <Text style={{ fontSize: 11 }}>Step {s.step}: {s.label}</Text>
@@ -2516,7 +2541,8 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
                             }>Payload</Button>
                           )}
                         </div>
-                        <code style={{ fontSize: 10, color: '#888', wordBreak: 'break-all' as const }}>{s.url}</code>
+                        <code style={{ fontSize: 10, color: isSkipped ? '#ad6800' : '#888', wordBreak: 'break-all' as const }}>{s.url}</code>
+                        {isSkipped && <Alert type="warning" message={(st.response as any)?.reason || 'Skipped'} style={{ marginTop: 4, fontSize: 11 }} showIcon />}
                         {st.error && <Alert type="error" message={st.error} style={{ marginTop: 4, fontSize: 11 }} showIcon />}
                       </div>
                     );
