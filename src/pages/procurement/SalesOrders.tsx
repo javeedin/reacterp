@@ -4095,22 +4095,60 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
   const [qtys, setQtys] = useState<Record<string, number>>({});
   const [rows, setRows] = useState<ImpRow[] | null>(null);
   const [uomMap, setUomMap] = useState<Record<string, { uom?: string; desc?: string }>>({});
+  const [searchType, setSearchType] = useState<'itemNumber' | 'description'>('itemNumber');
+  const [searchText, setSearchText] = useState('');
+  const [filterText, setFilterText] = useState('');
 
-  const loadOnhand = useCallback(async () => {
+  const loadOnhand = useCallback(async (type: 'itemNumber' | 'description', query: string) => {
     if (!org) { message.warning('Select an organization first'); return; }
+    if (!query.trim()) { message.warning('Enter a search term'); return; }
+
     setLoading(true);
     try {
+      let q = `OrganizationCode=${org}${subinv ? `;SubinventoryCode=${subinv}` : ''}`;
       const balances: any[] = [];
       let offset = 0;
-      for (let i = 0; i < 20; i++) {
-        const q = `OrganizationCode=${org}${subinv ? `;SubinventoryCode=${subinv}` : ''}`;
-        const r = await fetch(`${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&onlyData=true&limit=100&offset=${offset}`, { headers: FUSION_HDRS });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const d = await r.json();
-        balances.push(...(d.items ?? []));
-        if (!d.hasMore) break;
-        offset += 100;
+
+      if (type === 'itemNumber') {
+        q += `;ItemNumber=${query.trim()}`;
+      } else {
+        // For description search, we'll fetch items by description from itemCosts first
+        const itemRes = await fetch(`${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemDescription=${query.trim()}`)}&onlyData=true&limit=100`, { headers: FUSION_HDRS });
+        if (!itemRes.ok) throw new Error(`HTTP ${itemRes.status} searching items`);
+        const itemData = await itemRes.json();
+        const itemNumbers = (itemData.items ?? []).map((i: any) => pf(i, ['ItemNumber', 'Item'])).filter(Boolean);
+
+        if (itemNumbers.length === 0) {
+          setItems([]);
+          setUomMap({});
+          setSel([]);
+          setQtys({});
+          return;
+        }
+
+        // Search on-hand for each item number
+        await Promise.all(itemNumbers.map(async (itemNum: string) => {
+          for (let i = 0; i < 5; i++) {
+            const qry = `OrganizationCode=${org}${subinv ? `;SubinventoryCode=${subinv}` : ''};ItemNumber=${itemNum}`;
+            const r = await fetch(`${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(qry)}&onlyData=true&limit=100&offset=${i * 100}`, { headers: FUSION_HDRS });
+            if (!r.ok) return;
+            const d = await r.json();
+            balances.push(...(d.items ?? []));
+            if (!d.hasMore) break;
+          }
+        }));
       }
+
+      if (type === 'itemNumber') {
+        for (let i = 0; i < 5; i++) {
+          const r = await fetch(`${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&onlyData=true&limit=100&offset=${i * 100}`, { headers: FUSION_HDRS });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          balances.push(...(d.items ?? []));
+          if (!d.hasMore) break;
+        }
+      }
+
       // Deduplicate by item number and sum quantities
       const itemMap: Record<string, { item: string; qty: number; subinv?: string }> = {};
       balances.forEach((b: any) => {
@@ -4123,9 +4161,9 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
       });
 
       // Fetch UOM and description for each item from itemCosts
-      const items = Object.values(itemMap);
+      const itemsArray = Object.values(itemMap);
       const uomData: Record<string, { uom?: string; desc?: string }> = {};
-      await Promise.all(items.map(async (item) => {
+      await Promise.all(itemsArray.map(async (item) => {
         try {
           const r = await fetch(`${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemNumber=${item.item}`)}&onlyData=true&limit=1`, { headers: FUSION_HDRS });
           if (r.ok) {
@@ -4141,7 +4179,7 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
         } catch { /* skip */ }
       }));
 
-      setItems(items);
+      setItems(itemsArray);
       setUomMap(uomData);
       setSel([]);
       setQtys({});
@@ -4149,11 +4187,18 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
     finally { setLoading(false); }
   }, [org, subinv]);
 
-  useEffect(() => {
-    if (open) loadOnhand();
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const setQty = (item: string, v: number) => { setQtys(q => ({ ...q, [item]: v })); if (v > 0) setSel(s => s.includes(item) ? s : [...s, item]); };
+
+  const filteredItems = useMemo(() => {
+    if (!filterText.trim()) return items;
+    const lower = filterText.toLowerCase();
+    return items.filter(i =>
+      i.item.toLowerCase().includes(lower) ||
+      uomMap[i.item]?.desc?.toLowerCase().includes(lower) ||
+      i.subinv?.toLowerCase().includes(lower)
+    );
+  }, [items, filterText, uomMap]);
+
   const cols: ColumnsType<any> = [
     { title: 'Item', width: 110, render: (_, r) => <Text strong style={{ color: REDWOOD.info, fontSize: 12 }}>{r.item}</Text> },
     { title: 'Description', width: 200, ellipsis: true, render: (_, r) => <Text style={{ fontSize: 12 }}>{uomMap[r.item]?.desc || '—'}</Text> },
@@ -4166,12 +4211,67 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
   if (rows) return <StagedPreview rows={rows} org={org} ccy={ccy} onAdd={onAdd} onReset={() => setRows(null)} />;
   return (
     <div>
+      {/* Search Type Toggle */}
+      <div style={{ marginBottom: '16px' }}>
+        <Segmented
+          value={searchType}
+          onChange={(value) => setSearchType(value as 'itemNumber' | 'description')}
+          options={[
+            { label: 'Item Number', value: 'itemNumber' },
+            { label: 'Item Description', value: 'description' },
+          ]}
+          size="large"
+        />
+      </div>
+
+      {/* Search Input with Button */}
+      <div style={{ marginBottom: '16px', display: 'flex', gap: '12px' }}>
+        <Input
+          placeholder={searchType === 'itemNumber' ? 'Enter item number...' : 'Enter item description...'}
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          onPressEnter={() => loadOnhand(searchType, searchText)}
+          prefix={<SearchOutlined style={{ color: '#1890ff' }} />}
+          size="large"
+          allowClear
+          style={{ flex: 1 }}
+          disabled={loading}
+        />
+        <Button
+          type="primary"
+          size="large"
+          icon={<SearchOutlined />}
+          onClick={() => loadOnhand(searchType, searchText)}
+          loading={loading}
+          style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+        >
+          Search
+        </Button>
+      </div>
+
+      {/* Filter Input */}
+      {items.length > 0 && (
+        <div style={{ marginBottom: '12px' }}>
+          <Input
+            placeholder="Filter results..."
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+            prefix={<SearchOutlined style={{ color: '#1890ff' }} />}
+            size="small"
+            allowClear
+            style={{ maxWidth: '300px' }}
+          />
+          <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+            Showing {filteredItems.length} of {items.length} items
+          </div>
+        </div>
+      )}
+
       <Space wrap style={{ marginBottom: 10 }}>
-        <Button type="primary" icon={<ReloadOutlined />} loading={loading} onClick={loadOnhand} style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Refresh</Button>
         {items.length > 0 && <Tag color="blue">{items.length} items</Tag>}
       </Space>
-      <Table size="small" columns={cols} dataSource={items} rowKey={r => r.item} loading={loading}
-        rowSelection={{ selectedRowKeys: sel, onChange: setSel }} pagination={items.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ y: 330 }}
+      <Table size="small" columns={cols} dataSource={filteredItems} rowKey={r => r.item} loading={loading}
+        rowSelection={{ selectedRowKeys: sel, onChange: setSel }} pagination={filteredItems.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ y: 330 }}
         locale={{ emptyText: org ? 'No on-hand items' : 'Select an organization first' }} />
       <div style={{ marginTop: 10, display: 'flex', alignItems: 'center' }}>
         <Text type="secondary" style={{ fontSize: 12 }}>{sel.length} selected · {items.length} item(s)</Text>
