@@ -2478,31 +2478,43 @@ const ManageJournals: React.FC = () => {
         const lineIdxNum = parseInt(lineIdx);
         const currentLine = lines[lineIdxNum];
 
-        console.log('[Update Account] Debug Info:', {
+        const actualLineId = modifiedInfo.lineId || currentLine?.lineId;
+
+        console.log('[Update Account] Full Debug Info:', {
           modKey,
           lineIdx: lineIdxNum,
           currentLine,
           modifiedInfo,
-          lineIdFromLine: currentLine?.lineId,
           lineIdFromModified: modifiedInfo.lineId,
+          lineIdFromCurrentLine: currentLine?.lineId,
+          actualLineIdToUse: actualLineId,
+          jeHeaderId: journal.jeHeaderId,
+          newAccountCombination: modifiedInfo.current,
         });
 
         if (!currentLine) {
           message.error('Line not found in current lines array');
+          console.error('[Update Account] ERROR: currentLine is null/undefined');
           return;
         }
 
-        // Simple payload with only required fields for account combination update
+        if (!actualLineId) {
+          message.error('Line ID is missing. Cannot update without lineId.');
+          console.error('[Update Account] ERROR: lineId is missing from both modifiedInfo and currentLine');
+          return;
+        }
+
+        // Payload with lineId from API response
         const payload = {
           jeHeaderId: journal.jeHeaderId,
-          lineId: modifiedInfo.lineId || currentLine.lineId,
+          lineId: actualLineId,
           accountCombination: modifiedInfo.current,
         };
 
         const url = `${APEX_DB_CONFIG.baseUrl}/gl/journals/lines/update-account`;
         const payloadStr = JSON.stringify(payload, null, 2);
 
-        console.log('[Update Account] Sending Request:', { url, payload });
+        console.log('[Update Account] Payload being sent:', payload);
 
         // Show API payload inspector
         setApiPayload({
@@ -2520,20 +2532,25 @@ const ManageJournals: React.FC = () => {
 
         const result = await response.json();
 
-        console.log('[Update Account] Response:', result);
+        console.log('[Update Account] Response:', {
+          status: response.status,
+          ok: response.ok,
+          result,
+        });
 
         if (response.ok && result.status === 'SUCCESS') {
-          message.success(`Account combination updated: ${modifiedInfo.current}`);
+          message.success(`Account combination updated successfully to ${modifiedInfo.current}`);
           setModifiedLines(prev => {
             const updated = { ...prev };
             delete updated[modKey];
             return updated;
           });
         } else {
-          message.error(`Update failed: ${result.message || 'Unknown error'}`);
+          message.error(`Update failed: ${result.message || result.error || 'Unknown error'}`);
+          console.error('[Update Account] Update failed with response:', result);
         }
       } catch (error) {
-        console.error('[Update Account] Error:', error);
+        console.error('[Update Account] Exception Error:', error);
         message.error(`Update failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       } finally {
         setUpdatingLineKey(null);
