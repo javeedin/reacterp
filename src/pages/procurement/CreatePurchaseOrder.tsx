@@ -341,7 +341,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     setLovLoading(true);
     try {
       const [buRes, ccyRes, orgRes, subRes] = await Promise.allSettled([
-        fetch(`${FUSION_BASE}/payablesOptions?onlyData=true&limit=500&fields=businessUnitId,businessUnitName,paymentCurrency,ledgerCurrency,CompanyCode`, { headers: FUSION_HDRS })
+        fetch(`${FUSION_BASE}/payablesOptions?onlyData=true&limit=500&fields=businessUnitId,businessUnitName,paymentCurrency,ledgerCurrency`, { headers: FUSION_HDRS })
           .then(r => r.json())
           .then(d => {
             // Deduplicate business units by name and map to expected format
@@ -356,7 +356,6 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
               .map((b: any) => ({
                 bu_name: b.businessUnitName,
                 bu_id: b.businessUnitId,
-                bu_code: b.CompanyCode,
                 BusinessUnitName: b.businessUnitName,
                 BusinessUnitId: b.businessUnitId,
                 functional_currency: b.paymentCurrency,
@@ -383,7 +382,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
       headerForm.setFieldValue('billTo', buName);
       // Auto-populate currency from ledgerCurrency of the selected Business Unit
       if (bu.ledgerCurrency || bu.functional_currency) headerForm.setFieldValue('currency', bu.ledgerCurrency || bu.functional_currency);
-      setSelectedBuCompanyCode(bu.bu_code ? String(bu.bu_code) : '');
+      setSelectedBuCompanyCode(bu.bu_id ? String(bu.bu_id) : '');
 
       // Filter inventory orgs based on the selected BU (BusinessUnitId or BusinessUnitName)
       if (inventoryOrgs.length > 0) {
@@ -2809,8 +2808,8 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
               {
                 label: 'Business Units (Procurement BU / Bill To BU)',
                 method: 'GET', tag: 'blue',
-                url: `${FUSION_BASE}/payablesOptions?onlyData=true&limit=500&fields=businessUnitId,businessUnitName,paymentCurrency,ledgerCurrency,CompanyCode`,
-                note: 'Oracle Fusion: list of business units with Company Code and default Currency — used to populate BU dropdowns and auto-fill currency on selection',
+                url: `${FUSION_BASE}/payablesOptions?onlyData=true&limit=500&fields=businessUnitId,businessUnitName,paymentCurrency,ledgerCurrency`,
+                note: 'Oracle Fusion: list of business units with default Currency — used to populate BU dropdowns and auto-fill currency on selection',
                 source: 'Oracle Fusion REST',
               },
               {
