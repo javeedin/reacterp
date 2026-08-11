@@ -21,9 +21,9 @@ export interface CustomerSearchResult {
 }
 
 export interface BIPSearchParams {
-  businessunitid: string;
-  customer: string;
-  p_user?: string;
+  CUSTOMER_NAME: string;
+  account_number: string;
+  BUSINESS_UNIT_ID: string;
 }
 
 const buildCustomerSearchSoapEnvelope = (
@@ -131,9 +131,9 @@ export const searchCustomersByBIP = async (
     const reportPath = '/Custom/fusion_client/AR/CUSTOMER_SEARCH_BY_NAME_BIP.xdo';
 
     const parameters: BIPSearchParams = {
-      businessunitid: businessUnitId,
-      customer: customerName,
-      p_user: username,
+      CUSTOMER_NAME: customerName,
+      account_number: customerName,
+      BUSINESS_UNIT_ID: businessUnitId,
     };
 
     const envelope = buildCustomerSearchSoapEnvelope(reportPath, parameters, username, password);

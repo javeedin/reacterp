@@ -10,9 +10,9 @@ const { Text } = Typography;
 // Helper to build SOAP envelope for preview
 const buildPreviewSoapEnvelope = (reportPath: string, businessUnitId: string, customer: string, username: string, password: string): string => {
   const parameters = {
-    businessunitid: businessUnitId,
-    customer: customer,
-    p_user: username,
+    CUSTOMER_NAME: customer,
+    account_number: customer,
+    BUSINESS_UNIT_ID: businessUnitId,
   };
 
   const paramXml = Object.entries(parameters)
@@ -408,11 +408,11 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
               <div style={{ marginTop: '8px', padding: '8px', backgroundColor: '#e6f7ff', borderRadius: '4px', border: '1px solid #b3d9ff' }}>
                 <strong>Search Parameters:</strong>
                 <div style={{ marginTop: '4px', marginLeft: '8px' }}>
-                  • businessunitid: {businessUnitId || 'N/A'}
+                  • BUSINESS_UNIT_ID: {businessUnitId || 'N/A'}
                   <br />
-                  • customer: {searchText || 'N/A'}
+                  • CUSTOMER_NAME: {searchText || 'N/A'}
                   <br />
-                  • p_user: {username || 'N/A'}
+                  • account_number: {searchText || 'N/A'}
                 </div>
               </div>
             </div>
