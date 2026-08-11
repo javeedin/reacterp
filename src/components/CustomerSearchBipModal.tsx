@@ -9,16 +9,16 @@ const { Text } = Typography;
 
 // Helper to build SOAP envelope for preview
 const buildPreviewSoapEnvelope = (reportPath: string, businessUnitId: string, customer: string, username: string, password: string): string => {
-  const parameters = [
-    { name: 'businessunitid', value: businessUnitId },
-    { name: 'customer', value: customer },
-    { name: 'p_user', value: username },
-  ];
+  const parameters = {
+    businessunitid: businessUnitId,
+    customer: customer,
+    p_user: username,
+  };
 
-  const paramXml = parameters
-    .map(({ name, value }) => `
+  const paramXml = Object.entries(parameters)
+    .map(([key, value]) => `
             <v2:item>
-              <v2:name>${name}</v2:name>
+              <v2:name>${key}</v2:name>
               <v2:values><v2:item>${value}</v2:item></v2:values>
             </v2:item>`)
     .join('');
