@@ -26,6 +26,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   buildPcBankTxnSlaPayload, fetchLedgerByBusinessUnit, derivePeriodName, createAccounting,
 } from '../../services/sla.service';
+import { getGlJournalLines } from '../../services/glPosting.service';
 import { searchCombinations, type DistCombination } from '../../services/distCombinations.service';
 import { validateGlPayload, persistValidationLog, type GlJournalPayload } from '../../services/glValidation.service';
 import { useGlValidation } from '../../context/GlValidationContext';
@@ -293,10 +294,8 @@ const ViewAcctModal: React.FC<{
   // Capture and set actual API URLs on mount
   useEffect(() => {
     if (open && txn && apiUrls.headers === '') {
-      const srcNum = encodeURIComponent(String(txn.externalTransactionId));
-      const hdUrl = `${APEX_BASE}/sla/journals?moduleName=CASH&sourceNumber=${srcNum}`;
-      const lnUrl = `${APEX_BASE}/sla/journals/lines?moduleName=CASH&sourceNumber=${srcNum}`;
-      setApiUrls({ headers: hdUrl, lines: lnUrl });
+      const lnUrl = `/gl/journals/lines?reference2=${encodeURIComponent(String(txn.externalTransactionId))}&reference5=BANK_EXTERNAL_TRANSACTIONS`;
+      setApiUrls({ headers: lnUrl, lines: lnUrl });
     }
   }, [open, txn]);
 
@@ -305,15 +304,13 @@ const ViewAcctModal: React.FC<{
     if (!txn) return;
     setApiRefreshing(true);
     try {
-      const srcNum = encodeURIComponent(String(txn.externalTransactionId));
-      const hdUrl = `${APEX_BASE}/sla/journals?moduleName=CASH&sourceNumber=${srcNum}`;
-      const lnUrl = `${APEX_BASE}/sla/journals/lines?moduleName=CASH&sourceNumber=${srcNum}`;
-      setApiUrls({ headers: hdUrl, lines: lnUrl });
-      const [hRes, lRes] = await Promise.all([
-        fetch(hdUrl).then(x => x.json()),
-        fetch(lnUrl).then(x => x.json()),
-      ]);
-      setApiResponse({ headers: hRes, lines: lRes });
+      const lnUrl = `/gl/journals/lines?reference2=${encodeURIComponent(String(txn.externalTransactionId))}&reference5=BANK_EXTERNAL_TRANSACTIONS`;
+      setApiUrls({ headers: lnUrl, lines: lnUrl });
+      const lRes = await getGlJournalLines({
+        reference2: txn.externalTransactionId,
+        reference5: 'BANK_EXTERNAL_TRANSACTIONS',
+      });
+      setApiResponse({ headers: lRes, lines: lRes });
       message.success('API refreshed successfully');
     } catch (e: any) {
       message.error('API refresh failed: ' + e.message);
@@ -556,7 +553,7 @@ const ViewAcctModal: React.FC<{
 
       {/* Data Source Indicator */}
       {liveLines ? (
-        <Alert type="success" message="✓ Data from API" description="Real journal data fetched from /sla/journals/lines"
+        <Alert type="success" message="✓ Data from API" description="Real journal data fetched from /gl/journals/lines (reference2 & reference5 filters)"
           style={{ marginBottom: 12 }} showIcon />
       ) : (
         <Alert type="warning" message="⚠ Fallback Data" description="No journal data found. Showing placeholder data constructed from transaction object."
@@ -607,52 +604,20 @@ const ViewAcctModal: React.FC<{
       open={apiOpen} onCancel={() => setApiOpen(false)} footer={null} width={900}
       bodyStyle={{ maxHeight: '70vh', overflow: 'auto' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Alert type="info" message="These are the APIs used to fetch the GL journal data displayed above"
+        <Alert type="info" message="Querying GL Journal Lines directly by reference2 (External Transaction ID) and reference5 (BANK_EXTERNAL_TRANSACTIONS)"
           style={{ marginBottom: 8 }} showIcon />
 
         <div>
           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-            <Tag color="blue">GET</Tag> Journal Headers (by Source Number)
+            <Tag color="blue">GET</Tag> GL Journal Lines
           </div>
           <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
-            {apiUrls.headers || `${APEX_BASE}/sla/journals?moduleName=CASH&sourceNumber=${encodeURIComponent(String(txn?.externalTransactionId || ''))}`}
+            {apiUrls.lines || `/gl/journals/lines?reference2=${encodeURIComponent(String(txn?.externalTransactionId || ''))}&reference5=BANK_EXTERNAL_TRANSACTIONS`}
           </div>
           <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginTop: 6 }}
-            onClick={() => { navigator.clipboard.writeText(apiUrls.headers || `${APEX_BASE}/sla/journals?moduleName=CASH&sourceNumber=${encodeURIComponent(String(txn?.externalTransactionId || ''))}`); message.success('Copied'); }}>
+            onClick={() => { navigator.clipboard.writeText(apiUrls.lines || `/gl/journals/lines?reference2=${encodeURIComponent(String(txn?.externalTransactionId || ''))}&reference5=BANK_EXTERNAL_TRANSACTIONS`); message.success('Copied'); }}>
             Copy URL
           </Button>
-        </div>
-
-        <Divider />
-
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-            <Tag color="blue">GET</Tag> Journal Lines (by Source Number)
-          </div>
-          <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
-            {apiUrls.lines || `${APEX_BASE}/sla/journals/lines?moduleName=CASH&sourceNumber=${encodeURIComponent(String(txn?.externalTransactionId || ''))}`}
-          </div>
-          <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginTop: 6 }}
-            onClick={() => { navigator.clipboard.writeText(apiUrls.lines || `${APEX_BASE}/sla/journals/lines?moduleName=CASH&sourceNumber=${encodeURIComponent(String(txn?.externalTransactionId || ''))}`); message.success('Copied'); }}>
-            Copy URL
-          </Button>
-        </div>
-
-        <Divider />
-
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-            <Tag color="cyan">GET</Tag> Alternative: By Header ID
-          </div>
-          <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: REDWOOD.info }}>
-            {hdr?.headerId ? `${APEX_BASE}/sla/journals/lines?headerId=${hdr.headerId}&limit=500` : '(No Header ID available)'}
-          </div>
-          {hdr?.headerId && (
-            <Button size="small" type="text" icon={<CopyOutlined />} style={{ marginTop: 6 }}
-              onClick={() => { navigator.clipboard.writeText(`${APEX_BASE}/sla/journals/lines?headerId=${hdr.headerId}&limit=500`); message.success('Copied'); }}>
-              Copy URL
-            </Button>
-          )}
         </div>
 
         <Divider />
@@ -677,40 +642,17 @@ const ViewAcctModal: React.FC<{
           </div>
           {apiResponse ? (
             <>
-              {(!apiResponse.headers?.items || apiResponse.headers.items.length === 0) && (
-                <Alert type="error" message="No Headers Data" description="API returned empty response for /sla/journals"
-                  style={{ marginBottom: 8 }} showIcon />
-              )}
               {(!apiResponse.lines?.items || apiResponse.lines.items.length === 0) && (
-                <Alert type="error" message="No Lines Data" description="API returned empty response for /sla/journals/lines"
+                <Alert type="error" message="No Journal Data" description="API returned empty response for /gl/journals/lines"
                   style={{ marginBottom: 8 }} showIcon />
               )}
-              <Tabs
-                items={[
-                  {
-                    key: 'headers',
-                    label: 'Headers Response',
-                    children: (
-                      <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, maxHeight: 300, overflow: 'auto', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: REDWOOD.neutral900 }}>
-                        {JSON.stringify(apiResponse.headers, null, 2)}
-                      </div>
-                    ),
-                  },
-                  {
-                    key: 'lines',
-                    label: 'Lines Response',
-                    children: (
-                      <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, maxHeight: 300, overflow: 'auto', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: REDWOOD.neutral900 }}>
-                        {JSON.stringify(apiResponse.lines, null, 2)}
-                      </div>
-                    ),
-                  },
-                ]}
-              />
+              <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, maxHeight: 300, overflow: 'auto', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: REDWOOD.neutral900 }}>
+                {JSON.stringify(apiResponse.lines, null, 2)}
+              </div>
             </>
           ) : (
             <div style={{ background: '#f9fafb', borderRadius: 6, padding: 12, color: REDWOOD.neutral600, fontSize: 12 }}>
-              Click "Refresh Response" to fetch and display the API responses
+              Click "Refresh Response" to fetch and display the API response
             </div>
           )}
         </div>
@@ -4126,20 +4068,14 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                   setViewAcctLines([]);
                   setViewAcctOpen(true);
                   setViewAcctLoading(true);
-                  const srcNum = encodeURIComponent(String(r.externalTransactionId));
-                  const hdUrl = `${APEX_BASE}/sla/journals?moduleName=CASH&sourceNumber=${srcNum}`;
-                  const lnUrl = `${APEX_BASE}/sla/journals/lines?moduleName=CASH&sourceNumber=${srcNum}`;
-                  Promise.all([
-                    fetch(hdUrl).then(x => x.json()),
-                    fetch(lnUrl).then(x => x.json()),
-                  ]).then(([hRes, lRes]) => {
-                    console.log('Headers Response:', hRes);
-                    console.log('Lines Response:', lRes);
-                    const headers: any[] = hRes.items || hRes || [];
-                    const lines: any[]   = lRes.items || lRes || [];
-                    console.log('Parsed Headers:', headers);
+                  getGlJournalLines({
+                    reference2: r.externalTransactionId,
+                    reference5: 'BANK_EXTERNAL_TRANSACTIONS',
+                  }).then((res) => {
+                    console.log('GL Journal Lines Response:', res);
+                    const lines = res.items || [];
                     console.log('Parsed Lines:', lines);
-                    setViewAcctHeader(headers[0] || null);
+                    setViewAcctHeader(lines[0] || null);
                     setViewAcctLines(lines);
                   }).catch(e => {
                     console.error('API Error:', e);
