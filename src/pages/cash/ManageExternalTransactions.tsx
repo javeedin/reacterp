@@ -554,9 +554,18 @@ const ViewAcctModal: React.FC<{
       {/* Batch / SLA info */}
       {batchInfoEl}
 
+      {/* Data Source Indicator */}
+      {liveLines ? (
+        <Alert type="success" message="✓ Data from API" description="Real journal data fetched from /sla/journals/lines"
+          style={{ marginBottom: 12 }} showIcon />
+      ) : (
+        <Alert type="warning" message="⚠ Fallback Data" description="No journal data found. Showing placeholder data constructed from transaction object."
+          style={{ marginBottom: 12 }} showIcon />
+      )}
+
       {/* Journal Lines table */}
       <div style={{ fontWeight: 600, fontSize: 11, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        Journal Lines
+        Journal Lines {!liveLines && <span style={{ color: '#D93025', fontSize: 10, fontWeight: 400 }}>(Fallback/Placeholder)</span>}
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace', fontSize: 11 }}>
         <thead>
@@ -667,28 +676,38 @@ const ViewAcctModal: React.FC<{
             <Button size="small" type="text" loading={apiRefreshing} onClick={refreshApi}>Refresh Response</Button>
           </div>
           {apiResponse ? (
-            <Tabs
-              items={[
-                {
-                  key: 'headers',
-                  label: 'Headers Response',
-                  children: (
-                    <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, maxHeight: 300, overflow: 'auto', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: REDWOOD.neutral900 }}>
-                      {JSON.stringify(apiResponse.headers, null, 2)}
-                    </div>
-                  ),
-                },
-                {
-                  key: 'lines',
-                  label: 'Lines Response',
-                  children: (
-                    <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, maxHeight: 300, overflow: 'auto', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: REDWOOD.neutral900 }}>
-                      {JSON.stringify(apiResponse.lines, null, 2)}
-                    </div>
-                  ),
-                },
-              ]}
-            />
+            <>
+              {(!apiResponse.headers?.items || apiResponse.headers.items.length === 0) && (
+                <Alert type="error" message="No Headers Data" description="API returned empty response for /sla/journals"
+                  style={{ marginBottom: 8 }} showIcon />
+              )}
+              {(!apiResponse.lines?.items || apiResponse.lines.items.length === 0) && (
+                <Alert type="error" message="No Lines Data" description="API returned empty response for /sla/journals/lines"
+                  style={{ marginBottom: 8 }} showIcon />
+              )}
+              <Tabs
+                items={[
+                  {
+                    key: 'headers',
+                    label: 'Headers Response',
+                    children: (
+                      <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, maxHeight: 300, overflow: 'auto', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: REDWOOD.neutral900 }}>
+                        {JSON.stringify(apiResponse.headers, null, 2)}
+                      </div>
+                    ),
+                  },
+                  {
+                    key: 'lines',
+                    label: 'Lines Response',
+                    children: (
+                      <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, maxHeight: 300, overflow: 'auto', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: REDWOOD.neutral900 }}>
+                        {JSON.stringify(apiResponse.lines, null, 2)}
+                      </div>
+                    ),
+                  },
+                ]}
+              />
+            </>
           ) : (
             <div style={{ background: '#f9fafb', borderRadius: 6, padding: 12, color: REDWOOD.neutral600, fontSize: 12 }}>
               Click "Refresh Response" to fetch and display the API responses
