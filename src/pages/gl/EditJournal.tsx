@@ -957,6 +957,24 @@ const EditJournal: React.FC = () => {
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Journal</Text></Col>
                       <Col span={14}><Text strong style={{ fontSize: 13 }}>{currentJournal.journalName}</Text></Col>
 
+                      <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Header ID</Text></Col>
+                      <Col span={14}>
+                        <Space>
+                          <Text code style={{ fontSize: 13 }}>{currentJournal?.headerId || currentJournal?.jeHeaderId}</Text>
+                          <Tooltip title="Copy Header ID">
+                            <Button
+                              size="small"
+                              type="text"
+                              icon={<FileTextOutlined />}
+                              onClick={() => {
+                                navigator.clipboard.writeText(String(currentJournal?.headerId || currentJournal?.jeHeaderId));
+                                message.success('Header ID copied');
+                              }}
+                            />
+                          </Tooltip>
+                        </Space>
+                      </Col>
+
                       <Col span={10}><Text type="secondary" style={{ fontSize: 13 }}>Description</Text></Col>
                       <Col span={14}><Text style={{ fontSize: 13 }}>{currentJournal.journalDescription}</Text></Col>
 
@@ -1131,6 +1149,24 @@ const EditJournal: React.FC = () => {
                     <Row gutter={[6, 5]}>
                       <Col span={8}><Text type="secondary" style={{ fontSize: 13 }}>Journal</Text></Col>
                       <Col span={16}><Text strong style={{ fontSize: 13 }}>{currentJournal.journalName}</Text></Col>
+
+                      <Col span={8}><Text type="secondary" style={{ fontSize: 13 }}>Header ID</Text></Col>
+                      <Col span={16}>
+                        <Space>
+                          <Text code style={{ fontSize: 13 }}>{currentJournal?.headerId || currentJournal?.jeHeaderId}</Text>
+                          <Tooltip title="Copy Header ID">
+                            <Button
+                              size="small"
+                              type="text"
+                              icon={<FileTextOutlined />}
+                              onClick={() => {
+                                navigator.clipboard.writeText(String(currentJournal?.headerId || currentJournal?.jeHeaderId));
+                                message.success('Header ID copied');
+                              }}
+                            />
+                          </Tooltip>
+                        </Space>
+                      </Col>
 
                       <Col span={8}><Text type="secondary" style={{ fontSize: 13 }}>Description</Text></Col>
                       <Col span={16}><Text style={{ fontSize: 13 }}>{currentJournal.journalDescription}</Text></Col>
@@ -1380,6 +1416,24 @@ const EditJournal: React.FC = () => {
                   <Row gutter={[6, 5]}>
                     <Col span={8}><Text type="secondary" style={{ fontSize: 13 }}>Journal Batch</Text></Col>
                     <Col span={16}><Text style={{ fontSize: 13 }}>{currentJournal?.batchName}</Text></Col>
+
+                    <Col span={8}><Text type="secondary" style={{ fontSize: 13 }}>Batch ID</Text></Col>
+                    <Col span={16}>
+                      <Space>
+                        <Text code style={{ fontSize: 13 }}>{currentJournal?.batchId || currentJournal?.jeBatchId}</Text>
+                        <Tooltip title="Copy Batch ID">
+                          <Button
+                            size="small"
+                            type="text"
+                            icon={<FileTextOutlined />}
+                            onClick={() => {
+                              navigator.clipboard.writeText(String(currentJournal?.batchId || currentJournal?.jeBatchId));
+                              message.success('Batch ID copied');
+                            }}
+                          />
+                        </Tooltip>
+                      </Space>
+                    </Col>
 
                     <Col span={8}><Text type="secondary" style={{ fontSize: 13 }}>Description</Text></Col>
                     <Col span={16}><Text style={{ fontSize: 13 }}>{currentJournal?.batchDescription}</Text></Col>
