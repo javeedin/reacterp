@@ -968,18 +968,28 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({ invoice, onClose }) => {
           </Dropdown>
 
           {!isSynced && (
-            <Dropdown
-              menu={{ items: accountingActionsMenuItems, onClick: handleActionsMenuClick }}
-              trigger={['click']}
-            >
+            <>
               <Button
-                type="default"
+                type="primary"
                 loading={slaActionLoading}
-                style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+                onClick={handleAccountInDraft}
+                style={{ background: REDWOOD.success, borderColor: REDWOOD.success }}
               >
-                Accounting Actions <DownOutlined />
+                Create Accounting
               </Button>
-            </Dropdown>
+              <Dropdown
+                menu={{ items: accountingActionsMenuItems, onClick: handleActionsMenuClick }}
+                trigger={['click']}
+              >
+                <Button
+                  type="default"
+                  loading={slaActionLoading}
+                  style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
+                >
+                  Accounting Actions <DownOutlined />
+                </Button>
+              </Dropdown>
+            </>
           )}
 
           {!isSynced && <Button icon={<SaveOutlined />}>Save</Button>}
