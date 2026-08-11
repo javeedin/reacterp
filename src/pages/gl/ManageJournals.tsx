@@ -4030,6 +4030,22 @@ const ManageJournals: React.FC = () => {
                     ? <Tag style={{ fontSize: 10 }}>{val}</Tag>
                     : <span style={{ color: '#bbb' }}>—</span>,
                 },
+                {
+                  title: '',
+                  key: 'editAcctComb',
+                  width: 40,
+                  render: (_: any, _line: JournalLine, rowIdx: number) => (
+                    <Tooltip title="Edit Account Combination">
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={<EditOutlined />}
+                        onClick={() => setTabAccSel({ visible: true, tabKey, lineIdx: rowIdx, initial: _line.account || '' })}
+                        style={{ fontSize: 11, color: REDWOOD.info }}
+                      />
+                    </Tooltip>
+                  ),
+                },
               ] : []),
               ...(isEditable ? [{
                 title: '',
