@@ -558,54 +558,60 @@ const ViewAcctModal: React.FC<{
         </Row>
       </div>
 
-      {/* Batch / SLA info */}
-      {batchInfoEl}
+      {/* GL Journal Header info */}
+      {liveLines && batchInfoEl}
 
       {/* Data Source Indicator */}
       {liveLines ? (
-        <Alert type="success" message="✓ Data from API" description="Real journal data fetched from /gl/journals/lines (reference2 & reference5 filters)"
+        <Alert type="success" message="✓ GL Journal Data Found" description="Real journal data fetched from /gl/journals/lines"
           style={{ marginBottom: 12 }} showIcon />
       ) : (
-        <Alert type="warning" message="⚠ Fallback Data" description="No journal data found. Showing placeholder data constructed from transaction object."
+        <Alert type="info" message="ℹ No Accounting Entry" description="No GL journal lines found for this transaction."
           style={{ marginBottom: 12 }} showIcon />
       )}
 
       {/* Journal Lines table */}
-      <div style={{ fontWeight: 600, fontSize: 11, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        GL Journal Lines
-      </div>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace', fontSize: 11 }}>
-        <thead>
-          <tr style={{ background: '#f9fafb' }}>
-            <th style={ts({ textAlign: 'center', width: 32 })}>#</th>
-            <th style={ts({ textAlign: 'left', width: 38 })}>DR/CR</th>
-            <th style={ts({ textAlign: 'left', minWidth: 200 })}>GL Account</th>
-            <th style={ts({ textAlign: 'left', minWidth: 180, fontSize: 10 })}>Description</th>
-            <th colSpan={2} style={ts({ textAlign: 'center', background: '#e6f4ff', color: '#0572CE' })}>
-              Entered
-            </th>
-            <th colSpan={2} style={ts({ textAlign: 'center', background: '#f6ffed', color: '#389e0d' })}>
-              Accounted
-            </th>
-          </tr>
-          <tr style={{ background: '#f9fafb' }}>
-            <th style={ts()} /><th style={ts()} /><th style={ts()} /><th style={ts()} />
-            <th style={ts({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>DR</th>
-            <th style={ts({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>CR</th>
-            <th style={ts({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>DR</th>
-            <th style={ts({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>CR</th>
-          </tr>
-        </thead>
-        <tbody>{liveLines ? liveRows : fallbackRows}</tbody>
-      </table>
+      {liveLines ? (
+        <>
+          <div style={{ fontWeight: 600, fontSize: 11, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            GL Journal Lines
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace', fontSize: 11 }}>
+            <thead>
+              <tr style={{ background: '#f9fafb' }}>
+                <th style={ts({ textAlign: 'center', width: 32 })}>#</th>
+                <th style={ts({ textAlign: 'left', width: 38 })}>DR/CR</th>
+                <th style={ts({ textAlign: 'left', minWidth: 200 })}>GL Account</th>
+                <th style={ts({ textAlign: 'left', minWidth: 180, fontSize: 10 })}>Description</th>
+                <th colSpan={2} style={ts({ textAlign: 'center', background: '#e6f4ff', color: '#0572CE' })}>
+                  Entered
+                </th>
+                <th colSpan={2} style={ts({ textAlign: 'center', background: '#f6ffed', color: '#389e0d' })}>
+                  Accounted
+                </th>
+              </tr>
+              <tr style={{ background: '#f9fafb' }}>
+                <th style={ts()} /><th style={ts()} /><th style={ts()} /><th style={ts()} />
+                <th style={ts({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>DR</th>
+                <th style={ts({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>CR</th>
+                <th style={ts({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>DR</th>
+                <th style={ts({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>CR</th>
+              </tr>
+            </thead>
+            <tbody>{liveRows}</tbody>
+          </table>
+        </>
+      ) : null}
 
       {/* Totals */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, padding: '5px 10px', background: '#f9fafb', border: '1px solid #e5e7eb', borderTop: 'none', borderRadius: '0 0 4px 4px', fontSize: 11 }}>
-        <Typography.Text>Entered DR: <Typography.Text strong style={{ color: '#0572CE' }}>{fmtAmount(totalEntDr, entrCcy)}</Typography.Text></Typography.Text>
-        <Typography.Text>Entered CR: <Typography.Text strong style={{ color: '#389e0d' }}>{fmtAmount(totalEntCr, entrCcy)}</Typography.Text></Typography.Text>
-        <Typography.Text>Accounted DR: <Typography.Text strong style={{ color: '#0572CE' }}>{fmtAmount(totalAccDr, ledgerCcy)}</Typography.Text></Typography.Text>
-        <Typography.Text>Accounted CR: <Typography.Text strong style={{ color: '#389e0d' }}>{fmtAmount(totalAccCr, ledgerCcy)}</Typography.Text></Typography.Text>
-      </div>
+      {liveLines && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, padding: '5px 10px', background: '#f9fafb', border: '1px solid #e5e7eb', borderTop: 'none', borderRadius: '0 0 4px 4px', fontSize: 11 }}>
+          <Typography.Text>Entered DR: <Typography.Text strong style={{ color: '#0572CE' }}>{fmtAmount(totalEntDr, entrCcy)}</Typography.Text></Typography.Text>
+          <Typography.Text>Entered CR: <Typography.Text strong style={{ color: '#389e0d' }}>{fmtAmount(totalEntCr, entrCcy)}</Typography.Text></Typography.Text>
+          <Typography.Text>Accounted DR: <Typography.Text strong style={{ color: '#0572CE' }}>{fmtAmount(totalAccDr, ledgerCcy)}</Typography.Text></Typography.Text>
+          <Typography.Text>Accounted CR: <Typography.Text strong style={{ color: '#389e0d' }}>{fmtAmount(totalAccCr, ledgerCcy)}</Typography.Text></Typography.Text>
+        </div>
+      )}
     </Modal>
 
     {/* API Inspector Drawer */}
