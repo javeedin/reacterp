@@ -279,6 +279,7 @@ const ViewAcctModal: React.FC<{
   const [apiOpen, setApiOpen] = useState(false);
   const [apiRefreshing, setApiRefreshing] = useState(false);
   const [apiUrls, setApiUrls] = useState({ headers: '', lines: '' });
+  const [apiResponse, setApiResponse] = useState<{ headers: any; lines: any } | null>(null);
 
   // Resolve each account combination → natural-account segment description so we
   // can show it beneath the code in the Account column. Hook runs unconditionally.
@@ -312,6 +313,7 @@ const ViewAcctModal: React.FC<{
         fetch(hdUrl).then(x => x.json()),
         fetch(lnUrl).then(x => x.json()),
       ]);
+      setApiResponse({ headers: hRes, lines: lRes });
       message.success('API refreshed successfully');
     } catch (e: any) {
       message.error('API refresh failed: ' + e.message);
@@ -655,6 +657,43 @@ const ViewAcctModal: React.FC<{
             <div style={{ marginTop: 6 }}><Text type="secondary">GL Header ID:</Text> <Text code>{hdr?.glHeaderId || '—'}</Text></div>
             <div style={{ marginTop: 6 }}><Text type="secondary">Module:</Text> <Text code>CASH</Text></div>
           </div>
+        </div>
+
+        <Divider />
+
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600 }}>API Response Preview</div>
+            <Button size="small" type="text" loading={apiRefreshing} onClick={refreshApi}>Refresh Response</Button>
+          </div>
+          {apiResponse ? (
+            <Tabs
+              items={[
+                {
+                  key: 'headers',
+                  label: 'Headers Response',
+                  children: (
+                    <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, maxHeight: 300, overflow: 'auto', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: REDWOOD.neutral900 }}>
+                      {JSON.stringify(apiResponse.headers, null, 2)}
+                    </div>
+                  ),
+                },
+                {
+                  key: 'lines',
+                  label: 'Lines Response',
+                  children: (
+                    <div style={{ background: '#f5f5f5', borderRadius: 6, padding: 12, maxHeight: 300, overflow: 'auto', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: REDWOOD.neutral900 }}>
+                      {JSON.stringify(apiResponse.lines, null, 2)}
+                    </div>
+                  ),
+                },
+              ]}
+            />
+          ) : (
+            <div style={{ background: '#f9fafb', borderRadius: 6, padding: 12, color: REDWOOD.neutral600, fontSize: 12 }}>
+              Click "Refresh Response" to fetch and display the API responses
+            </div>
+          )}
         </div>
       </div>
     </Modal>
@@ -4069,15 +4108,23 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                   setViewAcctOpen(true);
                   setViewAcctLoading(true);
                   const srcNum = encodeURIComponent(String(r.externalTransactionId));
+                  const hdUrl = `${APEX_BASE}/sla/journals?moduleName=CASH&sourceNumber=${srcNum}`;
+                  const lnUrl = `${APEX_BASE}/sla/journals/lines?moduleName=CASH&sourceNumber=${srcNum}`;
                   Promise.all([
-                    fetch(`${APEX_BASE}/sla/journals?moduleName=CASH&sourceNumber=${srcNum}`).then(x => x.json()),
-                    fetch(`${APEX_BASE}/sla/journals/lines?moduleName=CASH&sourceNumber=${srcNum}`).then(x => x.json()),
+                    fetch(hdUrl).then(x => x.json()),
+                    fetch(lnUrl).then(x => x.json()),
                   ]).then(([hRes, lRes]) => {
-                    const headers: any[] = hRes.items || [];
-                    const lines: any[]   = lRes.items || [];
+                    console.log('Headers Response:', hRes);
+                    console.log('Lines Response:', lRes);
+                    const headers: any[] = hRes.items || hRes || [];
+                    const lines: any[]   = lRes.items || lRes || [];
+                    console.log('Parsed Headers:', headers);
+                    console.log('Parsed Lines:', lines);
                     setViewAcctHeader(headers[0] || null);
                     setViewAcctLines(lines);
-                  }).catch(() => {}).finally(() => setViewAcctLoading(false));
+                  }).catch(e => {
+                    console.error('API Error:', e);
+                  }).finally(() => setViewAcctLoading(false));
                 }} />
             </Tooltip>
           )}
