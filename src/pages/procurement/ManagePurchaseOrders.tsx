@@ -1426,98 +1426,108 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
 
       {/* Results with Orders and Lines Sub-tabs */}
       <Card styles={{ body: { padding: 0 } }} style={{ borderRadius: 8, border: `1px solid ${REDWOOD.neutral200}`, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-        <Tabs activeKey={subTab} onChange={setSubTab} style={{ margin: 0 }}>
-          <Tabs.TabPane
-            key="orders"
-            label={<span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <ShoppingCartOutlined style={{ fontSize: 13 }} /> Orders
-              {hasSearched && total > 0 && <Text type="secondary" style={{ fontWeight: 400, fontSize: 12 }}>({total})</Text>}
-            </span>}
-          >
-            <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <Text strong style={{ fontSize: 13 }}>
-                Purchase Orders
-                {hasSearched && total > 0 && <Text type="secondary" style={{ fontWeight: 400, marginLeft: 8 }}>({total} result{total !== 1 ? 's' : ''})</Text>}
-              </Text>
-              <Space style={{ marginLeft: 'auto' }}>
-                <Tooltip title="Export orders to Excel">
-                  <Button size="small" icon={<FileExcelOutlined />} onClick={exportOrdersToExcel} disabled={data.length === 0}
-                    style={{ borderColor: '#52A043', color: '#52A043', borderRadius: 4, fontWeight: 600 }}>
-                    Export
-                  </Button>
-                </Tooltip>
-                {selectedKeys.length > 0 && (
-                  <>
-                    <Text type="secondary" style={{ fontSize: 12 }}>{selectedKeys.length} selected</Text>
-                    <Button size="small" type="primary" icon={<CheckCircleOutlined />} loading={approving}
-                      onClick={submitSelectedForApproval}
-                      style={{ background: '#1D7B4D', borderColor: '#1D7B4D', fontWeight: 600 }}>
-                      Submit for Approval
-                    </Button>
-                    <Tooltip title="View approval API URL & JSON body">
-                      <Button size="small" icon={<ApiOutlined />} onClick={() => setApproveApiOpen(true)}
-                        style={{ borderColor: REDWOOD.info, color: REDWOOD.info }} />
+        <Tabs
+          activeKey={subTab}
+          onChange={setSubTab}
+          style={{ margin: 0 }}
+          items={[
+            {
+              key: 'orders',
+              label: <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <ShoppingCartOutlined style={{ fontSize: 13 }} /> Orders
+                {hasSearched && total > 0 && <Text type="secondary" style={{ fontWeight: 400, fontSize: 12 }}>({total})</Text>}
+              </span>,
+              children: (
+                <>
+                  <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <Text strong style={{ fontSize: 13 }}>
+                      Purchase Orders
+                      {hasSearched && total > 0 && <Text type="secondary" style={{ fontWeight: 400, marginLeft: 8 }}>({total} result{total !== 1 ? 's' : ''})</Text>}
+                    </Text>
+                    <Space style={{ marginLeft: 'auto' }}>
+                      <Tooltip title="Export orders to Excel">
+                        <Button size="small" icon={<FileExcelOutlined />} onClick={exportOrdersToExcel} disabled={data.length === 0}
+                          style={{ borderColor: '#52A043', color: '#52A043', borderRadius: 4, fontWeight: 600 }}>
+                          Export
+                        </Button>
+                      </Tooltip>
+                      {selectedKeys.length > 0 && (
+                        <>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{selectedKeys.length} selected</Text>
+                          <Button size="small" type="primary" icon={<CheckCircleOutlined />} loading={approving}
+                            onClick={submitSelectedForApproval}
+                            style={{ background: '#1D7B4D', borderColor: '#1D7B4D', fontWeight: 600 }}>
+                            Submit for Approval
+                          </Button>
+                          <Tooltip title="View approval API URL & JSON body">
+                            <Button size="small" icon={<ApiOutlined />} onClick={() => setApproveApiOpen(true)}
+                              style={{ borderColor: REDWOOD.info, color: REDWOOD.info }} />
+                          </Tooltip>
+                        </>
+                      )}
+                    </Space>
+                  </div>
+                  <Table
+                    columns={columns} dataSource={data} rowKey="POHeaderId"
+                    rowSelection={{ selectedRowKeys: selectedKeys, onChange: setSelectedKeys, preserveSelectedRowKeys: true }}
+                    loading={loading} size="small" scroll={{ x: 1250 }}
+                    pagination={hasSearched && total > PAGE_SIZE ? {
+                      current: page, pageSize: PAGE_SIZE, total, showSizeChanger: false,
+                      onChange: async p => { setPage(p); const items = await fetchPOs(searchParams, p); fetchLineCounts(items); },
+                      showTotal: (t, [s, e]) => `${s}–${e} of ${t}`,
+                      style: { padding: '10px 16px', margin: 0 },
+                    } : false}
+                    locale={{
+                      emptyText: hasSearched
+                        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No purchase orders found" style={{ padding: 40 }} />
+                        : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Use the search panel above to find purchase orders" style={{ padding: 40 }} />,
+                    }}
+                    rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
+                    onRow={rec => ({ style: { cursor: 'pointer' }, onDoubleClick: () => onOpen(rec) })}
+                  />
+                </>
+              ),
+            },
+            {
+              key: 'lines',
+              label: <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <UnorderedListOutlined style={{ fontSize: 13 }} /> Lines
+                {hasSearched && expandedLines.length > 0 && <Text type="secondary" style={{ fontWeight: 400, fontSize: 12 }}>({expandedLines.length})</Text>}
+              </span>,
+              children: (
+                <>
+                  <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <Text strong style={{ fontSize: 13 }}>
+                      Order Lines
+                      {hasSearched && expandedLines.length > 0 && <Text type="secondary" style={{ fontWeight: 400, marginLeft: 8 }}>({expandedLines.length} line{expandedLines.length !== 1 ? 's' : ''})</Text>}
+                    </Text>
+                    <Tooltip title="Export lines to Excel" style={{ marginLeft: 'auto' }}>
+                      <Button size="small" icon={<FileExcelOutlined />} onClick={exportLinesToExcel} disabled={expandedLines.length === 0}
+                        style={{ borderColor: '#52A043', color: '#52A043', borderRadius: 4, fontWeight: 600 }}>
+                        Export
+                      </Button>
                     </Tooltip>
-                  </>
-                )}
-              </Space>
-            </div>
-            <Table
-              columns={columns} dataSource={data} rowKey="POHeaderId"
-              rowSelection={{ selectedRowKeys: selectedKeys, onChange: setSelectedKeys, preserveSelectedRowKeys: true }}
-              loading={loading} size="small" scroll={{ x: 1250 }}
-              pagination={hasSearched && total > PAGE_SIZE ? {
-                current: page, pageSize: PAGE_SIZE, total, showSizeChanger: false,
-                onChange: async p => { setPage(p); const items = await fetchPOs(searchParams, p); fetchLineCounts(items); },
-                showTotal: (t, [s, e]) => `${s}–${e} of ${t}`,
-                style: { padding: '10px 16px', margin: 0 },
-              } : false}
-              locale={{
-                emptyText: hasSearched
-                  ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No purchase orders found" style={{ padding: 40 }} />
-                  : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Use the search panel above to find purchase orders" style={{ padding: 40 }} />,
-              }}
-              rowClassName={(_, i) => i % 2 !== 0 ? 'po-row-alt' : ''}
-              onRow={rec => ({ style: { cursor: 'pointer' }, onDoubleClick: () => onOpen(rec) })}
-            />
-          </Tabs.TabPane>
-
-          <Tabs.TabPane
-            key="lines"
-            label={<span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <UnorderedListOutlined style={{ fontSize: 13 }} /> Lines
-              {hasSearched && expandedLines.length > 0 && <Text type="secondary" style={{ fontWeight: 400, fontSize: 12 }}>({expandedLines.length})</Text>}
-            </span>}
-          >
-            <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <Text strong style={{ fontSize: 13 }}>
-                Order Lines
-                {hasSearched && expandedLines.length > 0 && <Text type="secondary" style={{ fontWeight: 400, marginLeft: 8 }}>({expandedLines.length} line{expandedLines.length !== 1 ? 's' : ''})</Text>}
-              </Text>
-              <Tooltip title="Export lines to Excel" style={{ marginLeft: 'auto' }}>
-                <Button size="small" icon={<FileExcelOutlined />} onClick={exportLinesToExcel} disabled={expandedLines.length === 0}
-                  style={{ borderColor: '#52A043', color: '#52A043', borderRadius: 4, fontWeight: 600 }}>
-                  Export
-                </Button>
-              </Tooltip>
-            </div>
-            <Table
-              columns={lineColumns} dataSource={expandedLines}
-              rowKey={(_, i) => `line-${i}`}
-              loading={loading} size="small" scroll={{ x: 1300 }}
-              locale={{
-                emptyText: hasSearched
-                  ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No lines found in search results" style={{ padding: 40 }} />
-                  : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Use the search panel above to see order lines" style={{ padding: 40 }} />,
-              }}
-              pagination={expandedLines.length > 50 ? {
-                pageSize: 50, showSizeChanger: false,
-                showTotal: (t) => `${t} line${t !== 1 ? 's' : ''}`,
-                style: { padding: '10px 16px', margin: 0 },
-              } : false}
-            />
-          </Tabs.TabPane>
-        </Tabs>
+                  </div>
+                  <Table
+                    columns={lineColumns} dataSource={expandedLines}
+                    rowKey={(_, i) => `line-${i}`}
+                    loading={loading} size="small" scroll={{ x: 1300 }}
+                    locale={{
+                      emptyText: hasSearched
+                        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No lines found in search results" style={{ padding: 40 }} />
+                        : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Use the search panel above to see order lines" style={{ padding: 40 }} />,
+                    }}
+                    pagination={expandedLines.length > 50 ? {
+                      pageSize: 50, showSizeChanger: false,
+                      showTotal: (t) => `${t} line${t !== 1 ? 's' : ''}`,
+                      style: { padding: '10px 16px', margin: 0 },
+                    } : false}
+                  />
+                </>
+              ),
+            },
+          ]}
+        />
       </Card>
 
       {/* Submit-for-Approval API Modal */}
