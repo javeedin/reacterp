@@ -2466,7 +2466,7 @@ const ManageJournals: React.FC = () => {
       setSelectedLinesByTab(prev => ({ ...prev, [tabKey]: [] }));
     };
 
-    // Update single journal line account combination in DB
+    // Update single journal line account combination in DB via RR_P_UPDATE_GL_LINES_CC
     const handleUpdateJournalLineAccount = async (modKey: string, modifiedInfo: { original: string; current: string; lineId?: number }) => {
       setUpdatingLineKey(modKey);
       try {
@@ -2479,17 +2479,14 @@ const ManageJournals: React.FC = () => {
           return;
         }
 
+        // Simple payload with only required fields for account combination update
         const payload = {
           jeHeaderId: journal.jeHeaderId,
           lineId: modifiedInfo.lineId || currentLine.lineId,
           accountCombination: modifiedInfo.current,
-          description: currentLine.description,
-          enteredDr: currentLine.enteredDr || 0,
-          enteredCr: currentLine.enteredCr || 0,
-          currency: currentLine.currency || journal.currencyCode,
         };
 
-        const response = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines/update`, {
+        const response = await fetch(`${APEX_DB_CONFIG.baseUrl}/gl/journals/lines/update-account`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(payload),
@@ -2498,14 +2495,14 @@ const ManageJournals: React.FC = () => {
         const result = await response.json();
 
         if (response.ok && result.status === 'SUCCESS') {
-          message.success(`Journal line account updated to ${modifiedInfo.current}`);
+          message.success(`Account combination updated: ${modifiedInfo.current}`);
           setModifiedLines(prev => {
             const updated = { ...prev };
             delete updated[modKey];
             return updated;
           });
         } else {
-          message.error(`Update failed: ${result.message || result.error || `HTTP ${response.status}`}`);
+          message.error(`Update failed: ${result.message || 'Unknown error'}`);
         }
       } catch (error) {
         message.error(`Update failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
