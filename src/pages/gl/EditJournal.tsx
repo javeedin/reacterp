@@ -1392,18 +1392,18 @@ const EditJournal: React.FC = () => {
                 cursor: 'pointer',
               }}
             >
-              <Space>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
                 <Text strong style={{ fontSize: 11 }}>
                   Journal Batch: {currentJournal?.batchName}
                 </Text>
-                <Text code style={{ fontSize: 10, background: REDWOOD.neutral100, padding: '2px 6px', borderRadius: 3 }}>
-                  ID: {currentJournal?.batchId || currentJournal?.jeBatchId}
+                <Text code style={{ fontSize: 10, background: '#e6e6e6', padding: '2px 8px', borderRadius: 3, margin: '0 4px' }}>
+                  {currentJournal?.batchId || currentJournal?.jeBatchId}
                 </Text>
                 <Tooltip title="Copy Batch ID">
                   <Button
                     size="small"
                     type="text"
-                    style={{ fontSize: 10, height: 20, width: 20 }}
+                    style={{ fontSize: 10, height: 22, padding: '0 4px' }}
                     icon={<FileTextOutlined />}
                     onClick={() => {
                       navigator.clipboard.writeText(String(currentJournal?.batchId || currentJournal?.jeBatchId));
@@ -1413,11 +1413,11 @@ const EditJournal: React.FC = () => {
                 </Tooltip>
                 <a
                   onClick={() => setBatchExpanded(!batchExpanded)}
-                  style={{ color: REDWOOD.info, fontSize: 10 }}
+                  style={{ color: REDWOOD.info, fontSize: 10, marginLeft: 8 }}
                 >
                   {batchExpanded ? 'Show Less' : 'Show More'}
                 </a>
-              </Space>
+              </div>
               <Dropdown menu={{ items: batchActionsMenu }}>
                 <Button size="small" style={{ fontSize: 10 }}>
                   Batch Actions <DownOutlined />
