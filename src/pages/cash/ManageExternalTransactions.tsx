@@ -3256,6 +3256,100 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
     if (noAccounts.length > 0) {
       message.warning(`${noAccounts.length} row(s) have missing cash/offset account — they will be skipped.`);
     }
+
+    // ── Check for existing GL journals ────────────────────────────────────
+    const journalsExistList: { txn: ExternalTxnRecord; hasJournal: boolean }[] = [];
+    for (const txn of selected) {
+      try {
+        const glResult = await getGlJournalLines({
+          reference2: String(txn.externalTransactionId),
+          reference5: 'BANK_EXTERNAL_TRANSACTIONS',
+        });
+        journalsExistList.push({
+          txn,
+          hasJournal: glResult.items && glResult.items.length > 0,
+        });
+      } catch (err) {
+        journalsExistList.push({ txn, hasJournal: false });
+      }
+    }
+
+    const withJournals = journalsExistList.filter(j => j.hasJournal);
+    if (withJournals.length > 0) {
+      Modal.confirm({
+        title: 'Journals Already Exist',
+        content: (
+          <div>
+            <p>
+              The following {withJournals.length} transaction(s) already have GL journals posted:
+            </p>
+            <ul style={{ marginTop: 8 }}>
+              {withJournals.slice(0, 5).map(j => (
+                <li key={j.txn.externalTransactionId}>
+                  Transaction {j.txn.transactionId} (Ext ID: {j.txn.externalTransactionId})
+                </li>
+              ))}
+              {withJournals.length > 5 && <li>... and {withJournals.length - 5} more</li>}
+            </ul>
+            <p style={{ marginTop: 12, marginBottom: 0, fontWeight: 500 }}>
+              Mark these as accounted and skip from create accounting?
+            </p>
+          </div>
+        ),
+        okText: 'Mark as Accounted',
+        cancelText: 'Cancel',
+        onOk: async () => {
+          const flagErrors: string[] = [];
+
+          for (const item of withJournals) {
+            try {
+              const flagUrl = `${APEX_BASE}/cash/externaltransactions/${item.txn.externalTransactionId}/acctflag?updated_by=${encodeURIComponent(currentUser)}`;
+              const flagRes = await fetch(flagUrl, {
+                method: 'PUT',
+                headers: { Accept: 'application/json' },
+              });
+              const flagData = (await flagRes.json().catch(() => ({}))) as { success?: boolean; message?: string };
+              if (!flagRes.ok || !flagData.success) {
+                flagErrors.push(`Transaction ${item.txn.externalTransactionId}: ${flagData.message || `HTTP ${flagRes.status}`}`);
+              } else {
+                // Update local state
+                setTransactions(prev => prev.map(t =>
+                  t.externalTransactionId === item.txn.externalTransactionId
+                    ? { ...t, accountingFlag: 'Y' }
+                    : t
+                ));
+              }
+            } catch (e: any) {
+              flagErrors.push(`Transaction ${item.txn.externalTransactionId}: ${e.message}`);
+            }
+          }
+
+          if (flagErrors.length > 0) {
+            message.error(`Failed to mark ${flagErrors.length} transaction(s) as accounted. Check console for details.`);
+            console.error('Flag update errors:', flagErrors);
+          } else {
+            message.success(`${withJournals.length} transaction(s) marked as accounted.`);
+          }
+
+          // Continue with remaining pending transactions
+          const remainingSelected = selected.filter(
+            t => !withJournals.some(j => j.txn.externalTransactionId === t.externalTransactionId)
+          );
+          if (remainingSelected.length === 0) {
+            message.info('No pending transactions to create accounting for.');
+            return;
+          }
+          proceedToAcctModal(remainingSelected);
+        },
+      });
+    } else {
+      // No existing journals, proceed directly
+      proceedToAcctModal(selected);
+    }
+  };
+
+  // Helper to proceed with Create Accounting modal for selected transactions
+  const proceedToAcctModal = (selected: ExternalTxnRecord[]) => {
     const acctDesc = (code: string) =>
       acctCombinations.find(c => c.glAccountDesc === code)?.description ?? '';
     const rows: BankAcctProgressRow[] = selected.map(t => {
@@ -3264,12 +3358,11 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       const date = t.transactionDate || t.valueDate || dayjs().format('YYYY-MM-DD');
       const absAmount = Math.abs(t.amount ?? 0);
       const direction = t.transactionDirection ?? ((t.amount ?? 0) >= 0 ? 'DR' : 'CR');
-      // DR = money in: DR bank/asset, CR offset
-      // CR = money out: DR offset, CR bank/asset
       const drAccount = direction === 'DR' ? t.assetAccountCombination : t.offsetAccountCombination;
       const crAccount = direction === 'DR' ? t.offsetAccountCombination : t.assetAccountCombination;
       return {
         extTxnId:      t.externalTransactionId,
+        txnNumber:     t.transactionId,
         txnDate:       date,
         periodName:    derivePeriodName(new Date(date)),
         amount:        absAmount,
