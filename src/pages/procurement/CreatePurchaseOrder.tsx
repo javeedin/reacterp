@@ -2655,7 +2655,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
             <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}><Spin tip="Loading…" /></div>
           ) : (
             <Form form={headerForm} layout="vertical" size="small"
-              initialValues={{ orderDate: dayjs(), ...PO_DEFAULTS }}
+              initialValues={{ orderDate: dayjs() }}
               style={{ '--form-item-margin-bottom': '8px' } as React.CSSProperties}>
               <style>{`.ant-form-item { margin-bottom: 8px !important; }`}</style>
               <Divider orientation={"left" as any} plain style={{ fontSize: 11, color: C.textMid, margin: '4px 0 8px' }}>Organization & Order</Divider>
@@ -2809,9 +2809,9 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
               {
                 label: 'Business Units (Procurement BU / Bill To BU)',
                 method: 'GET', tag: 'blue',
-                url: `${ORDS_DIRECT}/BUSINESS_UNITS`,
-                note: 'ORDS: list of business units with Company Code and default Currency — used to populate BU dropdowns and auto-fill currency on selection',
-                source: 'ORDS / Fusion Client ERP',
+                url: `${FUSION_BASE}/payablesOptions?onlyData=true&limit=500&fields=businessUnitId,businessUnitName,paymentCurrency,ledgerCurrency,CompanyCode`,
+                note: 'Oracle Fusion: list of business units with Company Code and default Currency — used to populate BU dropdowns and auto-fill currency on selection',
+                source: 'Oracle Fusion REST',
               },
               {
                 label: 'Currencies',
@@ -2823,16 +2823,16 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
               {
                 label: 'Inventory Organizations (Ship To Org)',
                 method: 'GET', tag: 'blue',
-                url: `${FUSION_BASE}/inventoryOrganizations?limit=500&offset=0`,
-                note: 'Oracle Fusion: list of inventory organizations for ship-to selection',
+                url: `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500`,
+                note: 'Oracle Fusion: list of inventory organizations filtered by Procurement BU for ship-to selection',
                 source: 'Oracle Fusion REST',
               },
               {
                 label: 'Subinventories',
                 method: 'GET', tag: 'blue',
-                url: `${ORDS_DIRECT}/inventory/inventorywarehousesubinventory?limit=500&offset=0`,
-                note: 'ORDS: warehouse sub-inventory codes, filtered client-side by selected ship-to org',
-                source: 'ORDS / Fusion Client ERP',
+                url: `${FUSION_BASE}/subinventories?q=OrganizationCode=<code>&onlyData=true&limit=500`,
+                note: 'Oracle Fusion: warehouse sub-inventory codes, filtered by selected ship-to org',
+                source: 'Oracle Fusion REST',
               },
             ].map((api, i) => (
               <div key={i} style={{ padding: '10px 14px', borderRadius: 8, border: `1px solid #e5e5e5`, background: '#fafafa' }}>
