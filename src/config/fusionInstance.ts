@@ -18,7 +18,7 @@ export interface FusionInstance {
 export const FUSION_INSTANCES: FusionInstance[] = [
   { key: 'TEST',  label: 'TEST',  host: 'https://iacney-test.fa.ocs.oraclecloud.com', username: 'emparun', password: 'Fusion@1234' },
   { key: 'TEST1', label: 'TEST1', host: 'https://efmh-test.fa.em3.oraclecloud.com',   username: 'shaik',   password: 'fusion1234' },
-  { key: 'PROD',  label: 'PROD',  host: 'https://efmh.fa.em3.oraclecloud.com',        username: 'shail',   password: 'fusion1234' },
+  { key: 'PROD',  label: 'PROD',  host: 'https://efmh.fa.em3.oraclecloud.com',        username: 'shaik',   password: 'fusion1234' },
 ];
 
 const STORAGE_KEY = 'fusionInstanceKey';
