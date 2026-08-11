@@ -3519,6 +3519,21 @@ const ManageJournals: React.FC = () => {
               <Text strong style={{ fontSize: 11 }}>
                 Journal Batch: {journal.batchName}
               </Text>
+              <Text code style={{ fontSize: 10, background: '#e6e6e6', padding: '2px 8px', borderRadius: 3 }}>
+                {journal.batchId || journal.jeBatchId}
+              </Text>
+              <Tooltip title="Copy Batch ID">
+                <Button
+                  size="small"
+                  type="text"
+                  style={{ fontSize: 10, height: 22, padding: '0 4px' }}
+                  icon={<FileTextOutlined />}
+                  onClick={() => {
+                    navigator.clipboard.writeText(String(journal.batchId || journal.jeBatchId));
+                    message.success('Batch ID copied');
+                  }}
+                />
+              </Tooltip>
               <Tag
                 style={{ fontSize: 10 }}
                 color={journal.statusMeaning === 'Posted' ? REDWOOD.success : REDWOOD.warning}
