@@ -1396,6 +1396,21 @@ const EditJournal: React.FC = () => {
                 <Text strong style={{ fontSize: 11 }}>
                   Journal Batch: {currentJournal?.batchName}
                 </Text>
+                <Text code style={{ fontSize: 10, background: REDWOOD.neutral100, padding: '2px 6px', borderRadius: 3 }}>
+                  ID: {currentJournal?.batchId || currentJournal?.jeBatchId}
+                </Text>
+                <Tooltip title="Copy Batch ID">
+                  <Button
+                    size="small"
+                    type="text"
+                    style={{ fontSize: 10, height: 20, width: 20 }}
+                    icon={<FileTextOutlined />}
+                    onClick={() => {
+                      navigator.clipboard.writeText(String(currentJournal?.batchId || currentJournal?.jeBatchId));
+                      message.success('Batch ID copied');
+                    }}
+                  />
+                </Tooltip>
                 <a
                   onClick={() => setBatchExpanded(!batchExpanded)}
                   style={{ color: REDWOOD.info, fontSize: 10 }}
