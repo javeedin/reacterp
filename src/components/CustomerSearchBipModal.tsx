@@ -151,7 +151,7 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
   return (
     <>
       <Modal
-        title={<div style={{ fontSize: '18px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between', width: '100%' }}>
+        title={<div style={{ fontSize: '18px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between', width: '100%', paddingRight: '40px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <SearchOutlined style={{ color: '#1890ff' }} />
             <span>Find Customer {businessUnitName && <span style={{ fontSize: '14px', fontWeight: '500', color: '#666' }}>({businessUnitName})</span>}</span>
@@ -163,7 +163,7 @@ const CustomerSearchBipModal: React.FC<CustomerSearchBipModalProps> = ({
               icon={<ApiOutlined style={{ color: '#1890ff' }} />}
               onClick={() => setApiDrawerOpen(true)}
               title={searchText.trim() ? "View API Payload Preview" : "View API Details"}
-              style={{ marginRight: '-8px' }}
+              style={{ marginRight: '0px' }}
             />
           )}
         </div>}
