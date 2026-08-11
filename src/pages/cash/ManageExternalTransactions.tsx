@@ -3371,6 +3371,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
           </tr>
         </tbody>
       </table>
+      </div>
     );
   };
 
