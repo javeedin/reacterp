@@ -4025,19 +4025,41 @@ const PriceListPanel: React.FC<{ org?: string; ccy?: string; onAdd: (items: any[
   const [sel, setSel] = useState<React.Key[]>([]);
   const [qtys, setQtys] = useState<Record<string, number>>({});
   const [rows, setRows] = useState<ImpRow[] | null>(null);
-  useEffect(() => {
-    setPlLoading(true);
-    fetch(`${FUSION_BASE}/priceLists?onlyData=true&limit=500`, { headers: FUSION_HDRS })
-      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then(d => setPriceLists(d.items ?? []))
-      .catch(e => message.error(`Price lists: ${e.message}`))
-      .finally(() => setPlLoading(false));
-  }, []);
+  const [searchType, setSearchType] = useState<'number' | 'description'>('number');
+  const [searchText, setSearchText] = useState('');
+  const [apiDrawerOpen, setApiDrawerOpen] = useState(false);
+  const [apiDetails, setApiDetails] = useState<{ priceListsUrl?: string; itemsUrl?: string }>({});
   const pl = priceLists.find(p => String(pf(p, ['PriceListId'])) === plId);
   const plCcy = pf(pl ?? {}, ['CurrencyCode', 'Currency']) ?? ccy;
+
+  const searchPriceLists = async () => {
+    if (!searchText.trim()) { message.warning('Enter a search term'); return; }
+    setPlLoading(true);
+    try {
+      let q = '';
+      if (searchType === 'number') {
+        q = `PriceListNumber=${searchText.trim()}`;
+      } else {
+        q = `Name=${searchText.trim()}`;
+      }
+      const priceListsUrl = `${FUSION_BASE}/priceLists?q=${encodeURIComponent(q)}&onlyData=true&limit=500`;
+      setApiDetails({ priceListsUrl });
+
+      const r = await fetch(priceListsUrl, { headers: FUSION_HDRS });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      setPriceLists(d.items ?? []);
+      if (!d.items?.length) message.info('No price lists found');
+    } catch (e: any) { message.error(`Price lists search: ${e.message}`); }
+    finally { setPlLoading(false); }
+  };
+
   const loadItems = async (id: string) => {
     setItemsLoading(true); setItems([]); setSel([]); setQtys({});
     try {
+      const itemsUrl = `${FUSION_BASE}/priceLists/${encodeURIComponent(id)}/child/items?expand=charges&onlyData=true&limit=100`;
+      setApiDetails(prev => ({ ...prev, itemsUrl }));
+
       const all: any[] = []; let offset = 0;
       for (let i = 0; i < 15; i++) {
         const r = await fetch(`${FUSION_BASE}/priceLists/${encodeURIComponent(id)}/child/items?expand=charges&onlyData=true&limit=100&offset=${offset}`, { headers: FUSION_HDRS });
@@ -4067,13 +4089,69 @@ const PriceListPanel: React.FC<{ org?: string; ccy?: string; onAdd: (items: any[
   ];
   return (
     <div>
+      {/* Search Type Toggle */}
+      <div style={{ marginBottom: '16px' }}>
+        <Segmented
+          value={searchType}
+          onChange={(value) => setSearchType(value as 'number' | 'description')}
+          options={[
+            { label: 'Price List Number', value: 'number' },
+            { label: 'Price List Description', value: 'description' },
+          ]}
+          size="large"
+        />
+      </div>
+
+      {/* Search Input with Button and API Icon */}
+      <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+        <Input
+          placeholder={searchType === 'number' ? 'Enter price list number...' : 'Enter price list description...'}
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          onPressEnter={searchPriceLists}
+          prefix={<SearchOutlined style={{ color: '#1890ff' }} />}
+          size="large"
+          allowClear
+          style={{ flex: 1 }}
+          disabled={plLoading}
+        />
+        <Button
+          type="primary"
+          size="large"
+          icon={<SearchOutlined />}
+          onClick={searchPriceLists}
+          loading={plLoading}
+          style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}
+        >
+          Search
+        </Button>
+        {(apiDetails.priceListsUrl || apiDetails.itemsUrl) && (
+          <Button
+            type="text"
+            size="large"
+            icon={<ApiOutlined style={{ color: '#1890ff' }} />}
+            onClick={() => setApiDrawerOpen(true)}
+            title="View API Details"
+          />
+        )}
+      </div>
+
+      {/* Price List Dropdown */}
+      {priceLists.length > 0 && (
+        <div style={{ marginBottom: '16px' }}>
+          <Select showSearch style={{ width: '100%' }} loading={plLoading} placeholder="Select a price list" optionFilterProp="label"
+            value={plId} onChange={onPickList}
+            options={priceLists.map(p => ({ value: String(pf(p, ['PriceListId'])), label: `${pf(p, ['Name', 'PriceListName']) ?? pf(p, ['PriceListId'])}${pf(p, ['CurrencyCode', 'Currency']) ? ` — ${pf(p, ['CurrencyCode', 'Currency'])}` : ''}${pf(p, ['StatusCode', 'Status']) ? ` · ${pf(p, ['StatusCode', 'Status'])}` : ''}` }))}
+            notFoundContent={plLoading ? <Spin size="small" /> : 'No price lists'} />
+        </div>
+      )}
+
+      {/* Item Filter */}
+      {pl && <div style={{ marginBottom: '16px' }}><Input allowClear placeholder="Filter items…" prefix={<SearchOutlined />} style={{ width: 220 }} value={filter} onChange={e => setFilter(e.target.value)} /></div>}
+      {plCcy && pl && <div style={{ marginBottom: '16px' }}><Tag color="blue">{plCcy}</Tag></div>}
+
+      {/* Space */}
       <Space wrap style={{ marginBottom: 10 }}>
-        <Select showSearch style={{ width: 340 }} loading={plLoading} placeholder="Select a price list" optionFilterProp="label"
-          value={plId} onChange={onPickList}
-          options={priceLists.map(p => ({ value: String(pf(p, ['PriceListId'])), label: `${pf(p, ['Name', 'PriceListName']) ?? pf(p, ['PriceListId'])}${pf(p, ['CurrencyCode', 'Currency']) ? ` — ${pf(p, ['CurrencyCode', 'Currency'])}` : ''}${pf(p, ['StatusCode', 'Status']) ? ` · ${pf(p, ['StatusCode', 'Status'])}` : ''}` }))}
-          notFoundContent={plLoading ? <Spin size="small" /> : 'No price lists'} />
-        {pl && <Input allowClear placeholder="Filter items…" prefix={<SearchOutlined />} style={{ width: 220 }} value={filter} onChange={e => setFilter(e.target.value)} />}
-        {plCcy && pl && <Tag color="blue">{plCcy}</Tag>}
       </Space>
       <Table size="small" columns={cols} dataSource={filtered} rowKey={r => String(plItemNumber(r))} loading={itemsLoading}
         rowSelection={{ selectedRowKeys: sel, onChange: setSel }} pagination={filtered.length > 20 ? { pageSize: 20, size: 'small' } : false} scroll={{ y: 330 }}
@@ -4083,6 +4161,104 @@ const PriceListPanel: React.FC<{ org?: string; ccy?: string; onAdd: (items: any[
         <Button type="primary" disabled={!sel.length} icon={<ImportOutlined />} style={{ marginLeft: 'auto', background: REDWOOD.primary, borderColor: REDWOOD.primary }}
           onClick={() => setRows(items.filter(r => sel.includes(String(plItemNumber(r)))).map(r => { const item = String(plItemNumber(r)); return { key: impKey(), itemNumber: item, description: pf(r, ['Description', 'ItemDescription']), qty: qtys[item] || 1, price: plBasePrice(r), valid: true }; }))}>Stage {sel.length || ''} for preview</Button>
       </div>
+
+      {/* API Details Drawer */}
+      <Drawer
+        title="API Details - Price Lists"
+        placement="right"
+        onClose={() => setApiDrawerOpen(false)}
+        open={apiDrawerOpen}
+        width={600}
+        bodyStyle={{ padding: '24px' }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="large">
+          {/* Price Lists Search URL */}
+          <div>
+            <div style={{ fontSize: '14px', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ApiOutlined />
+              Price Lists Search
+            </div>
+            <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
+              Searches for price lists by {searchType === 'number' ? 'number' : 'description'}
+            </div>
+            <div style={{
+              backgroundColor: '#f5f5f5',
+              padding: '12px',
+              borderRadius: '6px',
+              fontFamily: 'monospace',
+              fontSize: '11px',
+              wordBreak: 'break-all',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: '8px'
+            }}>
+              <span style={{ flex: 1 }}>{apiDetails.priceListsUrl || 'N/A'}</span>
+              <Button
+                type="text"
+                size="small"
+                icon={<CopyOutlined />}
+                onClick={() => {
+                  navigator.clipboard.writeText(apiDetails.priceListsUrl || '');
+                  message.success('Copied to clipboard');
+                }}
+              />
+            </div>
+          </div>
+
+          <Divider style={{ margin: '16px 0' }} />
+
+          {/* Price List Items URL */}
+          {apiDetails.itemsUrl && (
+            <>
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <ApiOutlined />
+                  Price List Items
+                </div>
+                <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
+                  Fetches items from the selected price list
+                </div>
+                <div style={{
+                  backgroundColor: '#f5f5f5',
+                  padding: '12px',
+                  borderRadius: '6px',
+                  fontFamily: 'monospace',
+                  fontSize: '11px',
+                  wordBreak: 'break-all',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  gap: '8px'
+                }}>
+                  <span style={{ flex: 1 }}>{apiDetails.itemsUrl}</span>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => {
+                      navigator.clipboard.writeText(apiDetails.itemsUrl || '');
+                      message.success('Copied to clipboard');
+                    }}
+                  />
+                </div>
+              </div>
+
+              <Divider style={{ margin: '16px 0' }} />
+            </>
+          )}
+
+          {/* Service Information */}
+          <div>
+            <div style={{ fontSize: '14px', fontWeight: '700', marginBottom: '8px' }}>Service Information</div>
+            <div style={{ fontSize: '12px', color: '#666', lineHeight: '1.8' }}>
+              <div><strong>Service:</strong> Oracle Fusion REST API</div>
+              <div><strong>Search Type:</strong> {searchType === 'number' ? 'Price List Number' : 'Price List Description'}</div>
+              <div><strong>Search Term:</strong> {searchText || 'N/A'}</div>
+            </div>
+          </div>
+        </Space>
+      </Drawer>
     </div>
   );
 };
