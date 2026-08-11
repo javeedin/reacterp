@@ -4274,6 +4274,8 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
   const [searchType, setSearchType] = useState<'itemNumber' | 'description'>('itemNumber');
   const [searchText, setSearchText] = useState('');
   const [filterText, setFilterText] = useState('');
+  const [apiDrawerOpen, setApiDrawerOpen] = useState(false);
+  const [apiUrl, setApiUrl] = useState('');
 
   const loadOnhand = useCallback(async (type: 'itemNumber' | 'description', query: string) => {
     if (!org) { message.warning('Select an organization first'); return; }
@@ -4284,9 +4286,11 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
       let q = `OrganizationCode=${org}${subinv ? `;SubinventoryCode=${subinv}` : ''}`;
       const balances: any[] = [];
       let offset = 0;
+      let capturedUrl = '';
 
       if (type === 'itemNumber') {
         q += `;ItemNumber=${query.trim()}`;
+        capturedUrl = `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(q)}&onlyData=true&limit=100`;
       } else {
         // For description search, we'll fetch items by description from itemCosts first
         const itemRes = await fetch(`${LATEST_URL}/itemCosts?q=${encodeURIComponent(`ItemDescription=${query.trim()}`)}&onlyData=true&limit=100`, { headers: FUSION_HDRS });
@@ -4300,6 +4304,12 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
           setSel([]);
           setQtys({});
           return;
+        }
+
+        // Capture URL for first item search
+        if (itemNumbers.length > 0) {
+          const qry = `OrganizationCode=${org}${subinv ? `;SubinventoryCode=${subinv}` : ''};ItemNumber=${itemNumbers[0]}`;
+          capturedUrl = `${FUSION_BASE}/inventoryOnhandBalances?q=${encodeURIComponent(qry)}&onlyData=true&limit=100`;
         }
 
         // Search on-hand for each item number
@@ -4324,6 +4334,9 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
           if (!d.hasMore) break;
         }
       }
+
+      // Store captured URL for API drawer
+      if (capturedUrl) setApiUrl(capturedUrl);
 
       // Deduplicate by item number and sum quantities
       const itemMap: Record<string, { item: string; qty: number; subinv?: string }> = {};
@@ -4423,6 +4436,16 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
         >
           Search
         </Button>
+        {apiUrl && (
+          <Button
+            type="text"
+            size="large"
+            icon={<ApiOutlined style={{ color: '#1890ff' }} />}
+            onClick={() => setApiDrawerOpen(true)}
+            title="View API Details"
+            style={{ marginLeft: '0px' }}
+          />
+        )}
       </div>
 
       {/* Filter Input */}
@@ -4454,6 +4477,68 @@ const OnhandPanel: React.FC<{ org?: string; subinv?: string; ccy?: string; onAdd
         <Button type="primary" disabled={!sel.length} icon={<ImportOutlined />} style={{ marginLeft: 'auto', background: REDWOOD.primary, borderColor: REDWOOD.primary }}
           onClick={() => setRows(items.filter(r => sel.includes(r.item)).map(r => ({ key: impKey(), itemNumber: r.item, description: uomMap[r.item]?.desc || '', UOMCode: uomMap[r.item]?.uom || '', qty: qtys[r.item] || 1, price: 0, valid: true })))}>Stage {sel.length || ''} for preview</Button>
       </div>
+
+      {/* API Details Drawer */}
+      <Drawer
+        title="API Details"
+        placement="right"
+        onClose={() => setApiDrawerOpen(false)}
+        open={apiDrawerOpen}
+        width={600}
+        bodyStyle={{ padding: '24px' }}
+      >
+        {apiUrl ? (
+          <Space direction="vertical" style={{ width: '100%' }} size="large">
+            {/* On-hand Inventory URL */}
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <ApiOutlined />
+                Inventory On-hand Balances
+              </div>
+              <div style={{
+                backgroundColor: '#f5f5f5',
+                padding: '12px',
+                borderRadius: '6px',
+                fontFamily: 'monospace',
+                fontSize: '11px',
+                wordBreak: 'break-all',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: '8px'
+              }}>
+                <span style={{ flex: 1 }}>{apiUrl}</span>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CopyOutlined />}
+                  onClick={() => {
+                    navigator.clipboard.writeText(apiUrl);
+                    message.success('Copied to clipboard');
+                  }}
+                />
+              </div>
+            </div>
+
+            <Divider style={{ margin: '16px 0' }} />
+
+            {/* Service Information */}
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: '700', marginBottom: '8px' }}>Service Information</div>
+              <div style={{ fontSize: '12px', color: '#666', lineHeight: '1.8' }}>
+                <div><strong>Service:</strong> Oracle Fusion REST API</div>
+                <div><strong>Endpoint:</strong> inventoryOnhandBalances</div>
+                <div><strong>Search Type:</strong> {searchType === 'itemNumber' ? 'Item Number' : 'Item Description'}</div>
+                <div><strong>Search Term:</strong> {searchText || 'N/A'}</div>
+                {org && <div><strong>Organization:</strong> {org}</div>}
+                {subinv && <div><strong>Subinventory:</strong> {subinv}</div>}
+              </div>
+            </div>
+          </Space>
+        ) : (
+          <Empty description="No API call made yet. Search for items to view API details." />
+        )}
+      </Drawer>
     </div>
   );
 };
