@@ -341,7 +341,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     setLovLoading(true);
     try {
       const [buRes, ccyRes, orgRes, subRes] = await Promise.allSettled([
-        fetch(`${FUSION_BASE}/payablesOptions?onlyData=true&limit=500&fields=businessUnitId,businessUnitName,paymentCurrency,ledgerCurrency`, { headers: FUSION_HDRS })
+        fetch(`${FUSION_BASE}/payablesOptions?onlyData=true&limit=500&fields=businessUnitId,businessUnitName,paymentCurrency,ledgerCurrency,CompanyCode`, { headers: FUSION_HDRS })
           .then(r => r.json())
           .then(d => {
             // Deduplicate business units by name and map to expected format
@@ -356,6 +356,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
               .map((b: any) => ({
                 bu_name: b.businessUnitName,
                 bu_id: b.businessUnitId,
+                bu_code: b.CompanyCode,
                 BusinessUnitName: b.businessUnitName,
                 BusinessUnitId: b.businessUnitId,
                 functional_currency: b.paymentCurrency,
