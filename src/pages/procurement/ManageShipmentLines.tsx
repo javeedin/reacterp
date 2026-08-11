@@ -483,8 +483,8 @@ const ManageShipmentLines: React.FC = () => {
 
   const searchUrl = useMemo(() => {
     const q = buildQ(filters);
-    const qs = q ? `q=${encodeURIComponent(q)}&` : '';
-    return `${FUSION_BASE}/shipmentLines?${qs}orderBy=CreationDate:desc&onlyData=false`;
+    const qs = q ? `q=${encodeURIComponent(q)}` : '';
+    return `${FUSION_BASE}/shipmentLines?${qs}`;
   }, [filters, buildQ]);
 
   const runSearch = useCallback(async () => {
