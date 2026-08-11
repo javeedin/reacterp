@@ -938,6 +938,8 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
   const [searchParams, setSearchParams] = useState<SearchParams>({});
   const [hasSearched, setHasSearched]   = useState(false);
   const [subTab, setSubTab]         = useState('orders');
+  const [ordersFilterText, setOrdersFilterText] = useState('');
+  const [linesFilterText, setLinesFilterText] = useState('');
   const [apiOpen, setApiOpen]       = useState(false);
   const [apiTestLoading, setATL]    = useState(false);
   const [apiResult, setApiResult]   = useState<{ status: number; body: string } | null>(null);
@@ -1159,8 +1161,8 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
   };
 
   const exportOrdersToExcel = () => {
-    if (data.length === 0) { message.warning('No orders to export'); return; }
-    const rows = data.map(po => ({
+    if (filteredOrdersData.length === 0) { message.warning('No orders to export'); return; }
+    const rows = filteredOrdersData.map(po => ({
       'Created': fmtDate(po.CreationDate),
       'Order Number': po.OrderNumber,
       'Legal Entity': po.SoldToLegalEntity,
@@ -1181,12 +1183,12 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
       { wch: 14 }, { wch: 12 },
     ];
     XLSX.writeFile(wb, `PurchaseOrders_${dayjs().format('YYYY-MM-DD_HHmmss')}.xlsx`);
-    message.success(`Exported ${data.length} order(s)`);
+    message.success(`Exported ${filteredOrdersData.length} order(s)`);
   };
 
   const exportLinesToExcel = () => {
-    if (expandedLines.length === 0) { message.warning('No lines to export'); return; }
-    const rows = expandedLines.map(line => ({
+    if (filteredLinesData.length === 0) { message.warning('No lines to export'); return; }
+    const rows = filteredLinesData.map(line => ({
       'PO Number': (line as any)._PONumber,
       'Line #': line.LineNumber,
       'Type': line.LineType,
@@ -1212,10 +1214,36 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
       { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
     ];
     XLSX.writeFile(wb, `PurchaseOrderLines_${dayjs().format('YYYY-MM-DD_HHmmss')}.xlsx`);
-    message.success(`Exported ${expandedLines.length} line(s)`);
+    message.success(`Exported ${filteredLinesData.length} line(s)`);
   };
 
   const currentUrl = buildUrl(searchParams, page);
+
+  const filteredOrdersData = useMemo(() => {
+    if (!ordersFilterText) return data;
+    const lowerFilter = ordersFilterText.toLowerCase();
+    return data.filter(po =>
+      (po.OrderNumber?.toLowerCase().includes(lowerFilter)) ||
+      (po.Supplier?.toLowerCase().includes(lowerFilter)) ||
+      (po.SoldToLegalEntity?.toLowerCase().includes(lowerFilter)) ||
+      (po.BuyerDisplayName?.toLowerCase().includes(lowerFilter)) ||
+      (po.StatusCode?.toLowerCase().includes(lowerFilter)) ||
+      (po.CurrencyCode?.toLowerCase().includes(lowerFilter))
+    );
+  }, [data, ordersFilterText]);
+
+  const filteredLinesData = useMemo(() => {
+    if (!linesFilterText) return expandedLines;
+    const lowerFilter = linesFilterText.toLowerCase();
+    return expandedLines.filter(line =>
+      ((line as any)._PONumber?.toLowerCase().includes(lowerFilter)) ||
+      (line.Item?.toLowerCase().includes(lowerFilter)) ||
+      (line.Description?.toLowerCase().includes(lowerFilter)) ||
+      (line.Category?.toLowerCase().includes(lowerFilter)) ||
+      (line.LineType?.toLowerCase().includes(lowerFilter)) ||
+      (line.StatusCode?.toLowerCase().includes(lowerFilter))
+    );
+  }, [expandedLines, linesFilterText]);
 
   const columns: ColumnsType<RawPO> = [
     { title: 'Created', dataIndex: 'CreationDate', width: 80, render: d => fmtDate(d),
@@ -1223,7 +1251,7 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
       defaultSortOrder: 'descend' as const,
     },
     {
-      title: 'Order Number', dataIndex: 'OrderNumber', width: 90,
+      title: 'Order Number', dataIndex: 'OrderNumber', width: 130,
       render: (v, rec) => (
         <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12 }} onClick={() => onOpen(rec)}>
           {v}
@@ -1328,7 +1356,15 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
     { title: '#', dataIndex: 'LineNumber', width: 48, align: 'center',
       render: v => <Text style={{ fontSize: 12, color: REDWOOD.neutral600 }}>{v}</Text> },
     { title: 'PO Number', dataIndex: '_PONumber', width: 130, fixed: 'left',
-      render: (v) => <Text style={{ fontSize: 12, fontWeight: 600, color: REDWOOD.info }}>{v ?? '—'}</Text> },
+      render: (v, rec: any) => (
+        <Button type="link" style={{ padding: 0, fontWeight: 700, color: REDWOOD.info, fontSize: 12 }}
+          onClick={() => {
+            const poRec = data.find(po => po.POHeaderId === rec._POHeaderId);
+            if (poRec) onOpen(poRec);
+          }}>
+          {v ?? '—'}
+        </Button>
+      ) },
     { title: 'Type', dataIndex: 'LineType', width: 80,
       render: v => <Tag style={{ fontSize: 11 }}>{v ?? '—'}</Tag> },
     { title: 'Item', dataIndex: 'Item', width: 130,
@@ -1439,14 +1475,22 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
               </span>,
               children: (
                 <>
-                  <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                     <Text strong style={{ fontSize: 13 }}>
                       Purchase Orders
                       {hasSearched && total > 0 && <Text type="secondary" style={{ fontWeight: 400, marginLeft: 8 }}>({total} result{total !== 1 ? 's' : ''})</Text>}
                     </Text>
+                    <Input
+                      placeholder="Filter orders..."
+                      size="small"
+                      style={{ width: 200, fontFamily: 'monospace' }}
+                      value={ordersFilterText}
+                      onChange={e => setOrdersFilterText(e.target.value)}
+                      allowClear
+                    />
                     <Space style={{ marginLeft: 'auto' }}>
                       <Tooltip title="Export orders to Excel">
-                        <Button size="small" icon={<FileExcelOutlined />} onClick={exportOrdersToExcel} disabled={data.length === 0}
+                        <Button size="small" icon={<FileExcelOutlined />} onClick={exportOrdersToExcel} disabled={filteredOrdersData.length === 0}
                           style={{ borderColor: '#52A043', color: '#52A043', borderRadius: 4, fontWeight: 600 }}>
                           Export
                         </Button>
@@ -1468,9 +1512,9 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
                     </Space>
                   </div>
                   <Table
-                    columns={columns} dataSource={data} rowKey="POHeaderId"
+                    columns={columns} dataSource={filteredOrdersData} rowKey="POHeaderId"
                     rowSelection={{ selectedRowKeys: selectedKeys, onChange: setSelectedKeys, preserveSelectedRowKeys: true }}
-                    loading={loading} size="small" scroll={{ x: 1250 }}
+                    loading={loading} size="small" scroll={{ x: 1280 }}
                     pagination={hasSearched && total > PAGE_SIZE ? {
                       current: page, pageSize: PAGE_SIZE, total, showSizeChanger: false,
                       onChange: async p => { setPage(p); const items = await fetchPOs(searchParams, p); fetchLineCounts(items); },
@@ -1496,20 +1540,30 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
               </span>,
               children: (
                 <>
-                  <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ padding: '10px 16px', borderBottom: `1px solid ${REDWOOD.neutral200}`, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                     <Text strong style={{ fontSize: 13 }}>
                       Order Lines
                       {hasSearched && expandedLines.length > 0 && <Text type="secondary" style={{ fontWeight: 400, marginLeft: 8 }}>({expandedLines.length} line{expandedLines.length !== 1 ? 's' : ''})</Text>}
                     </Text>
-                    <Tooltip title="Export lines to Excel" style={{ marginLeft: 'auto' }}>
-                      <Button size="small" icon={<FileExcelOutlined />} onClick={exportLinesToExcel} disabled={expandedLines.length === 0}
-                        style={{ borderColor: '#52A043', color: '#52A043', borderRadius: 4, fontWeight: 600 }}>
-                        Export
-                      </Button>
-                    </Tooltip>
+                    <Input
+                      placeholder="Filter lines..."
+                      size="small"
+                      style={{ width: 200, fontFamily: 'monospace' }}
+                      value={linesFilterText}
+                      onChange={e => setLinesFilterText(e.target.value)}
+                      allowClear
+                    />
+                    <Space style={{ marginLeft: 'auto' }}>
+                      <Tooltip title="Export lines to Excel">
+                        <Button size="small" icon={<FileExcelOutlined />} onClick={exportLinesToExcel} disabled={filteredLinesData.length === 0}
+                          style={{ borderColor: '#52A043', color: '#52A043', borderRadius: 4, fontWeight: 600 }}>
+                          Export
+                        </Button>
+                      </Tooltip>
+                    </Space>
                   </div>
                   <Table
-                    columns={lineColumns} dataSource={expandedLines}
+                    columns={lineColumns} dataSource={filteredLinesData}
                     rowKey={(_, i) => `line-${i}`}
                     loading={loading} size="small" scroll={{ x: 1300 }}
                     locale={{
