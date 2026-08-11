@@ -311,6 +311,33 @@ const ViewAcctModal: React.FC<{
         reference2: txn.externalTransactionId,
         reference5: 'BANK_EXTERNAL_TRANSACTIONS',
       });
+      const items = lRes.items || [];
+      if (items.length > 0) {
+        const firstLine = items[0];
+        const hdr = {
+          glBatchName: firstLine.batch_name,
+          glBatchId: firstLine.je_batch_id,
+          glHeaderId: firstLine.je_header_id,
+          periodName: firstLine.period_name,
+          accountingDate: firstLine.accounting_date,
+          moduleName: firstLine.je_category || 'Cash Management',
+          postingStatus: firstLine.journal_status || 'POSTED',
+        };
+        const formattedLines = items.map((line: any) => ({
+          lineId: line.line_id,
+          lineNumber: line.line_num,
+          lineType: line.entered_dr ? 'DR' : 'CR',
+          accountCombination: line.account,
+          accountDescription: line.description,
+          enteredDr: line.entered_dr,
+          enteredCr: line.entered_cr,
+          accountedDr: line.accounted_dr,
+          accountedCr: line.accounted_cr,
+          currency: line.currency_code,
+        }));
+        setViewAcctHeader(hdr);
+        setViewAcctLines(formattedLines);
+      }
       setApiResponse({ headers: lRes, lines: lRes });
       message.success('API refreshed successfully');
     } catch (e: any) {
@@ -366,12 +393,12 @@ const ViewAcctModal: React.FC<{
           </div>
           <div style={{ border: '1px solid #91caff', borderTop: 'none', borderRadius: '0 0 6px 6px', padding: '10px 14px', background: '#fff' }}>
             <Row gutter={[16, 8]}>
-              <Col xs={24} md={8}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Batch Name</Typography.Text>
+              <Col xs={24} md={6}>
+                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Journal Name</Typography.Text>
                 <Typography.Text strong style={{ fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>{hdr.glBatchName || '—'}</Typography.Text>
               </Col>
               <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Batch ID</Typography.Text>
+                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>JE Batch ID</Typography.Text>
                 <Typography.Text code style={{ fontSize: 12 }}>{hdr.glBatchId || '—'}</Typography.Text>
               </Col>
               <Col xs={12} md={4}>
@@ -387,35 +414,13 @@ const ViewAcctModal: React.FC<{
                 <Typography.Text style={{ fontSize: 12 }}>{fmtDate(hdr.accountingDate)}</Typography.Text>
               </Col>
               <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Posting Status</Typography.Text>
-                <Tag color={hdStatusColor} style={{ fontSize: 11 }}>{hdr.postingStatus || hdr.accountingStatus || '—'}</Tag>
+                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Status</Typography.Text>
+                <Tag color={hdr.postingStatus === 'POSTED' ? 'success' : 'default'} style={{ fontSize: 11 }}>{hdr.postingStatus || '—'}</Tag>
               </Col>
               <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Acctg Status</Typography.Text>
-                <Tag color={hdr.accountingStatus === 'FINAL' ? 'processing' : 'default'} style={{ fontSize: 11 }}>{hdr.accountingStatus || '—'}</Tag>
+                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Category</Typography.Text>
+                <Typography.Text style={{ fontSize: 12 }}>{hdr.moduleName || '—'}</Typography.Text>
               </Col>
-              <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Module</Typography.Text>
-                <Typography.Text style={{ fontSize: 12 }}>{hdr.moduleName || 'Cash Management'}</Typography.Text>
-              </Col>
-              <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Posted By</Typography.Text>
-                <Typography.Text style={{ fontSize: 12 }}>{hdr.postedBy || '—'}</Typography.Text>
-              </Col>
-              <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Posted Date</Typography.Text>
-                <Typography.Text style={{ fontSize: 12 }}>{hdr.postedDate ? fmtDate(hdr.postedDate) : '—'}</Typography.Text>
-              </Col>
-              <Col xs={12} md={4}>
-                <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>SLA Header ID</Typography.Text>
-                <Typography.Text code style={{ fontSize: 12 }}>{hdr.headerId || '—'}</Typography.Text>
-              </Col>
-              {hdr.description && (
-                <Col xs={24}>
-                  <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Description</Typography.Text>
-                  <Typography.Text style={{ fontSize: 12 }}>{hdr.description}</Typography.Text>
-                </Col>
-              )}
             </Row>
           </div>
         </div>
@@ -425,18 +430,22 @@ const ViewAcctModal: React.FC<{
   const liveRows = lines.map((l: any, i: number) => {
     const lineColor = l.lineType === 'DR' ? '#0572CE' : '#389e0d';
     const rowBg     = i % 2 === 1 ? '#f9fafb' : undefined;
+    const descLines = (l.accountDescription || '').split('\n').filter((s: string) => s.trim());
     return (
-      <tr key={l.lineId ?? i} style={{ background: rowBg }}>
+      <tr key={l.lineId ?? i} style={{ background: rowBg, verticalAlign: 'top' }}>
         <td style={ts({ textAlign: 'center', color: '#6b7280' })}>{l.lineNumber ?? i + 1}</td>
         <td style={ts({ fontWeight: 700, color: lineColor })}>{l.lineType}</td>
         <td style={ts()}>
-          <div>{l.accountCombination || '—'}</div>
-          {(acctDescMap[l.accountCombination] || l.accountDescription) && (
-            <div style={{ fontSize: 10, color: '#6b7280', fontWeight: 400, whiteSpace: 'normal' }}>{acctDescMap[l.accountCombination] || l.accountDescription}</div>
+          <div style={{ fontSize: 11, fontWeight: 600 }}>{l.accountCombination || '—'}</div>
+          {acctDescMap[l.accountCombination] && (
+            <div style={{ fontSize: 9, color: '#6b7280', fontWeight: 400, whiteSpace: 'normal', marginTop: 2 }}>{acctDescMap[l.accountCombination]}</div>
           )}
         </td>
-        <td style={ts({ fontSize: 10, color: '#6b7280' })}>{l.accountingClass || '—'}</td>
-        <td style={ts({ fontSize: 10 })}>{l.description || '—'}</td>
+        <td style={ts({ fontSize: 10, lineHeight: 1.4, maxWidth: 250 })}>
+          {descLines.length > 0 ? descLines.map((line: string, idx: number) => (
+            <div key={idx} style={{ whiteSpace: 'normal' }}>{line}</div>
+          )) : '—'}
+        </td>
         <td style={ts({ textAlign: 'right', color: '#0572CE', fontWeight: l.enteredDr ? 600 : 400 })}>
           {l.enteredDr ? fmtAmount(l.enteredDr) : '—'}
         </td>
@@ -539,12 +548,12 @@ const ViewAcctModal: React.FC<{
             <div style={{ fontSize: 13, fontFamily: 'monospace' }}>{ledgerCcy}</div>
           </Col>
           <Col xs={12} md={6}>
-            <Typography.Text type="secondary" style={{ fontSize: 11 }}>SLA Header ID</Typography.Text>
-            <div style={{ fontWeight: 600, fontSize: 13, fontFamily: 'monospace', color: REDWOOD.info }}>{hdr?.headerId || '—'}</div>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>JE Batch ID</Typography.Text>
+            <div style={{ fontWeight: 600, fontSize: 13, fontFamily: 'monospace', color: REDWOOD.info }}>{hdr?.glBatchId || '—'}</div>
           </Col>
           <Col xs={12} md={6}>
-            <Typography.Text type="secondary" style={{ fontSize: 11 }}>GL Batch ID</Typography.Text>
-            <div style={{ fontWeight: 600, fontSize: 13, fontFamily: 'monospace', color: REDWOOD.info }}>{hdr?.glBatchId || '—'}</div>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>JE Header ID</Typography.Text>
+            <div style={{ fontWeight: 600, fontSize: 13, fontFamily: 'monospace', color: REDWOOD.info }}>{hdr?.glHeaderId || '—'}</div>
           </Col>
         </Row>
       </div>
@@ -563,25 +572,24 @@ const ViewAcctModal: React.FC<{
 
       {/* Journal Lines table */}
       <div style={{ fontWeight: 600, fontSize: 11, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        Journal Lines {!liveLines && <span style={{ color: '#D93025', fontSize: 10, fontWeight: 400 }}>(Fallback/Placeholder)</span>}
+        GL Journal Lines
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace', fontSize: 11 }}>
         <thead>
           <tr style={{ background: '#f9fafb' }}>
             <th style={ts({ textAlign: 'center', width: 32 })}>#</th>
-            <th style={ts({ textAlign: 'left', width: 38 })}>Dr/Cr</th>
-            <th style={ts({ textAlign: 'left' })}>Account</th>
-            <th style={ts({ textAlign: 'left', width: 90, fontSize: 10 })}>Class</th>
-            <th style={ts({ textAlign: 'left', width: 140, fontSize: 10 })}>Description</th>
+            <th style={ts({ textAlign: 'left', width: 38 })}>DR/CR</th>
+            <th style={ts({ textAlign: 'left', minWidth: 200 })}>GL Account</th>
+            <th style={ts({ textAlign: 'left', minWidth: 180, fontSize: 10 })}>Description</th>
             <th colSpan={2} style={ts({ textAlign: 'center', background: '#e6f4ff', color: '#0572CE' })}>
-              Entered ({entrCcy})
+              Entered
             </th>
             <th colSpan={2} style={ts({ textAlign: 'center', background: '#f6ffed', color: '#389e0d' })}>
-              Accounted ({ledgerCcy})
+              Accounted
             </th>
           </tr>
           <tr style={{ background: '#f9fafb' }}>
-            <th style={ts()} /><th style={ts()} /><th style={ts()} /><th style={ts()} /><th style={ts()} />
+            <th style={ts()} /><th style={ts()} /><th style={ts()} /><th style={ts()} />
             <th style={ts({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>DR</th>
             <th style={ts({ textAlign: 'right', background: '#e6f4ff', fontSize: 10 })}>CR</th>
             <th style={ts({ textAlign: 'right', background: '#f6ffed', fontSize: 10 })}>DR</th>
@@ -4074,10 +4082,35 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                     reference5: 'BANK_EXTERNAL_TRANSACTIONS',
                   }).then((res) => {
                     console.log('GL Journal Lines Response:', res);
-                    const lines = res.items || [];
-                    console.log('Parsed Lines:', lines);
-                    setViewAcctHeader(lines[0] || null);
-                    setViewAcctLines(lines);
+                    const items = res.items || [];
+                    if (items.length > 0) {
+                      const firstLine = items[0];
+                      const hdr = {
+                        glBatchName: firstLine.batch_name,
+                        glBatchId: firstLine.je_batch_id,
+                        glHeaderId: firstLine.je_header_id,
+                        periodName: firstLine.period_name,
+                        accountingDate: firstLine.accounting_date,
+                        moduleName: firstLine.je_category || 'Cash Management',
+                        postingStatus: firstLine.journal_status || 'POSTED',
+                      };
+                      const formattedLines = items.map((line: any) => ({
+                        lineId: line.line_id,
+                        lineNumber: line.line_num,
+                        lineType: line.entered_dr ? 'DR' : 'CR',
+                        accountCombination: line.account,
+                        accountDescription: line.description,
+                        enteredDr: line.entered_dr,
+                        enteredCr: line.entered_cr,
+                        accountedDr: line.accounted_dr,
+                        accountedCr: line.accounted_cr,
+                        currency: line.currency_code,
+                      }));
+                      console.log('Formatted Header:', hdr);
+                      console.log('Formatted Lines:', formattedLines);
+                      setViewAcctHeader(hdr);
+                      setViewAcctLines(formattedLines);
+                    }
                   }).catch(e => {
                     console.error('API Error:', e);
                   }).finally(() => setViewAcctLoading(false));
