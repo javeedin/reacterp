@@ -451,12 +451,25 @@ const ManagePayments: React.FC = () => {
     const q = gridSearch.trim().toLowerCase();
     return payments.filter(p => {
       if (acctStatusFilter !== 'all' && (p.accountingStatus || '').toUpperCase() !== acctStatusFilter) return false;
-      if (q && ![
-        p.paymentNumber, p.payee, p.supplierNumber, p.businessUnit, p.payeeSite,
-        p.paymentMethod, p.paymentType, p.paymentStatus, p.accountingStatus,
-        p.accountingDate, p.legalEntity, p.disbursementBankAccount, p.paymentCurrency,
-        p.paymentDescription,
-      ].some(v => v != null && String(v).toLowerCase().includes(q))) return false;
+      if (q) {
+        // Search across all visible data fields
+        const searchableFields = [
+          p.paymentNumber, p.checkId, p.paymentDocument, p.paymentStatus, p.reconciled,
+          p.payee, p.paymentDate, p.maturityDate, p.paymentAmount, p.paymentCurrency,
+          p.businessUnit, p.supplierNumber, p.payeeSite, p.paymentMethod, p.paymentType,
+          p.accountingDate, p.accountingStatus, p.voidDate, p.legalEntity, p.disbursementBankAccount,
+          p.voucherNumber, p.paymentReference, p.paymentProcessRequest, p.paymentDescription,
+          p.remitToAddress, p.remitToAccountNumber, p.paymentProcessProfile, p.documentCategory,
+          p.documentSequence, p.withheldAmount, p.paymentFileReference, p.conversionRate,
+          p.conversionDate, p.conversionRateType, p.anticipatedValueDate, p.stopDate, p.stopReason,
+          p.stopReference, p.thirdPartySupplier, p.lastUpdateDate, p.voidAccountingDate,
+          p.clearingDate, p.clearingAmount, p.clearingLedgerAmount, p.clearingValueDate,
+          p.clearingConversionRate, p.clearingConversionDate, p.clearingConversionRateType,
+          p.addressLine1, p.addressLine2, p.addressLine3, p.city, p.country, p.createdBy,
+          p.creationDate, p.legalEntityName, p.syncStatus,
+        ];
+        if (!searchableFields.some(v => v != null && String(v).toLowerCase().includes(q))) return false;
+      }
       return true;
     });
   }, [payments, acctStatusFilter, gridSearch]);
@@ -3550,17 +3563,29 @@ const ManagePayments: React.FC = () => {
                     { label: 'Posted', value: 'POSTED' },
                   ]}
                 />
-                <Input
-                  size="small"
-                  allowClear
-                  placeholder="Filter payments…"
-                  prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
-                  value={gridSearch}
-                  onChange={e => setGridSearch(e.target.value)}
-                  style={{ width: 210 }}
-                />
+                <Tooltip
+                  title="Search any visible data: Payment #, Check ID, Date, Amount, Status, Payee, Account, etc."
+                  placement="top"
+                >
+                  <Input
+                    size="small"
+                    allowClear
+                    placeholder="Filter payments…"
+                    prefix={<SearchOutlined style={{ color: REDWOOD.neutral600 }} />}
+                    value={gridSearch}
+                    onChange={e => setGridSearch(e.target.value)}
+                    style={{ width: 210 }}
+                  />
+                </Tooltip>
                 {(gridSearch || acctStatusFilter !== 'all') && (
-                  <Text type="secondary" style={{ fontSize: 12 }}>{displayPayments.length} shown</Text>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {displayPayments.length} of {payments.length} payments
+                    </Text>
+                    {gridSearch && (
+                      <Tag color="blue">Search: "{gridSearch}"</Tag>
+                    )}
+                  </div>
                 )}
                 {(() => {
                   if (selectedRowKeys.length !== 1) return null;
