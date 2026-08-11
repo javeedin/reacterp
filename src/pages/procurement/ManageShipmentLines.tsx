@@ -73,7 +73,7 @@ const isEmpty = (v: any) => v == null || v === '' || (typeof v === 'object' && !
 
 interface Filters {
   dateOp?: string; date?: Dayjs | null;
-  orderType?: string; order?: string; item?: string; itemDesc?: string; lineStatus?: string;
+  orderType?: string; order?: string; item?: string; itemDesc?: string; lineStatus?: string; orgCode?: string;
 }
 
 const ORDER_TYPES = ['Transfer order', 'Sales order', 'Purchase order', 'Return material authorization'];
@@ -446,13 +446,33 @@ const ManageShipmentLines: React.FC = () => {
   const [detail, setDetail] = useState<any | null>(null);
   const [orderDialog, setOrderDialog] = useState<any | null>(null);
   const [filterText, setFilterText] = useState('');
+  const [organizations, setOrganizations] = useState<any[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(false);
 
   const [filters, setFilters] = useState<Filters>({ dateOp: '>', date: dayjs().subtract(7, 'day') });
+
+  // Load inventory organizations on mount
+  useEffect(() => {
+    const loadOrgs = async () => {
+      setOrgsLoading(true);
+      try {
+        const url = `${FUSION_BASE}/inventoryOrganizations?onlyData=true&limit=500&fields=OrganizationCode,OrganizationName`;
+        const orgs = await fetchAllPages(url);
+        setOrganizations(orgs);
+      } catch (e: any) {
+        console.error('Failed to load organizations:', e);
+      } finally {
+        setOrgsLoading(false);
+      }
+    };
+    loadOrgs();
+  }, []);
 
   // Fusion here uses SQL LIKE with single quotes and % wildcards; dates unquoted.
   const buildQ = useCallback((f: Filters) => {
     const parts: string[] = [];
     if (f.date) parts.push(`CreationDate${f.dateOp || '>'}${dayjs(f.date).format('YYYY-MM-DD')}`);
+    if (f.orgCode) parts.push(`OrganizationCode='${f.orgCode}'`);
     if (f.orderType) parts.push(`OrderType='${f.orderType}'`);
     if (f.order?.trim()) parts.push(`Order='${f.order.trim()}'`);
     if (f.item?.trim()) parts.push(`Item LIKE '${f.item.trim()}%'`);
@@ -549,13 +569,20 @@ const ManageShipmentLines: React.FC = () => {
                   </Form.Item>
                 </Col>
                 <Col xs={12} sm={12} md={4}>
+                  <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Organization</Text>} style={{ marginBottom: 6 }}>
+                    <Select allowClear showSearch placeholder="Any" value={filters.orgCode} loading={orgsLoading}
+                      onChange={v => setFilters(f => ({ ...f, orgCode: v }))}
+                      options={organizations.map(o => ({ value: o.OrganizationCode, label: `${o.OrganizationCode} — ${o.OrganizationName}` }))} />
+                  </Form.Item>
+                </Col>
+                <Col xs={12} sm={12} md={4}>
                   <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Order Type</Text>} style={{ marginBottom: 6 }}>
                     <Select allowClear showSearch placeholder="Any" value={filters.orderType}
                       onChange={v => setFilters(f => ({ ...f, orderType: v }))}
                       options={ORDER_TYPES.map(s => ({ value: s, label: s }))} />
                   </Form.Item>
                 </Col>
-                <Col xs={12} sm={8} md={3}>
+                <Col xs={12} sm={8} md={2}>
                   <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Order</Text>} style={{ marginBottom: 6 }}>
                     <Input placeholder="Order #" allowClear value={filters.order}
                       onChange={e => setFilters(f => ({ ...f, order: e.target.value }))} onPressEnter={runSearch} />
@@ -584,7 +611,7 @@ const ManageShipmentLines: React.FC = () => {
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <Button type="primary" size="small" icon={<SearchOutlined />} loading={loading} onClick={runSearch}
                   style={{ background: REDWOOD.primary, borderColor: REDWOOD.primary }}>Search</Button>
-                <Button size="small" icon={<ClearOutlined />} onClick={() => setFilters({ dateOp: '>', date: dayjs().subtract(7, 'day') })}>Reset</Button>
+                <Button size="small" icon={<ClearOutlined />} onClick={() => setFilters({ dateOp: '>', date: dayjs().subtract(7, 'day'), orgCode: undefined })}>Reset</Button>
                 <Tooltip title="API Inspector — shipmentLines web service">
                   <Button size="small" icon={<ApiOutlined />} style={{ marginLeft: 'auto', borderColor: REDWOOD.info, color: REDWOOD.info }}
                     onClick={() => setApiOpen(true)}>API</Button>
