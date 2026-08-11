@@ -432,33 +432,49 @@ const ViewAcctModal: React.FC<{
     const rowBg     = i % 2 === 1 ? '#f9fafb' : undefined;
     const descLines = (l.accountDescription || '').split('\n').filter((s: string) => s.trim());
     return (
-      <tr key={l.lineId ?? i} style={{ background: rowBg, verticalAlign: 'top' }}>
-        <td style={ts({ textAlign: 'center', color: '#6b7280' })}>{l.lineNumber ?? i + 1}</td>
-        <td style={ts({ fontWeight: 700, color: lineColor })}>{l.lineType}</td>
-        <td style={ts()}>
-          <div style={{ fontSize: 11, fontWeight: 600 }}>{l.accountCombination || '—'}</div>
-          {acctDescMap[l.accountCombination] && (
-            <div style={{ fontSize: 9, color: '#6b7280', fontWeight: 400, whiteSpace: 'normal', marginTop: 2 }}>{acctDescMap[l.accountCombination]}</div>
-          )}
-        </td>
-        <td style={ts({ fontSize: 10, lineHeight: 1.4, maxWidth: 250 })}>
-          {descLines.length > 0 ? descLines.map((line: string, idx: number) => (
-            <div key={idx} style={{ whiteSpace: 'normal' }}>{line}</div>
-          )) : '—'}
-        </td>
-        <td style={ts({ textAlign: 'right', color: '#0572CE', fontWeight: l.enteredDr ? 600 : 400 })}>
-          {l.enteredDr ? fmtAmount(l.enteredDr) : '—'}
-        </td>
-        <td style={ts({ textAlign: 'right', color: '#389e0d', fontWeight: l.enteredCr ? 600 : 400 })}>
-          {l.enteredCr ? fmtAmount(l.enteredCr) : '—'}
-        </td>
-        <td style={ts({ textAlign: 'right', color: '#0572CE', fontWeight: l.accountedDr ? 600 : 400 })}>
-          {l.accountedDr ? fmtAmount(l.accountedDr) : '—'}
-        </td>
-        <td style={ts({ textAlign: 'right', color: '#389e0d', fontWeight: l.accountedCr ? 600 : 400 })}>
-          {l.accountedCr ? fmtAmount(l.accountedCr) : '—'}
-        </td>
-      </tr>
+      <>
+        <tr key={l.lineId ?? i} style={{ background: rowBg, verticalAlign: 'top' }}>
+          <td style={ts({ textAlign: 'center', color: '#6b7280' })}>{l.lineNumber ?? i + 1}</td>
+          <td style={ts({ fontWeight: 700, color: lineColor })}>{l.lineType}</td>
+          <td style={ts()}>
+            <div style={{ fontSize: 11, fontWeight: 600 }}>{l.accountCombination || '—'}</div>
+            {acctDescMap[l.accountCombination] && (
+              <div style={{ fontSize: 9, color: '#6b7280', fontWeight: 400, whiteSpace: 'normal', marginTop: 2 }}>{acctDescMap[l.accountCombination]}</div>
+            )}
+          </td>
+          <td style={ts({ fontSize: 10, lineHeight: 1.4, maxWidth: 250 })}>
+            {descLines.length > 0 ? descLines.map((line: string, idx: number) => (
+              <div key={idx} style={{ whiteSpace: 'normal' }}>{line}</div>
+            )) : '—'}
+          </td>
+          <td style={ts({ textAlign: 'right', color: '#0572CE', fontWeight: l.enteredDr ? 600 : 400 })}>
+            {l.enteredDr ? fmtAmount(l.enteredDr) : '—'}
+          </td>
+          <td style={ts({ textAlign: 'right', color: '#389e0d', fontWeight: l.enteredCr ? 600 : 400 })}>
+            {l.enteredCr ? fmtAmount(l.enteredCr) : '—'}
+          </td>
+          <td style={ts({ textAlign: 'right', color: '#0572CE', fontWeight: l.accountedDr ? 600 : 400 })}>
+            {l.accountedDr ? fmtAmount(l.accountedDr) : '—'}
+          </td>
+          <td style={ts({ textAlign: 'right', color: '#389e0d', fontWeight: l.accountedCr ? 600 : 400 })}>
+            {l.accountedCr ? fmtAmount(l.accountedCr) : '—'}
+          </td>
+        </tr>
+        {i === 0 && (
+          <tr style={{ background: '#f0f5ff', verticalAlign: 'top' }}>
+            <td colSpan={8} style={ts({ padding: '8px 10px' })}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#0572CE', marginBottom: 6 }}>GL References</div>
+              <Row gutter={[12, 4]} style={{ fontSize: 11 }}>
+                <Col xs={12} md={6}><span style={{ color: '#6b7280' }}>Ref1:</span> <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{l.reference1 || '—'}</span></Col>
+                <Col xs={12} md={6}><span style={{ color: '#6b7280' }}>Ref2:</span> <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{l.reference2 || '—'}</span></Col>
+                <Col xs={12} md={6}><span style={{ color: '#6b7280' }}>Ref3:</span> <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{l.reference3 || '—'}</span></Col>
+                <Col xs={12} md={6}><span style={{ color: '#6b7280' }}>Ref4:</span> <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{l.reference4 || '—'}</span></Col>
+                <Col xs={12} md={6}><span style={{ color: '#6b7280' }}>Ref5:</span> <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{l.reference5 || '—'}</span></Col>
+              </Row>
+            </td>
+          </tr>
+        )}
+      </>
     );
   });
 
@@ -3299,7 +3315,32 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       { dc: 'CR', account: r.crAccount, desc: r.crAccountDesc, entDr: 0, entCr: r.amount, accDr: 0, accCr: acc },
     ];
     return (
-      <table style={{ width: '100%', borderCollapse: 'collapse', margin: '2px 0' }}>
+      <div>
+        {/* References Section */}
+        <div style={{ background: '#f0f5ff', border: '1px solid #91caff', borderRadius: 4, padding: 10, marginBottom: 12 }}>
+          <Typography.Text style={{ fontSize: 11, fontWeight: 600, color: '#0572CE', display: 'block', marginBottom: 8 }}>GL References</Typography.Text>
+          <Row gutter={[12, 8]}>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 10 }}>Reference1 (Trx #)</Typography.Text>
+              <div style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{r.txnNumber || r.extTxnId}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 10 }}>Reference2 (Ext Txn ID)</Typography.Text>
+              <div style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{r.extTxnId}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 10 }}>Reference4 (Business Unit)</Typography.Text>
+              <div style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{r.bu || '—'}</div>
+            </Col>
+            <Col xs={12} md={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 10 }}>Reference5 (Source)</Typography.Text>
+              <div style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>BANK_EXTERNAL_TRANSACTIONS</div>
+            </Col>
+          </Row>
+        </div>
+
+        {/* Journal Lines Table */}
+        <table style={{ width: '100%', borderCollapse: 'collapse', margin: '2px 0' }}>
         <thead>
           <tr style={{ background: '#f9fafb' }}>
             <th style={{ ...hd, textAlign: 'left', width: 44 }}>Dr/Cr</th>
@@ -3431,7 +3472,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             userCurrencyConversionType: 'User',
             accountCombination: l.accountCombination,
             chartOfAccountsName: 'Chart of Accounts',
-            reference1: String(txn.externalTransactionId),
+            reference1: String(txn.transactionId),
             reference2: String(txn.externalTransactionId),
             reference3: l.accountingClass || null,
             reference4: txn.businessUnitName || null,
@@ -3531,6 +3572,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
       const crAccount = direction === 'DR' ? txn.offsetAccountCombination : txn.assetAccountCombination;
       return {
         extTxnId:      txn.externalTransactionId,
+        txnNumber:     txn.transactionId,
         txnDate:       date,
         periodName:    derivePeriodName(new Date(date)),
         amount:        absAmount,
@@ -3649,7 +3691,7 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
             userCurrencyConversionType: 'User',
             accountCombination: l.accountCombination,
             chartOfAccountsName: 'Chart of Accounts',
-            reference1: String(txn.externalTransactionId),
+            reference1: String(txn.transactionId),
             reference2: String(txn.externalTransactionId),
             reference3: l.accountingClass || null,
             reference4: txn.businessUnitName || null,
@@ -4111,6 +4153,11 @@ const ManageExternalTransactions: React.FC<{ module?: 'ap' | 'cash' }> = ({ modu
                         accountedDr: line.accounted_dr,
                         accountedCr: line.accounted_cr,
                         currency: line.currency_code,
+                        reference1: line.reference1,
+                        reference2: line.reference2,
+                        reference3: line.reference3,
+                        reference4: line.reference4,
+                        reference5: line.reference5,
                       }));
                       console.log('Formatted Header:', hdr);
                       console.log('Formatted Lines:', formattedLines);
