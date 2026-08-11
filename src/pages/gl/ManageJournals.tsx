@@ -420,6 +420,8 @@ const ManageJournals: React.FC = () => {
   // API payload inspector state
   const [apiPayloadVisible, setApiPayloadVisible] = useState(false);
   const [apiPayload, setApiPayload] = useState<{ url: string; method: string; body: string } | null>(null);
+  const [apiTestLoading, setApiTestLoading] = useState(false);
+  const [apiTestResponse, setApiTestResponse] = useState<{ status: number; body: string } | null>(null);
 
   // Floating panel state
   const [activePanel, setActivePanel] = useState<'none' | 'tasks' | 'reports'>('none');
@@ -6368,10 +6370,54 @@ const ManageJournals: React.FC = () => {
           </Space>
         }
         open={apiPayloadVisible}
-        onCancel={() => setApiPayloadVisible(false)}
+        onCancel={() => {
+          setApiPayloadVisible(false);
+          setApiTestResponse(null);
+        }}
         width={900}
         footer={
-          <Button onClick={() => setApiPayloadVisible(false)}>Close</Button>
+          <Space>
+            <Button onClick={() => {
+              setApiPayloadVisible(false);
+              setApiTestResponse(null);
+            }}>Close</Button>
+            <Button
+              type="primary"
+              loading={apiTestLoading}
+              onClick={async () => {
+                if (!apiPayload) return;
+                setApiTestLoading(true);
+                try {
+                  const payload = JSON.parse(apiPayload.body);
+                  const response = await fetch(apiPayload.url, {
+                    method: apiPayload.method,
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    body: apiPayload.body,
+                  });
+                  const result = await response.json();
+                  setApiTestResponse({
+                    status: response.status,
+                    body: JSON.stringify(result, null, 2),
+                  });
+                  console.log('[API Test] Response:', { status: response.status, result });
+                } catch (error) {
+                  console.error('[API Test] Error:', error);
+                  setApiTestResponse({
+                    status: 500,
+                    body: JSON.stringify({
+                      status: 'ERROR',
+                      message: error instanceof Error ? error.message : 'Request failed',
+                    }, null, 2),
+                  });
+                } finally {
+                  setApiTestLoading(false);
+                }
+              }}
+              icon={<CloudOutlined />}
+            >
+              Test Request
+            </Button>
+          </Space>
         }
         destroyOnClose
       >
@@ -6420,6 +6466,35 @@ const ManageJournals: React.FC = () => {
                 Copy Payload
               </Button>
             </div>
+
+            {/* Test Response */}
+            {apiTestResponse && (
+              <div>
+                <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                  Test Response {apiTestResponse.status >= 200 && apiTestResponse.status < 300 ? (
+                    <Tag color="green">{apiTestResponse.status}</Tag>
+                  ) : (
+                    <Tag color="red">{apiTestResponse.status}</Tag>
+                  )}
+                </Text>
+                <div style={{ background: '#f5f5f5', border: '1px solid #d9d9d9', borderRadius: 4, padding: 12, maxHeight: 200, overflow: 'auto' }}>
+                  <pre style={{ margin: 0, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {apiTestResponse.body}
+                  </pre>
+                </div>
+                <Button
+                  size="small"
+                  style={{ marginTop: 8 }}
+                  icon={<CopyOutlined />}
+                  onClick={() => {
+                    navigator.clipboard.writeText(apiTestResponse.body);
+                    message.success('Response copied');
+                  }}
+                >
+                  Copy Response
+                </Button>
+              </div>
+            )}
 
             {/* Debug Info */}
             <Alert
