@@ -2145,20 +2145,22 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
             )}
             {getAccountingStatusDisplay()}
             {!isFusionSynced && slaStatus?.accountingStatus !== 'POSTED' && (
-              <Tooltip title="Create accounting entries in DRAFT">
+              <Tooltip title={isVoided ? "Cannot create accounting for voided payment" : "Create accounting entries in DRAFT"}>
                 <Button
                   icon={<AccountBookOutlined />}
                   onClick={handleCreateAccounting}
+                  disabled={isVoided}
                 >
                   {slaStatus?.accountingStatus === 'DRAFT' ? 'Re-create Accounting' : 'Create Accounting'}
                 </Button>
               </Tooltip>
             )}
             {slaStatus?.exists && slaStatus.accountingStatus === 'DRAFT' && (
-              <Tooltip title="Post accounting to General Ledger and lock">
+              <Tooltip title={isVoided ? "Cannot post accounting for voided payment" : "Post accounting to General Ledger and lock"}>
                 <Button
                   icon={<SendOutlined />}
                   loading={slaActionLoading}
+                  disabled={isVoided}
                   style={{ borderColor: REDWOOD.info, color: REDWOOD.info }}
                   onClick={handlePostToLedgerOpen}
                 >
@@ -2602,7 +2604,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
           <Space>
             <Button
               onClick={handleCreateAccounting}
-              disabled={acctLoading}
+              disabled={acctLoading || isVoided}
               icon={<PlayCircleOutlined />}
             >
               Run Again
@@ -3039,6 +3041,7 @@ const PaymentDetail: React.FC<PaymentDetailProps> = ({ payment, onClose }) => {
               type="primary"
               icon={<SendOutlined />}
               loading={slaActionLoading}
+              disabled={isVoided}
               onClick={() => { setViewAcctOpen(false); handlePostToLedgerOpen(); }}
             >
               Post Accounting
