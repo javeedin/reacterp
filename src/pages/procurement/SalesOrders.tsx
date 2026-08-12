@@ -6309,8 +6309,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     const bu = bUnits.find(b => b.businessUnitName === buName);
     if (bu) {
       const baseCcy = pf(bu, ['paymentCurrency', 'ledgerCurrency', 'invoiceCurrency']);
-      setBranchBUData({ baseCurrency: baseCcy });
-      branchSalesForm.setFieldsValue({ currency: baseCcy });
+      // Calculate conversion rate from transaction currency to base currency
+      const txnCcy = hdr.txnCurrency || branchSalesForm.getFieldValue('currency');
+      const conversionRate = (txnCcy === baseCcy) ? 1 : hdr.rate || 1;
+      setBranchBUData({ baseCurrency: baseCcy, conversionRate });
 
       // Fetch inventory orgs filtered by Business Unit Name (from Fusion)
       const filterQuery = `BusinessUnitName = '${buName}'`;
