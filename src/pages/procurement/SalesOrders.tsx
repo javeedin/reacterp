@@ -6317,7 +6317,6 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       // Fetch inventory orgs filtered by Management Business Unit Name (from Fusion)
       const filterQuery = `ManagementBusinessUnitName=${buName}`;
       const url = `${FUSION_BASE}/inventoryOrganizations?q=${filterQuery}&onlyData=true&limit=500`;
-      trackApiCall(`Ship-To Locations (${buName})`, url);
 
       console.log('Fetching inventory organizations:', { buName, url, headers: FUSION_HDRS });
       fetch(url, { headers: FUSION_HDRS })
