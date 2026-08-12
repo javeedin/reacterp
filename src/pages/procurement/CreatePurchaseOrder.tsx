@@ -266,6 +266,8 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
   const [itemsLoading, setItemsLoading] = useState(false);
   const [itemCacheTs, setItemCacheTs] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [itemSearchType, setItemSearchType] = useState<'number' | 'description'>('number');
+  const [itemSearchLoading, setItemSearchLoading] = useState(false);
   const [selectedItemKeys, setSelectedItemKeys] = useState<string[]>([]);
   const [lovLoading, setLovLoading] = useState(false);
   const [sitesLoading, setSitesLoading] = useState(false);
@@ -2231,52 +2233,71 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
     }
   };
 
-  const openAddItem = async () => {
+  const openAddItem = () => {
     if (!header) return;
-    const url = `${ORDS_BASE}/inventory/itemmaster?org=${header.shipToOrg}`;
-    setAddItemApiUrl(`${ORDS_DIRECT}/inventory/itemmaster?org=${header.shipToOrg}`);
-    setAddItemOpen(true); setSearchTerm(''); setSelectedItemKeys([]);
-    setAddItemTab('browse'); setPastedRows([]); setPasteText('');
+    setAddItemOpen(true);
+    setSearchTerm('');
+    setSelectedItemKeys([]);
+    setAddItemTab('browse');
+    setPastedRows([]);
+    setPasteText('');
+    setItems([]);
+    setItemCacheTs('');
+    setItemSearchType('number');
+  };
 
-    // Load from localStorage cache first — no network call needed
-    const cached = loadItemmasterCache(header.shipToOrg);
-    if (cached) {
-      setItems(cached.items);
-      setItemCacheTs(cached.ts);
+  const searchItemsV2 = async () => {
+    if (!header || !searchTerm.trim()) {
+      message.warning('Please enter a search term');
       return;
     }
 
-    // Cache miss — fetch from API and save to localStorage
-    setItemsLoading(true);
+    setItemSearchLoading(true);
     try {
-      const all = await fetchLOV(url, false);
-      setItems(all);
-      if (all.length === 0) {
-        message.warning(`Item master returned 0 records for org "${header.shipToOrg}". Check that the org code is correct.`);
+      let query = '';
+      if (itemSearchType === 'number') {
+        query = `ItemNumber='${encodeURIComponent(searchTerm.trim())}'`;
       } else {
-        saveItemmasterCache(header.shipToOrg, all);
-        setItemCacheTs(new Date().toISOString());
+        query = `Description LIKE '%${encodeURIComponent(searchTerm.trim())}%'`;
+      }
+
+      const url = `${FUSION_BASE}/itemsV2?q=${encodeURIComponent(query)}&limit=100&onlyData=true`;
+      setAddItemApiUrl(`GET itemsV2?q=${query}`);
+
+      const res = await fetch(url, { headers: FUSION_HDRS });
+      if (!res.ok) throw new Error(`API returned ${res.status}`);
+
+      const data = await res.json();
+      const results = data.items ?? data.data ?? [];
+
+      if (results.length === 0) {
+        message.info(`No items found matching "${searchTerm}"`);
+        setItems([]);
+      } else {
+        const mapped = results.map((item: any) => ({
+          item_number: item.ItemNumber,
+          description: item.Description,
+          primary_uom_code: item.PrimaryUnitOfMeasureCode,
+          inventory_item_status_code: item.InventoryItemStatusCode,
+          ...item
+        }));
+        setItems(mapped);
+        message.success(`Found ${results.length} item(s)`);
       }
     } catch (e: any) {
+      message.error(`Search failed: ${e?.message ?? 'Network error'}`);
       setItems([]);
-      message.error(`Failed to load item master: ${e?.message ?? 'Network or CORS error — check browser console'}`);
-    } finally { setItemsLoading(false); }
+    } finally {
+      setItemSearchLoading(false);
+    }
   };
 
   const refreshItems = async () => {
-    if (!header) return;
-    const url = `${ORDS_BASE}/inventory/itemmaster?org=${header.shipToOrg}`;
-    setItemsLoading(true);
-    try {
-      const all = await fetchLOV(url, false);
-      setItems(all);
-      saveItemmasterCache(header.shipToOrg, all);
-      const ts = new Date().toISOString();
-      setItemCacheTs(ts);
-      message.success(`Item master refreshed — ${all.length} items cached`);
-    } catch (e: any) {
-      message.error(`Failed to refresh item master: ${e?.message ?? 'Network or CORS error'}`);
-    } finally { setItemsLoading(false); }
+    if (items.length === 0 || !searchTerm.trim()) {
+      message.info('Perform a search first, then use Refresh to get updated results');
+      return;
+    }
+    await searchItemsV2();
   };
 
   const exportItemsExcel = () => {
@@ -4155,16 +4176,54 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                 label: 'Browse Items',
                 children: (
                   <>
-                    <div style={{ marginBottom: 10 }}>
-                      <Input placeholder="Search by item number or description…" value={searchTerm}
-                        onChange={e => setSearchTerm(e.target.value)} allowClear
-                        prefix={<SearchOutlined style={{ color: C.textLight }} />} />
-                    </div>
-                    {itemsLoading ? (
-                      <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
-                        <Spin tip="Loading all items (paginating)…" />
+                    <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4, color: C.textMid }}>Search Type</div>
+                        <Segmented
+                          value={itemSearchType}
+                          onChange={v => setItemSearchType(v as 'number' | 'description')}
+                          options={[
+                            { label: 'Item Number', value: 'number' },
+                            { label: 'Description', value: 'description' }
+                          ]}
+                          style={{ width: '100%' }}
+                        />
                       </div>
-                    ) : (
+                      <div style={{ flex: 2 }}>
+                        <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4, color: C.textMid }}>
+                          {itemSearchType === 'number' ? 'Item Number' : 'Description'}
+                        </div>
+                        <Input
+                          placeholder={itemSearchType === 'number' ? 'Enter item number…' : 'Enter description…'}
+                          value={searchTerm}
+                          onChange={e => setSearchTerm(e.target.value)}
+                          onPressEnter={searchItemsV2}
+                          allowClear
+                          prefix={<SearchOutlined style={{ color: C.textLight }} />}
+                        />
+                      </div>
+                      <Button
+                        type="primary"
+                        icon={<SearchOutlined />}
+                        loading={itemSearchLoading}
+                        onClick={searchItemsV2}
+                        style={{ background: C.blue, borderColor: C.blue }}
+                      >
+                        Search
+                      </Button>
+                    </div>
+
+                    {items.length === 0 && !itemSearchLoading && (
+                      <div style={{ display: 'flex', justifyContent: 'center', padding: 60, color: C.textLight }}>
+                        <Text type="secondary">Enter a search term and click Search to find items</Text>
+                      </div>
+                    )}
+                    {itemSearchLoading && (
+                      <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
+                        <Spin tip="Searching items…" />
+                      </div>
+                    )}
+                    {items.length > 0 && !itemSearchLoading && (
                       <Table columns={itemTableCols} dataSource={filteredItems} rowKey={r => String(r.item_number)}
                         size="small" bordered
                         pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10','20','50','100'],
