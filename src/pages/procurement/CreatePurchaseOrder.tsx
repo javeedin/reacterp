@@ -381,7 +381,13 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
       // Auto-populate Bill To BU with same value as Procurement BU
       headerForm.setFieldValue('billTo', buName);
       // Auto-populate currency from ledgerCurrency of the selected Business Unit
-      if (bu.ledgerCurrency || bu.functional_currency) headerForm.setFieldValue('currency', bu.ledgerCurrency || bu.functional_currency);
+      const buCurrency = bu.ledgerCurrency || bu.functional_currency;
+      if (buCurrency) {
+        headerForm.setFieldValue('currency', buCurrency);
+        console.log('Procurement BU Changed:', { buName, buCurrency, buData: { ledgerCurrency: bu.ledgerCurrency, functional_currency: bu.functional_currency } });
+      } else {
+        console.warn('No currency found for BU:', { buName, buData: bu });
+      }
       setSelectedBuCompanyCode(bu.bu_id ? String(bu.bu_id) : '');
 
       // Filter inventory orgs based on the selected BU (BusinessUnitId or BusinessUnitName)
