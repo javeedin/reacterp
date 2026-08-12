@@ -2268,8 +2268,8 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
         query = `ItemDescription LIKE '%${encodeURIComponent(searchTerm.trim())}%';OrganizationCode=${org}`;
       }
 
-      const url = `${FUSION_BASE}/itemsV2?q=${encodeURIComponent(query)}&limit=100&onlyData=true`;
-      setAddItemApiUrl(`GET itemsV2?q=${query}`);
+      const url = `${FUSION_BASE}/itemsV2?q=${encodeURIComponent(query)}&fields=ItemNumber,ItemDescription,PrimaryUOMValue,ItemStatusValue&limit=100&onlyData=true`;
+      setAddItemApiUrl(`GET itemsV2?q=${query}&fields=ItemNumber,ItemDescription,PrimaryUOMValue,ItemStatusValue&limit=100&onlyData=true`);
 
       const res = await fetch(url, { headers: FUSION_HDRS });
       if (!res.ok) throw new Error(`API returned ${res.status}`);
