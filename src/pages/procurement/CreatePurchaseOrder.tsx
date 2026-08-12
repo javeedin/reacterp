@@ -2737,26 +2737,24 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                     </div>
                   </Col>
                 )}
-                <Row gutter={[12, 0]}>
-                  {selectedBuBaseCurrency && (
-                    <Col span={12}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 10px', background: '#f0f5ff', borderRadius: 6, border: '1px solid #d6e4ff' }}>
-                        <DollarOutlined style={{ color: C.blue, fontSize: 13 }} />
-                        <Text style={{ fontSize: 12, color: C.textMid }}>Base Currency:</Text>
-                        <Text strong style={{ fontSize: 13, color: C.blue, fontFamily: 'monospace' }}>{selectedBuBaseCurrency}</Text>
-                      </div>
-                    </Col>
-                  )}
-                  {fxRate && headerForm.getFieldValue('currency') && headerForm.getFieldValue('currency') !== selectedBuBaseCurrency && (
-                    <Col span={12}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 10px', background: '#f0f5ff', borderRadius: 6, border: '1px solid #d6e4ff' }}>
-                        <SwapOutlined style={{ color: C.blue, fontSize: 13 }} />
-                        <Text style={{ fontSize: 12, color: C.textMid }}>Conversion Rate:</Text>
-                        <Text strong style={{ fontSize: 13, color: C.blue, fontFamily: 'monospace' }}>1 {headerForm.getFieldValue('currency')} = {fxRate.rate.toFixed(4)} {selectedBuBaseCurrency}</Text>
-                      </div>
-                    </Col>
-                  )}
-                </Row>
+                {selectedBuBaseCurrency && (
+                  <Col span={12}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 10px', background: '#f0f5ff', borderRadius: 6, border: '1px solid #d6e4ff' }}>
+                      <DollarOutlined style={{ color: C.blue, fontSize: 13 }} />
+                      <Text style={{ fontSize: 12, color: C.textMid }}>Base Currency:</Text>
+                      <Text strong style={{ fontSize: 13, color: C.blue, fontFamily: 'monospace' }}>{selectedBuBaseCurrency}</Text>
+                    </div>
+                  </Col>
+                )}
+                {fxRate && headerForm.getFieldValue('currency') && headerForm.getFieldValue('currency') !== selectedBuBaseCurrency && (
+                  <Col span={12}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 10px', background: '#f0f5ff', borderRadius: 6, border: '1px solid #d6e4ff' }}>
+                      <SwapOutlined style={{ color: C.blue, fontSize: 13 }} />
+                      <Text style={{ fontSize: 12, color: C.textMid }}>Conversion Rate:</Text>
+                      <Text strong style={{ fontSize: 13, color: C.blue, fontFamily: 'monospace' }}>1 {headerForm.getFieldValue('currency')} = {fxRate.rate.toFixed(4)} {selectedBuBaseCurrency}</Text>
+                    </div>
+                  </Col>
+                )}
                 <Col span={8}>
                   <Form.Item name="orderDate" label="Order Date" rules={[{ required: true }]}>
                     <DatePicker style={{ width: '100%' }} format="D-MMM-YYYY" disabled={!selectedBuCompanyCode} />
