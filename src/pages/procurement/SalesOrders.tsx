@@ -7945,9 +7945,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             {!returnMode && anyAwaitingBilling && <Button icon={<DollarOutlined />} onClick={() => setAutoInvoiceOpen(true)}
               style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary }}>Create AR Invoice</Button>}
             {isBranchSales && isDraftStatus && <Button icon={<ShoppingOutlined />} onClick={() => {
-              setSavedOrderNumber(createdOrderNumber || orderNumber);
+              const displayOrderNo = editMode ? (editOrder?.SourceTransactionNumber ?? orderNumber) : (createdOrderNumber || orderNumber);
+              setSavedOrderNumber(displayOrderNo);
               branchSalesForm.setFieldsValue({
-                salesOrderNumber: createdOrderNumber || orderNumber,
+                salesOrderNumber: displayOrderNo,
                 currency: hdr.txnCurrency,
                 branchBusinessUnit: hdr.branchBU,
                 needByDate: dayjs().add(7, 'days')
