@@ -2254,11 +2254,18 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
 
     setItemSearchLoading(true);
     try {
+      const org = header.shipToOrg;
+      if (!org) {
+        message.warning('Select a Ship-to Organization first');
+        setItemSearchLoading(false);
+        return;
+      }
+
       let query = '';
       if (itemSearchType === 'number') {
-        query = `ItemNumber='${encodeURIComponent(searchTerm.trim())}'`;
+        query = `ItemNumber='${encodeURIComponent(searchTerm.trim())}';OrganizationCode=${org}`;
       } else {
-        query = `Description LIKE '%${encodeURIComponent(searchTerm.trim())}%'`;
+        query = `ItemDescription LIKE '%${encodeURIComponent(searchTerm.trim())}%';OrganizationCode=${org}`;
       }
 
       const url = `${FUSION_BASE}/itemsV2?q=${encodeURIComponent(query)}&limit=100&onlyData=true`;
@@ -2271,18 +2278,18 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
       const results = data.items ?? data.data ?? [];
 
       if (results.length === 0) {
-        message.info(`No items found matching "${searchTerm}"`);
+        message.info(`No items found matching "${searchTerm}" in organization ${org}`);
         setItems([]);
       } else {
         const mapped = results.map((item: any) => ({
           item_number: item.ItemNumber,
-          description: item.Description,
-          primary_uom_code: item.PrimaryUnitOfMeasureCode,
-          inventory_item_status_code: item.InventoryItemStatusCode,
+          description: item.ItemDescription,
+          primary_uom_code: item.PrimaryUOMValue || item.PrimaryUnitOfMeasureCode,
+          inventory_item_status_code: item.ItemStatusValue,
           ...item
         }));
         setItems(mapped);
-        message.success(`Found ${results.length} item(s)`);
+        message.success(`Found ${results.length} item(s) in ${org}`);
       }
     } catch (e: any) {
       message.error(`Search failed: ${e?.message ?? 'Network error'}`);
