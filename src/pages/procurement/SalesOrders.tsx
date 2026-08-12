@@ -4586,7 +4586,13 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
   const [branchSalesModalOpen, setBranchSalesModalOpen] = useState(false);
   const [branchForm] = Form.useForm();
   const [custSearchModalOpen, setCustSearchModalOpen] = useState(false);
+  const [apiInspectorOpen, setApiInspectorOpen] = useState(false);
+  const [apiCalls, setApiCalls] = useState<Array<{ name: string; url: string; timestamp: string }>>([]);
   const instance = getFusionInstance();
+
+  const trackApiCall = (name: string, url: string) => {
+    setApiCalls(prev => [...prev, { name, url, timestamp: new Date().toLocaleTimeString() }]);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -4600,7 +4606,9 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
 
   const fetchOrderTypes = () => {
     setOrderTypeOpts([]);
-    fetch(`${FUSION_BASE}/standardLookups?q=LookupType LIKE 'ORA_DOO_ORDER_TYPES%'&expand=lookupCodes&onlyData=true&limit=500`, { headers: FUSION_HDRS })
+    const url = `${FUSION_BASE}/standardLookups?q=LookupType LIKE 'ORA_DOO_ORDER_TYPES%'&expand=lookupCodes&onlyData=true&limit=500`;
+    trackApiCall('Order Types (standardLookups)', url);
+    fetch(url, { headers: FUSION_HDRS })
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => {
         const items = d.items ?? [];
@@ -4610,9 +4618,22 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
             .filter((lc: any) => lc.EnabledFlag === 'Y')
             .map((lc: any) => {
               lookupMap.set(lc.LookupCode, lc);
-              return { value: lc.LookupCode, label: lc.Meaning };
+              const isBranch = lc.Tag === 'BRANCH SALES';
+              return {
+                value: lc.LookupCode,
+                label: isBranch ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span>{lc.Meaning}</span>
+                    <Tag color="orange" style={{ fontSize: '11px', margin: 0 }}>BRANCH SALES</Tag>
+                  </div>
+                ) : lc.Meaning
+              };
             })
-            .sort((a: any, b: any) => a.label.localeCompare(b.label));
+            .sort((a: any, b: any) => {
+              const aLabel = typeof a.label === 'string' ? a.label : a.label.props.children[0];
+              const bLabel = typeof b.label === 'string' ? b.label : b.label.props.children[0];
+              return aLabel.localeCompare(bLabel);
+            });
           setOrderTypeOpts(opts);
           setOrderTypeLookup(lookupMap);
           message.success('✓ Order types refreshed');
@@ -4743,10 +4764,13 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
   return (
     <>
       <Modal open={open} onCancel={onClose} maskClosable={false} width={960} styles={{ body: { background: REDWOOD.neutral100, padding: 12, maxHeight: 'calc(100vh - 140px)', overflowY: 'auto' } }}
-      title={<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <span style={{ width: 38, height: 38, borderRadius: 10, background: `linear-gradient(135deg, ${REDWOOD.primary}, ${REDWOOD.primary}bb)`, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, boxShadow: `0 3px 10px ${REDWOOD.primary}40` }}><PlusOutlined /></span>
-        <div><div style={{ fontSize: 16, fontWeight: 700, color: REDWOOD.neutral900 }}>Register New Order</div>
-          <div style={{ fontSize: 12, color: REDWOOD.neutral600, fontWeight: 400 }}>Set the order header, then proceed to add lines</div></div>
+      title={<div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ width: 38, height: 38, borderRadius: 10, background: `linear-gradient(135deg, ${REDWOOD.primary}, ${REDWOOD.primary}bb)`, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, boxShadow: `0 3px 10px ${REDWOOD.primary}40` }}><PlusOutlined /></span>
+          <div><div style={{ fontSize: 16, fontWeight: 700, color: REDWOOD.neutral900 }}>Register New Order</div>
+            <div style={{ fontSize: 12, color: REDWOOD.neutral600, fontWeight: 400 }}>Set the order header, then proceed to add lines</div></div>
+        </div>
+        <Button type="text" size="small" icon={<ApiOutlined />} onClick={() => setApiInspectorOpen(true)} title="View API calls" style={{ color: REDWOOD.info }} />
       </div>}
       footer={<Space><Button onClick={onClose}>Cancel</Button>
         <Button type="primary" icon={<ExportOutlined />} style={{ background: REDWOOD.info, borderColor: REDWOOD.info }} onClick={submit}>Proceed to Lines</Button></Space>}>
@@ -4822,6 +4846,43 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
           <Col xs={24}><Form.Item label="Remarks" name="remarks" style={{ marginBottom: 0 }}><Input.TextArea disabled={!buName} rows={1} placeholder="Optional notes…" size="small" /></Form.Item></Col>
         </Section>
       </Form>
+    </Modal>
+
+    {/* API Inspector Modal */}
+    <Modal
+      title={<Space><ApiOutlined style={{ color: REDWOOD.info }} /><span>API Inspector — Register New Order</span></Space>}
+      open={apiInspectorOpen}
+      onCancel={() => setApiInspectorOpen(false)}
+      footer={null}
+      width={800}
+      bodyStyle={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}
+    >
+      {apiCalls.length === 0 ? (
+        <Empty description="No API calls tracked yet" style={{ marginTop: 20 }} />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {apiCalls.map((call, idx) => (
+            <Card key={idx} size="small" style={{ background: REDWOOD.neutral100 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: REDWOOD.neutral900, marginBottom: 6 }}>{call.name}</div>
+                  <div style={{ fontSize: 11, fontFamily: 'monospace', color: REDWOOD.neutral600, wordBreak: 'break-all', marginBottom: 6 }}>{call.url}</div>
+                  <div style={{ fontSize: 10, color: REDWOOD.neutral500 }}>📍 {call.timestamp}</div>
+                </div>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CopyOutlined />}
+                  onClick={() => {
+                    navigator.clipboard.writeText(call.url);
+                    message.success('URL copied');
+                  }}
+                />
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
     </Modal>
 
     <CustomerSearchBipModal
