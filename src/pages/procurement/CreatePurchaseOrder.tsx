@@ -1059,6 +1059,13 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
   const totalTax   = lines.reduce((s, l) => s + l.taxAmount, 0);
   const grandTotal = lines.reduce((s, l) => s + l.netTotal,  0);
 
+  // Get base currency from the selected procurement BU (ledgerCurrency)
+  const baseCurrency = React.useMemo(() => {
+    if (!header?.procurementBU || !busUnits.length) return 'AED';
+    const procBU = busUnits.find(bu => (bu.bu_name ?? bu.BusinessUnitName) === header.procurementBU);
+    return procBU?.ledgerCurrency || procBU?.functional_currency || 'AED';
+  }, [header?.procurementBU, busUnits]);
+
   /* ─── Acquisition cost helpers ─────────────────────── */
   const addAcqCharge = () => {
     const key = `acq-${Date.now()}`;
@@ -1071,14 +1078,14 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
   };
 
   const fetchAcqFxRate = async (chargeKey: string, currency: string) => {
-    if (!currency || currency === 'AED') {
+    if (!currency || currency === baseCurrency) {
       setAcqFxRates(prev => { const r = { ...prev }; delete r[chargeKey]; return r; });
       setAcqFxLoading(prev => { const r = { ...prev }; delete r[chargeKey]; return r; });
       return;
     }
     setAcqFxLoading(prev => ({ ...prev, [chargeKey]: true }));
     try {
-      const params = new URLSearchParams({ from_currency: currency, to_currency: 'AED' });
+      const params = new URLSearchParams({ from_currency: currency, to_currency: baseCurrency });
       const res = await fetch(`${GL_ORDS_BASE}/currencies/dailyrates?${params}`);
       if (!res.ok) return;
       const raw = (await res.text()).replace(/:\s*(-?)\.(\d)/g, ': $10.$2');
@@ -1200,9 +1207,9 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
 
     const currencyObj = currencies.find(c => c.code === header.currency);
 
-    // Conversion rate — only for a foreign currency (AED is functional).
+    // Conversion rate — only for a foreign currency (base currency is functional).
     // Pulled from the fxRate already shown on the page (rate/type/date).
-    const isForeignCcy = !!header.currency && header.currency !== 'AED';
+    const isForeignCcy = !!header.currency && header.currency !== baseCurrency;
     const useFx = isForeignCcy && fxRate && fxRate.rate > 0;
 
     return {
@@ -1295,9 +1302,9 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
     if (!header.buyer)          errors.push('Buyer is required');
     // Foreign currency must have a conversion rate to AED before interfacing to
     // Fusion — if none was found (or still loading), don't allow the save.
-    if (header.currency && header.currency !== 'AED') {
-      if (fxRateLoading) errors.push(`Conversion rate for ${header.currency} → AED is still loading — try again in a moment`);
-      else if (!fxRate || !(fxRate.rate > 0)) errors.push(`Conversion rate for ${header.currency} → AED is required — none found`);
+    if (header.currency && header.currency !== baseCurrency) {
+      if (fxRateLoading) errors.push(`Conversion rate for ${header.currency} → ${baseCurrency} is still loading — try again in a moment`);
+      else if (!fxRate || !(fxRate.rate > 0)) errors.push(`Conversion rate for ${header.currency} → ${baseCurrency} is required — none found`);
     }
     if (lines.length === 0)     errors.push('At least one line item is required');
     const linesWithoutNeedBy = lines.filter(l => !l.needBy);
@@ -1683,7 +1690,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
         <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:center;color:#666;font-size:12px">${l.needBy ? l.needBy.format('D-MMM-YYYY') : '—'}</td>
       </tr>`).join('');
 
-    const fxHtml = fxRate ? `<p style="font-size:12px;color:#0572CE;margin:8px 0">Conversion Rate: 1 ${header.currency} = ${fxRate.rate.toFixed(4)} AED &nbsp;·&nbsp; ${fxRate.rateType} &nbsp;·&nbsp; ${fxRate.rateDate ? dayjs(fxRate.rateDate).format('D-MMM-YYYY') : ''}</p>` : '';
+    const fxHtml = fxRate ? `<p style="font-size:12px;color:#0572CE;margin:8px 0">Conversion Rate: 1 ${header.currency} = ${fxRate.rate.toFixed(4)} ${baseCurrency} &nbsp;·&nbsp; ${fxRate.rateType} &nbsp;·&nbsp; ${fxRate.rateDate ? dayjs(fxRate.rateDate).format('D-MMM-YYYY') : ''}</p>` : '';
 
     const acqHtml = acqCharges.length > 0 ? `
       <h3 style="color:#D4A800;margin:24px 0 8px">Acquisition Costs</h3>
@@ -1868,7 +1875,7 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
       hdrRows.push(['Grand Total', nCell(grandTotal)]);
       if (fxRate) {
         hdrRows.push(['', '']);
-        hdrRows.push([`Exchange Rate: 1 ${header.currency} = ${fxRate.rate.toFixed(4)} AED`, `${fxRate.rateType} - ${fxRate.rateDate ? dayjs(fxRate.rateDate).format('D-MMM-YYYY') : ''}`]);
+        hdrRows.push([`Exchange Rate: 1 ${header.currency} = ${fxRate.rate.toFixed(4)} ${baseCurrency}`, `${fxRate.rateType} - ${fxRate.rateDate ? dayjs(fxRate.rateDate).format('D-MMM-YYYY') : ''}`]);
       }
 
       const wsHdr = XLSX.utils.aoa_to_sheet(hdrRows);
@@ -3217,6 +3224,12 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                           ).map(c => <Option key={c.code} value={c.code}>{c.code}{c.name ? ` — ${c.name}` : ''}</Option>)}
                         </Select>
                       } />
+                      {baseCurrency && (
+                        <div style={{ fontSize: 11, color: C.textMid, marginBottom: 8, paddingLeft: 7 }}>
+                          <DollarOutlined style={{ color: C.blue, marginRight: 4 }} />
+                          Base Currency: <Text strong style={{ color: C.blue, fontFamily: 'monospace' }}>{baseCurrency}</Text>
+                        </div>
+                      )}
                       {/* Conversion rate display */}
                       {fxRateLoading && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 7 }}>
@@ -3234,23 +3247,23 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <Text strong style={{ fontSize: 13, color: C.blue, fontVariantNumeric: 'tabular-nums' }}>
-                              1 {header.currency} = {fxRate.rate.toFixed(4)} AED
+                              1 {header.currency} = {fxRate.rate.toFixed(4)} {baseCurrency}
                             </Text>
                           </div>
                           <div style={{ fontSize: 10, color: C.textLight, marginTop: 2 }}>
-                            Inverse: 1 AED = {fxRate.inverseRate > 0 ? fxRate.inverseRate.toFixed(6) : (1 / fxRate.rate).toFixed(6)} {header.currency}
+                            Inverse: 1 {baseCurrency} = {fxRate.inverseRate > 0 ? fxRate.inverseRate.toFixed(6) : (1 / fxRate.rate).toFixed(6)} {header.currency}
                             &nbsp;·&nbsp;{fxRate.rateDate ? dayjs(fxRate.rateDate).format('D-MMM-YYYY') : ''}
                           </div>
                           {grandTotal > 0 && (
                             <div style={{ borderTop: `1px solid ${C.blue}30`, marginTop: 4, paddingTop: 4, fontSize: 11, color: C.textMid }}>
-                              PO Total ≈ <Text strong style={{ color: C.teal }}>{fmt(grandTotal * fxRate.rate)} AED</Text>
+                              PO Total ≈ <Text strong style={{ color: C.teal }}>{fmt(grandTotal * fxRate.rate)} {baseCurrency}</Text>
                             </div>
                           )}
                         </div>
                       )}
-                      {!fxRate && !fxRateLoading && header.currency && header.currency !== 'AED' && (
+                      {!fxRate && !fxRateLoading && header.currency && header.currency !== baseCurrency && (
                         <div style={{ fontSize: 11, color: C.orange, marginBottom: 6 }}>
-                          No rate found for {header.currency} → AED
+                          No rate found for {header.currency} → {baseCurrency}
                         </div>
                       )}
                       <FieldPair label="Source Agreement"
