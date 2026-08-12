@@ -7948,15 +7948,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               const displayOrderNo = editMode ? (editOrder?.SourceTransactionNumber ?? orderNumber) : (createdOrderNumber || orderNumber);
               setSavedOrderNumber(displayOrderNo);
               const poNumber = 'BLPO' + displayOrderNo.replace(/^BCSO/, '');
+              const branchBU = editMode ? (editOrder?.branchBU ?? hdr.branchBU) : hdr.branchBU;
               branchSalesForm.setFieldsValue({
                 salesOrderNumber: displayOrderNo,
                 poNumber: poNumber,
                 currency: hdr.txnCurrency,
-                branchBusinessUnit: hdr.branchBU,
+                branchBusinessUnit: branchBU,
                 needByDate: dayjs().add(7, 'days')
               });
-              if (hdr.branchBU) {
-                onBranchBUChange(hdr.branchBU);
+              if (branchBU) {
+                onBranchBUChange(branchBU);
               }
               setBranchSalesModalOpen(true);
             }}
@@ -8942,22 +8943,27 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           </Row>
           <Row gutter={8}>
             <Col span={12}>
-              <Form.Item label="Transaction Currency" name="currency" style={{ marginBottom: 8 }}>
-                <Input readOnly size="small" suffix={branchBUData.baseCurrency ? `(Base: ${branchBUData.baseCurrency})` : ''} />
+              <Form.Item label="Branch Business Unit" name="branchBusinessUnit" rules={[{ required: true, message: 'Select a business unit' }]} style={{ marginBottom: 8 }}>
+                <Select showSearch size="small" placeholder="Select Branch Business Unit" optionFilterProp="label"
+                  onChange={(buName) => onBranchBUChange(buName)}
+                  options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item label="Conversion Rate (Trx → Base)" style={{ marginBottom: 8 }}>
-                <Input readOnly size="small" value={branchBUData.conversionRate ? `1 ${hdr.txnCurrency} = ${branchBUData.conversionRate} ${branchBUData.baseCurrency}` : '—'} />
+              <Form.Item label="Base Currency" style={{ marginBottom: 8 }}>
+                <Input readOnly size="small" value={branchBUData.baseCurrency || '—'} />
               </Form.Item>
             </Col>
           </Row>
           <Row gutter={8}>
             <Col span={12}>
-              <Form.Item label="Branch Business Unit" name="branchBusinessUnit" rules={[{ required: true, message: 'Select a business unit' }]} style={{ marginBottom: 8 }}>
-                <Select showSearch size="small" placeholder="Select Branch Business Unit" optionFilterProp="label"
-                  onChange={(buName) => onBranchBUChange(buName)}
-                  options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} />
+              <Form.Item label="Transaction Currency" name="currency" style={{ marginBottom: 8 }}>
+                <Input readOnly size="small" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Conversion Rate (Trx → Base)" style={{ marginBottom: 8 }}>
+                <Input readOnly size="small" value={branchBUData.conversionRate ? `1 ${hdr.txnCurrency} = ${branchBUData.conversionRate} ${branchBUData.baseCurrency}` : '—'} />
               </Form.Item>
             </Col>
           </Row>
