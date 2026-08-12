@@ -6312,13 +6312,27 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       setBranchBUData({ baseCurrency: baseCcy });
       branchSalesForm.setFieldsValue({ currency: baseCcy });
 
-      // Filter inventory orgs by Business Unit ID — try multiple field name variations
-      const filteredOrgs = orgRows.filter((o: any) => {
-        const orgBuId = pf(o, ['BusinessUnitId', 'business_unit_id', 'bu_id', 'BUId']);
-        return orgBuId === bu.businessUnitId || orgBuId === String(bu.businessUnitId);
-      });
-      console.log('Branch BU Change:', { buName, bu, orgRowsCount: orgRows.length, filteredOrgsCount: filteredOrgs.length, filteredOrgs });
-      setBranchShipToOrgs(filteredOrgs);
+      // Fetch inventory orgs filtered by Business Unit Name (from Fusion)
+      const filterQuery = `BusinessUnitName EQ '${buName}'`;
+      const url = `${FUSION_BASE}/inventoryOrganizations?q=${encodeURIComponent(filterQuery)}&onlyData=true&limit=500`;
+      trackApiCall(`Ship-To Locations (${buName})`, url);
+
+      fetch(url, { headers: FUSION_HDRS })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+        .then(d => {
+          const orgs = d.items ?? [];
+          console.log('Branch BU Change - Ship-To Locations:', { buName, bu, orgsCount: orgs.length, orgs });
+          setBranchShipToOrgs(orgs);
+        })
+        .catch(err => {
+          console.error('Failed to fetch ship-to locations:', err);
+          // Fallback to local filtering
+          const filteredOrgs = orgRows.filter((o: any) => {
+            const orgBuName = pf(o, ['BusinessUnitName', 'business_unit_name']);
+            return orgBuName === buName;
+          });
+          setBranchShipToOrgs(filteredOrgs);
+        });
 
       setBranchPoNeedByDate(dayjs().add(7, 'days'));
     }
@@ -7118,6 +7132,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           const needByDate = dayjs().add(7, 'days');
           const branchBU = form.getFieldValue('branchBU');
           branchSalesForm.setFieldsValue({
+            salesOrderNumber: String(data.OrderNumber),
             currency: hdr.txnCurrency,
             needByDate,
             branchBusinessUnit: branchBU
@@ -7930,6 +7945,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             {isBranchSales && isDraftStatus && <Button icon={<ShoppingOutlined />} onClick={() => {
               setSavedOrderNumber(createdOrderNumber || orderNumber);
               branchSalesForm.setFieldsValue({
+                salesOrderNumber: createdOrderNumber || orderNumber,
                 branchBusinessUnit: hdr.branchBU,
                 needByDate: dayjs().add(7, 'days')
               });
@@ -8933,7 +8949,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               <Button type="primary" icon={<SearchOutlined />} onClick={() => setBranchSupplierSearchOpen(true)} style={{ background: REDWOOD.info, borderColor: REDWOOD.info }} />
             </div>
           </Form.Item>
-          <Form.Item label={<span>Ship-To Location (Inventory Org) <Tooltip title={`Web Service: GET /inventoryOrganizations?q=BusinessUnitId EQ ${form.getFieldValue('branchBU') ? "'" + form.getFieldValue('branchBU') + "'" : 'N/A'}`}><ApiOutlined style={{ color: REDWOOD.info, marginLeft: 4, cursor: 'pointer' }} /></Tooltip></span>} name="shipToLocation" rules={[{ required: true, message: 'Select a location' }]}>
+          <Form.Item label={<span>Ship-To Location (Inventory Org) <Tooltip title={(() => {
+            const buName = form.getFieldValue('branchBU');
+            const filterQuery = buName ? `BusinessUnitName EQ '${buName}'` : 'N/A';
+            const fullUrl = `${FUSION_BASE}/inventoryOrganizations?q=${encodeURIComponent(filterQuery)}&onlyData=true&limit=500`;
+            return <span style={{ fontFamily: 'monospace', fontSize: '11px', wordBreak: 'break-all' }}><b>GET</b><br />{fullUrl}</span>;
+          })()}><ApiOutlined style={{ color: REDWOOD.info, marginLeft: 4, cursor: 'pointer' }} /></Tooltip></span>} name="shipToLocation" rules={[{ required: true, message: 'Select a location' }]}>
             <Select showSearch placeholder="Select Ship-To Location" optionFilterProp="label" allowClear
               options={branchShipToOrgs.map((o: any) => ({ value: pf(o, ['OrganizationCode']), label: `${pf(o, ['OrganizationCode'])}${pf(o, ['OrganizationName']) ? ' — ' + pf(o, ['OrganizationName']) : ''}` }))} />
           </Form.Item>
