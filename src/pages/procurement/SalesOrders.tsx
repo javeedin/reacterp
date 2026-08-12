@@ -4598,8 +4598,8 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
     setInventoryTransactionFlag(false);
   }, [open, form]);
 
-  useEffect(() => {
-    // Fetch order types from standardLookups
+  const fetchOrderTypes = () => {
+    setOrderTypeOpts([]);
     fetch(`${FUSION_BASE}/standardLookups?q=LookupType LIKE 'ORA_DOO_ORDER_TYPES%'&expand=lookupCodes&onlyData=true&limit=500`, { headers: FUSION_HDRS })
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => {
@@ -4615,13 +4615,20 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
             .sort((a: any, b: any) => a.label.localeCompare(b.label));
           setOrderTypeOpts(opts);
           setOrderTypeLookup(lookupMap);
+          message.success('✓ Order types refreshed');
         }
       })
       .catch(err => {
         console.error('Error fetching order types:', err);
+        message.error('Failed to fetch order types');
         setOrderTypeOpts([]);
       });
-  }, []);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    fetchOrderTypes();
+  }, [open]);
 
   const onCustomer = (name: string, opt: any) => {
     const row = opt?._c ?? customers.find(c => custName(c) === name);
@@ -4773,7 +4780,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
           <Col xs={12} md={5}><Form.Item label="Rate Type" name="currencyRateType" style={{ marginBottom: 8 }}>
             <Select disabled={!buName} placeholder="Rate type" size="small" options={[{ value: 'Corporate', label: 'Corporate' }, { value: 'Spot', label: 'Spot' }, { value: 'User', label: 'User' }]} /></Form.Item></Col>
           <Col xs={12} md={5}><Form.Item label="Currency Date" name="currencyDate" style={{ marginBottom: 8 }}><DatePicker disabled={!buName} style={{ width: '100%' }} size="small" /></Form.Item></Col>
-          <Col xs={12} md={5}><Form.Item label="Order Type" name="orderType" rules={req('Order type')} style={{ marginBottom: 8 }}>
+          <Col xs={12} md={7}><Form.Item label={<div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}><span>Order Type</span><Button type="text" size="small" icon={<ReloadOutlined />} onClick={fetchOrderTypes} title="Refresh order types" style={{ padding: '2px 4px', height: 'auto' }} /></div>} name="orderType" rules={req('Order type')} style={{ marginBottom: 8 }}>
             <Select showSearch disabled={!buName} placeholder="Select order type" size="small" loading={orderTypeOpts.length === 0} onChange={onOrderTypeChange} options={orderTypeOpts} /></Form.Item></Col>
           <Col xs={12} md={5}><Form.Item label="Order Date" name="orderDate" rules={req('Order date')} style={{ marginBottom: 8 }}><DatePicker disabled={!buName} style={{ width: '100%' }} size="small" /></Form.Item></Col>
           {isBranchSales && (
