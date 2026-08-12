@@ -6314,9 +6314,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       const conversionRate = (txnCcy === baseCcy) ? 1 : hdr.rate || 1;
       setBranchBUData({ baseCurrency: baseCcy, conversionRate });
 
-      // Fetch inventory orgs filtered by Business Unit Name (from Fusion)
-      const filterQuery = `BusinessUnitName = '${buName}'`;
-      const url = `${FUSION_BASE}/inventoryOrganizations?q=${encodeURIComponent(filterQuery)}&onlyData=true&limit=500`;
+      // Fetch inventory orgs filtered by Management Business Unit Name (from Fusion)
+      const filterQuery = `ManagementBusinessUnitName=${buName}`;
+      const url = `${FUSION_BASE}/inventoryOrganizations?q=${filterQuery}&onlyData=true&limit=500`;
       trackApiCall(`Ship-To Locations (${buName})`, url);
 
       fetch(url, { headers: FUSION_HDRS })
@@ -8899,7 +8899,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
       {/* Branch Sales Modal — capture branch details and create PO */}
       <Modal open={branchSalesModalOpen} onCancel={() => { setBranchSalesModalOpen(false); branchSalesForm.resetFields(); setSavedOrderNumber(null); }}
-        maskClosable={false} width={1100} title={(() => {
+        maskClosable={false} width={900} style={{ maxHeight: '90vh' }} title={(() => {
           const orderTypeDetail = orderTypeLookup.get(hdr.orderType);
           const branchPoCode = orderTypeDetail?.branchPoCode || 'BRNS';
           return <Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /> Create Branch Purchase Order ({branchPoCode}) — Sales Order <span style={{ color: REDWOOD.info, fontWeight: 'bold' }}>{createdOrderNumber || orderNumber}</span></Space>;
@@ -8911,8 +8911,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             Create Branch PO
           </Button>
         </Space>}>
-        <div style={{ marginBottom: 16, padding: '12px 16px', background: '#E6F7FF', borderRadius: 6, border: `1px solid ${REDWOOD.info}` }}>
-          <Text style={{ fontSize: 12, color: REDWOOD.info }}>
+        <div style={{ marginBottom: 12, padding: '8px 12px', background: '#E6F7FF', borderRadius: 6, border: `1px solid ${REDWOOD.info}` }}>
+          <Text style={{ fontSize: 11, color: REDWOOD.info }}>
             {(() => {
               const orderTypeDetail = orderTypeLookup.get(hdr.orderType);
               const branchPoCode = orderTypeDetail?.branchPoCode || 'BRNS';
@@ -8925,76 +8925,76 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             })()}
           </Text>
         </div>
-        <Form form={branchSalesForm} layout="vertical" size="middle">
-          <Row gutter={16}>
+        <Form form={branchSalesForm} layout="vertical" size="small">
+          <Row gutter={8}>
             <Col span={12}>
-              <Form.Item label="Sales Order Number" name="salesOrderNumber">
-                <Input readOnly />
+              <Form.Item label="Sales Order Number" name="salesOrderNumber" style={{ marginBottom: 8 }}>
+                <Input readOnly size="small" />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item label="PO Number" name="poNumber">
-                <Input placeholder="Auto-generated with BLPO prefix" readOnly />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item label="Transaction Currency" name="currency">
-                <Input readOnly suffix={branchBUData.baseCurrency ? `(Base: ${branchBUData.baseCurrency})` : ''} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label="Conversion Rate (Trx → Base)">
-                <Input readOnly value={branchBUData.conversionRate ? `1 ${hdr.txnCurrency} = ${branchBUData.conversionRate} ${branchBUData.baseCurrency}` : '—'} />
+              <Form.Item label="PO Number" name="poNumber" style={{ marginBottom: 8 }}>
+                <Input placeholder="Auto-generated with BLPO prefix" readOnly size="small" />
               </Form.Item>
             </Col>
           </Row>
-          <Row gutter={16}>
+          <Row gutter={8}>
             <Col span={12}>
-              <Form.Item label="Branch Business Unit" name="branchBusinessUnit" rules={[{ required: true, message: 'Select a business unit' }]}>
-                <Select showSearch placeholder="Select Branch Business Unit" optionFilterProp="label"
+              <Form.Item label="Transaction Currency" name="currency" style={{ marginBottom: 8 }}>
+                <Input readOnly size="small" suffix={branchBUData.baseCurrency ? `(Base: ${branchBUData.baseCurrency})` : ''} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Conversion Rate (Trx → Base)" style={{ marginBottom: 8 }}>
+                <Input readOnly size="small" value={branchBUData.conversionRate ? `1 ${hdr.txnCurrency} = ${branchBUData.conversionRate} ${branchBUData.baseCurrency}` : '—'} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={8}>
+            <Col span={12}>
+              <Form.Item label="Branch Business Unit" name="branchBusinessUnit" rules={[{ required: true, message: 'Select a business unit' }]} style={{ marginBottom: 8 }}>
+                <Select showSearch size="small" placeholder="Select Branch Business Unit" optionFilterProp="label"
                   onChange={(buName) => onBranchBUChange(buName)}
                   options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} />
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item label={<span>Branch Supplier <SearchOutlined style={{ color: REDWOOD.info, marginLeft: 4 }} /></span>} name="branchSupplierName" rules={[{ required: true, message: 'Select a supplier' }]}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Input placeholder="Search supplier by name..." readOnly value={branchSalesForm.getFieldValue('branchSupplierName') ?? ''} disabled style={{ flex: 1 }} />
-              <Button type="primary" icon={<SearchOutlined />} onClick={() => setBranchSupplierSearchOpen(true)} style={{ background: REDWOOD.info, borderColor: REDWOOD.info }} />
+          <Form.Item label={<span>Branch Supplier <SearchOutlined style={{ color: REDWOOD.info, marginLeft: 4 }} /></span>} name="branchSupplierName" rules={[{ required: true, message: 'Select a supplier' }]} style={{ marginBottom: 8 }}>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <Input placeholder="Search supplier by name..." size="small" readOnly value={branchSalesForm.getFieldValue('branchSupplierName') ?? ''} disabled style={{ flex: 1 }} />
+              <Button size="small" icon={<SearchOutlined />} onClick={() => setBranchSupplierSearchOpen(true)} style={{ background: REDWOOD.info, borderColor: REDWOOD.info, color: '#fff' }} />
             </div>
           </Form.Item>
           <Form.Item label={<span>Ship-To Location (Inventory Org) <Tooltip title={(() => {
             const buName = branchSalesForm.getFieldValue('branchBusinessUnit');
-            const filterQuery = buName ? `BusinessUnitName = '${buName}'` : 'N/A';
-            const fullUrl = `${FUSION_BASE}/inventoryOrganizations?q=${encodeURIComponent(filterQuery)}&onlyData=true&limit=500`;
+            const filterQuery = buName ? `ManagementBusinessUnitName=${buName}` : 'N/A';
+            const fullUrl = `${FUSION_BASE}/inventoryOrganizations?q=${filterQuery}&onlyData=true&limit=500`;
             return <span style={{ fontFamily: 'monospace', fontSize: '11px', wordBreak: 'break-all' }}><b>GET</b><br />{fullUrl}</span>;
-          })()}><ApiOutlined style={{ color: REDWOOD.info, marginLeft: 4, cursor: 'pointer' }} /></Tooltip></span>} name="shipToLocation" rules={[{ required: true, message: 'Select a location' }]}>
-            <Select showSearch placeholder="Select Ship-To Location" optionFilterProp="label" allowClear
+          })()}><ApiOutlined style={{ color: REDWOOD.info, marginLeft: 4, cursor: 'pointer' }} /></Tooltip></span>} name="shipToLocation" rules={[{ required: true, message: 'Select a location' }]} style={{ marginBottom: 8 }}>
+            <Select showSearch size="small" placeholder="Select Ship-To Location" optionFilterProp="label" allowClear
               options={branchShipToOrgs.map((o: any) => ({ value: pf(o, ['OrganizationCode']), label: `${pf(o, ['OrganizationCode'])}${pf(o, ['OrganizationName']) ? ' — ' + pf(o, ['OrganizationName']) : ''}` }))} />
           </Form.Item>
-          <Form.Item label="Need-By Date" name="needByDate" rules={[{ required: true, message: 'Select need-by date' }]}>
-            <DatePicker value={branchPoNeedByDate} onChange={(date) => setBranchPoNeedByDate(date)} />
+          <Form.Item label="Need-By Date" name="needByDate" rules={[{ required: true, message: 'Select need-by date' }]} style={{ marginBottom: 8 }}>
+            <DatePicker size="small" value={branchPoNeedByDate} onChange={(date) => setBranchPoNeedByDate(date)} />
           </Form.Item>
 
-          <Divider>Line Items from Sales Order</Divider>
+          <Divider style={{ margin: '8px 0' }}>Line Items from Sales Order</Divider>
 
-          <div style={{ marginBottom: 16, maxHeight: '300px', overflowY: 'auto' }}>
+          <div style={{ marginBottom: 12, maxHeight: '200px', overflowY: 'auto' }}>
             <Table
               size="small"
               rowKey="key"
               dataSource={lines.filter(l => l.itemNumber && num(l.qty) > 0)}
               pagination={false}
               columns={[
-                { title: 'Item', dataIndex: 'itemNumber', width: 100 },
+                { title: 'Item', dataIndex: 'itemNumber', width: 80 },
                 { title: 'Description', dataIndex: 'description', ellipsis: true },
-                { title: 'Qty', dataIndex: 'qty', width: 70, align: 'right', render: (v: any) => fmtQty(num(v)) },
-                { title: 'UOM', dataIndex: 'uom', width: 60 },
-                { title: 'Unit Price', dataIndex: 'unitPrice', width: 100, align: 'right', render: (v: any) => fmtAmount(num(v), hdr.txnCurrency) },
+                { title: 'Qty', dataIndex: 'qty', width: 60, align: 'right', render: (v: any) => fmtQty(num(v)) },
+                { title: 'UOM', dataIndex: 'uom', width: 50 },
+                { title: 'Unit Price', dataIndex: 'unitPrice', width: 90, align: 'right', render: (v: any) => fmtAmount(num(v), hdr.txnCurrency) },
                 {
                   title: 'Line Total',
-                  width: 120,
+                  width: 110,
                   align: 'right',
                   render: (_: any, record: any) => {
                     const lineTot = num(record.qty) * num(record.unitPrice);
@@ -9005,19 +9005,19 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             />
           </div>
 
-          <Row gutter={16} style={{ background: REDWOOD.neutral100, padding: '12px', borderRadius: '6px', marginBottom: '16px' }}>
+          <Row gutter={8} style={{ background: REDWOOD.neutral100, padding: '8px', borderRadius: '6px', marginBottom: 0 }}>
             <Col span={12}>
               <div>
-                <Text style={{ fontSize: '12px', color: REDWOOD.neutral600 }}>Transaction Currency Total</Text>
-                <div style={{ fontSize: '16px', fontWeight: '700', color: REDWOOD.primary }}>
+                <Text style={{ fontSize: '11px', color: REDWOOD.neutral600 }}>Transaction Currency Total</Text>
+                <div style={{ fontSize: '14px', fontWeight: '700', color: REDWOOD.primary }}>
                   {fmtAmount(lines.filter(l => l.itemNumber && num(l.qty) > 0).reduce((s, l) => s + (num(l.qty) * num(l.unitPrice)), 0), hdr.txnCurrency)}
                 </div>
               </div>
             </Col>
             <Col span={12}>
               <div>
-                <Text style={{ fontSize: '12px', color: REDWOOD.neutral600 }}>Base Currency (Conversion Rate: {num(hdr.rate).toFixed(4)})</Text>
-                <div style={{ fontSize: '16px', fontWeight: '700', color: REDWOOD.success }}>
+                <Text style={{ fontSize: '11px', color: REDWOOD.neutral600 }}>Base Currency (Conversion Rate: {num(hdr.rate).toFixed(4)})</Text>
+                <div style={{ fontSize: '14px', fontWeight: '700', color: REDWOOD.success }}>
                   {fmtAmount(
                     lines.filter(l => l.itemNumber && num(l.qty) > 0).reduce((s, l) => s + (num(l.qty) * num(l.unitPrice)), 0) * (num(hdr.rate) || 1),
                     branchBUData.baseCurrency || hdr.baseCurrency
