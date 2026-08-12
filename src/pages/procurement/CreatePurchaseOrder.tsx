@@ -2838,11 +2838,6 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                     </Select>
                   </Form.Item>
                 </Col>
-                <Col span={24}>
-                  <Form.Item name="noteToSupplier" label="Note to Supplier">
-                    <Input.TextArea rows={2} placeholder="Optional note…" disabled={!selectedBuCompanyCode} />
-                  </Form.Item>
-                </Col>
               </Row>
                     </>
                   )
@@ -2884,8 +2879,8 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                     <>
                       <Row gutter={[12, 0]}>
                         <Col span={24}>
-                          <Form.Item name="headerNote" label="Header Note">
-                            <Input.TextArea rows={3} placeholder="Optional note…" disabled={!selectedBuCompanyCode} />
+                          <Form.Item name="noteToSupplier" label="Note to Supplier">
+                            <Input.TextArea rows={3} placeholder="Optional note to supplier…" disabled={!selectedBuCompanyCode} />
                           </Form.Item>
                         </Col>
                       </Row>
