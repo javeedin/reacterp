@@ -1,5 +1,5 @@
 // Proxy Server Configuration - Use to avoid CORS issues in production
-const isElectron = typeof window !== 'undefined' && !!(window as any).electron;
+const isElectron = typeof window !== 'undefined' && !!(window as any).electronAPI?.isElectron;
 export const PROXY_CONFIG = {
   baseUrl: isElectron ? 'http://localhost:3001/api' : '/api',
   enabled: true,    // Enable proxy to bypass CORS restrictions
