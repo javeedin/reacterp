@@ -6313,7 +6313,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       branchSalesForm.setFieldsValue({ currency: baseCcy });
 
       // Fetch inventory orgs filtered by Business Unit Name (from Fusion)
-      const filterQuery = `BusinessUnitName EQ '${buName}'`;
+      const filterQuery = `BusinessUnitName = '${buName}'`;
       const url = `${FUSION_BASE}/inventoryOrganizations?q=${encodeURIComponent(filterQuery)}&onlyData=true&limit=500`;
       trackApiCall(`Ship-To Locations (${buName})`, url);
 
@@ -8951,7 +8951,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           </Form.Item>
           <Form.Item label={<span>Ship-To Location (Inventory Org) <Tooltip title={(() => {
             const buName = form.getFieldValue('branchBU');
-            const filterQuery = buName ? `BusinessUnitName EQ '${buName}'` : 'N/A';
+            const filterQuery = buName ? `BusinessUnitName = '${buName}'` : 'N/A';
             const fullUrl = `${FUSION_BASE}/inventoryOrganizations?q=${encodeURIComponent(filterQuery)}&onlyData=true&limit=500`;
             return <span style={{ fontFamily: 'monospace', fontSize: '11px', wordBreak: 'break-all' }}><b>GET</b><br />{fullUrl}</span>;
           })()}><ApiOutlined style={{ color: REDWOOD.info, marginLeft: 4, cursor: 'pointer' }} /></Tooltip></span>} name="shipToLocation" rules={[{ required: true, message: 'Select a location' }]}>
