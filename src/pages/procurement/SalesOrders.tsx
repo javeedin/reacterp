@@ -14,7 +14,7 @@ import {
   SafetyCertificateOutlined, StopOutlined, SendOutlined, RollbackOutlined,
   FilePdfOutlined, FileExcelOutlined, SnippetsOutlined, ImportOutlined, TableOutlined, DownOutlined,
   ThunderboltOutlined, CarOutlined, InboxOutlined, WarningFilled, AppstoreOutlined,
-  PaperClipOutlined, FileTextOutlined, LinkOutlined, FileOutlined, FileImageOutlined, RefreshOutlined,
+  PaperClipOutlined, FileTextOutlined, LinkOutlined, FileOutlined, FileImageOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { ShipConfirmModal, PickSlipDialog } from './ConfirmPicks';
@@ -8972,7 +8972,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             const filterQuery = buName ? `ManagementBusinessUnitName=${buName}` : 'N/A';
             const fullUrl = `${FUSION_BASE}/inventoryOrganizations?q=${filterQuery}&onlyData=true&limit=500`;
             return <span style={{ fontFamily: 'monospace', fontSize: '11px', wordBreak: 'break-all' }}><b>GET</b><br />{fullUrl}</span>;
-          })()}><ApiOutlined style={{ color: REDWOOD.info, marginLeft: 4, cursor: 'pointer' }} /></Tooltip> <RefreshOutlined style={{ color: REDWOOD.success, marginLeft: 4, cursor: 'pointer' }} onClick={() => {
+          })()}><ApiOutlined style={{ color: REDWOOD.info, marginLeft: 4, cursor: 'pointer' }} /></Tooltip> <ReloadOutlined style={{ color: REDWOOD.success, marginLeft: 4, cursor: 'pointer' }} onClick={() => {
             const buName = branchSalesForm.getFieldValue('branchBusinessUnit');
             if (buName) {
               onBranchBUChange(buName);
