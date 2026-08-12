@@ -7267,10 +7267,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
     if (!branchBU || !branchSupplier || !shipToLoc) {
       const missing = [];
-      if (!branchBU) missing.push('Branch Business Unit');
-      if (!branchSupplier) missing.push('Branch Supplier');
+      if (!branchBU) missing.push('Branch Business Unit (required)');
+      if (!branchSupplier) missing.push('Branch Supplier - Click search icon 🔍 to select');
       if (!shipToLoc) missing.push('Ship-To Location');
-      message.error(`Please fill in: ${missing.join(', ')}`);
+      const msg = `Required fields not filled:\n\n${missing.join('\n')}`;
+      message.error(msg);
       console.error('Missing fields:', missing);
       return;
     }
