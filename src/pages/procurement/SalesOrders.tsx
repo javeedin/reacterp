@@ -14,7 +14,7 @@ import {
   SafetyCertificateOutlined, StopOutlined, SendOutlined, RollbackOutlined,
   FilePdfOutlined, FileExcelOutlined, SnippetsOutlined, ImportOutlined, TableOutlined, DownOutlined,
   ThunderboltOutlined, CarOutlined, InboxOutlined, WarningFilled, AppstoreOutlined,
-  PaperClipOutlined, FileTextOutlined, LinkOutlined, FileOutlined, FileImageOutlined,
+  PaperClipOutlined, FileTextOutlined, LinkOutlined, FileOutlined, FileImageOutlined, RefreshOutlined,
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { ShipConfirmModal, PickSlipDialog } from './ConfirmPicks';
@@ -7947,8 +7947,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             {isBranchSales && <Button icon={<ShoppingOutlined />} onClick={() => {
               const displayOrderNo = editMode ? (editOrder?.SourceTransactionNumber ?? orderNumber) : (createdOrderNumber || orderNumber);
               setSavedOrderNumber(displayOrderNo);
+              const poNumber = 'BLPO' + displayOrderNo.replace(/^BCSO/, '');
               branchSalesForm.setFieldsValue({
                 salesOrderNumber: displayOrderNo,
+                poNumber: poNumber,
                 currency: hdr.txnCurrency,
                 branchBusinessUnit: hdr.branchBU,
                 needByDate: dayjs().add(7, 'days')
@@ -8970,7 +8972,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             const filterQuery = buName ? `ManagementBusinessUnitName=${buName}` : 'N/A';
             const fullUrl = `${FUSION_BASE}/inventoryOrganizations?q=${filterQuery}&onlyData=true&limit=500`;
             return <span style={{ fontFamily: 'monospace', fontSize: '11px', wordBreak: 'break-all' }}><b>GET</b><br />{fullUrl}</span>;
-          })()}><ApiOutlined style={{ color: REDWOOD.info, marginLeft: 4, cursor: 'pointer' }} /></Tooltip></span>} name="shipToLocation" rules={[{ required: true, message: 'Select a location' }]} style={{ marginBottom: 8 }}>
+          })()}><ApiOutlined style={{ color: REDWOOD.info, marginLeft: 4, cursor: 'pointer' }} /></Tooltip> <RefreshOutlined style={{ color: REDWOOD.success, marginLeft: 4, cursor: 'pointer' }} onClick={() => {
+            const buName = branchSalesForm.getFieldValue('branchBusinessUnit');
+            if (buName) {
+              onBranchBUChange(buName);
+            }
+          }} title="Refresh inventory organizations" /></span>} name="shipToLocation" rules={[{ required: true, message: 'Select a location' }]} style={{ marginBottom: 8 }}>
             <Select showSearch size="small" placeholder="Select Ship-To Location" optionFilterProp="label" allowClear
               options={branchShipToOrgs.map((o: any) => ({ value: pf(o, ['OrganizationCode']), label: `${pf(o, ['OrganizationCode'])}${pf(o, ['OrganizationName']) ? ' — ' + pf(o, ['OrganizationName']) : ''}` }))} />
           </Form.Item>
