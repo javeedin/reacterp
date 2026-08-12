@@ -7946,6 +7946,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               setSavedOrderNumber(createdOrderNumber || orderNumber);
               branchSalesForm.setFieldsValue({
                 salesOrderNumber: createdOrderNumber || orderNumber,
+                currency: hdr.txnCurrency,
                 branchBusinessUnit: hdr.branchBU,
                 needByDate: dayjs().add(7, 'days')
               });
@@ -8925,19 +8926,31 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item label="Sales Order Number" name="salesOrderNumber">
-                <Input readOnly value={savedOrderNumber || orderNumber || ''} />
+                <Input readOnly />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item label="Currency" name="currency">
+              <Form.Item label="PO Number" name="poNumber">
+                <Input placeholder="Auto-generated with BLPO prefix" readOnly />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label="Transaction Currency" name="currency">
                 <Input readOnly suffix={branchBUData.baseCurrency ? `(Base: ${branchBUData.baseCurrency})` : ''} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Conversion Rate (Trx → Base)">
+                <Input readOnly value={branchBUData.conversionRate ? `1 ${hdr.txnCurrency} = ${branchBUData.conversionRate} ${branchBUData.baseCurrency}` : '—'} />
               </Form.Item>
             </Col>
           </Row>
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item label="Branch Business Unit" name="branchBusinessUnit" rules={[{ required: true, message: 'Select a business unit' }]}>
-                <Select disabled showSearch placeholder="Select Branch Business Unit" optionFilterProp="label"
+                <Select showSearch placeholder="Select Branch Business Unit" optionFilterProp="label"
                   onChange={(buName) => onBranchBUChange(buName)}
                   options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))} />
               </Form.Item>
@@ -8950,7 +8963,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             </div>
           </Form.Item>
           <Form.Item label={<span>Ship-To Location (Inventory Org) <Tooltip title={(() => {
-            const buName = form.getFieldValue('branchBU');
+            const buName = branchSalesForm.getFieldValue('branchBusinessUnit');
             const filterQuery = buName ? `BusinessUnitName = '${buName}'` : 'N/A';
             const fullUrl = `${FUSION_BASE}/inventoryOrganizations?q=${encodeURIComponent(filterQuery)}&onlyData=true&limit=500`;
             return <span style={{ fontFamily: 'monospace', fontSize: '11px', wordBreak: 'break-all' }}><b>GET</b><br />{fullUrl}</span>;
