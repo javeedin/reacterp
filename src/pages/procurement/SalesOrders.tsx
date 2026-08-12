@@ -4602,7 +4602,14 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
     setSubs([]);
     setIsBranchSales(false);
     setInventoryTransactionFlag(false);
-  }, [open, form]);
+
+    // Track webservices that were loaded for this modal
+    if (bUnits.length > 0) trackApiCall(`Payables Options (${bUnits.length} BUs)`, `${FUSION_BASE}/payablesOptions`);
+    if (orgRows.length > 0) trackApiCall(`Inventory Organizations (${orgRows.length} orgs)`, INV_ORGS_URL);
+    if (customers.length > 0) trackApiCall(`Customers (${customers.length} customers)`, `Fusion salesOrders/customers`);
+    if (payTermOpts.length > 0) trackApiCall(`Payment Terms (${payTermOpts.length} terms)`, PAYMENT_TERMS_URL);
+    if (salesRepOpts.length > 0) trackApiCall(`Sales Reps (${salesRepOpts.length} reps)`, SALESREPS_URL);
+  }, [open, form, bUnits.length, orgRows.length, customers.length, payTermOpts.length, salesRepOpts.length]);
 
   const fetchBranchPoCode = async (lookupCode: string) => {
     const url = `${FUSION_BASE}/standardLookups/ORA_DOO_ORDER_TYPES/child/lookupCodes/${lookupCode}/child/lookupsDFF`;
@@ -4705,7 +4712,9 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
   };
   const onWarehouse = (code: string) => {
     form.setFieldsValue({ subinventory: undefined }); setSubs([]);
-    fetch(`${FUSION_BASE}/subinventories?q=OrganizationCode=${encodeURIComponent(code)}&onlyData=true&limit=500`, { headers: FUSION_HDRS })
+    const url = `${FUSION_BASE}/subinventories?q=OrganizationCode=${encodeURIComponent(code)}&onlyData=true&limit=500`;
+    trackApiCall(`Subinventories (${code})`, url);
+    fetch(url, { headers: FUSION_HDRS })
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => setSubs(Array.from(new Set((d.items ?? []).map((s: any) => s.SecondaryInventoryName).filter(Boolean))).sort() as string[])).catch(() => setSubs([]));
   };
@@ -4730,6 +4739,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
     try {
       const params = new URLSearchParams({ from_currency: txnCcy, to_currency: baseCcy });
       const url = `${APEX_BASE}/currencies/dailyrates?${params}`;
+      trackApiCall(`Currency Conversion (${txnCcy} → ${baseCcy})`, url);
       const res = await fetch(url);
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
