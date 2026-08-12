@@ -4827,7 +4827,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
       username={instance.username}
       password={instance.password}
     />
-    </>
+  </>
   );
 };
 
