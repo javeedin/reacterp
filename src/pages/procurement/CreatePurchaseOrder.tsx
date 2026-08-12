@@ -16,7 +16,7 @@ import {
   BuildOutlined, FileTextOutlined, CheckCircleOutlined,
   CloseCircleOutlined, UploadOutlined, MailOutlined, SyncOutlined,
   CodeOutlined, DownOutlined, DownloadOutlined, FolderOpenOutlined,
-  CheckOutlined, ThunderboltOutlined,
+  CheckOutlined, ThunderboltOutlined, SwapOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { message } from 'antd';
@@ -253,6 +253,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
 
   const [busUnits, setBusUnits] = useState<any[]>([]);
   const [selectedBuCompanyCode, setSelectedBuCompanyCode] = useState('');
+  const [selectedBuBaseCurrency, setSelectedBuBaseCurrency] = useState('');
   const [currencies, setCurrencies] = useState<any[]>([]);
   const [currencyInput, setCurrencyInput] = useState('');
   const [fxRate, setFxRate] = useState<{ rate: number; inverseRate: number; rateDate: string; rateType: string } | null>(null);
@@ -389,6 +390,7 @@ const CreatePurchaseOrder: React.FC<{ onExit?: () => void; initialPo?: any; edit
         console.warn('No currency found for BU:', { buName, buData: bu });
       }
       setSelectedBuCompanyCode(bu.bu_id ? String(bu.bu_id) : '');
+      setSelectedBuBaseCurrency(bu.ledgerCurrency || bu.functional_currency || '');
 
       // Filter inventory orgs based on the selected BU (BusinessUnitId or BusinessUnitName)
       if (inventoryOrgs.length > 0) {
@@ -2704,6 +2706,24 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                       <BuildOutlined style={{ color: C.blue, fontSize: 13 }} />
                       <Text style={{ fontSize: 12, color: C.textMid }}>Company Code:</Text>
                       <Text strong style={{ fontSize: 13, color: C.blue, fontFamily: 'monospace' }}>{selectedBuCompanyCode}</Text>
+                    </div>
+                  </Col>
+                )}
+                {selectedBuBaseCurrency && (
+                  <Col span={24}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 10px', background: '#f0f5ff', borderRadius: 6, border: '1px solid #d6e4ff' }}>
+                      <DollarOutlined style={{ color: C.blue, fontSize: 13 }} />
+                      <Text style={{ fontSize: 12, color: C.textMid }}>Base Currency:</Text>
+                      <Text strong style={{ fontSize: 13, color: C.blue, fontFamily: 'monospace' }}>{selectedBuBaseCurrency}</Text>
+                    </div>
+                  </Col>
+                )}
+                {fxRate && headerForm.getFieldValue('currency') && headerForm.getFieldValue('currency') !== selectedBuBaseCurrency && (
+                  <Col span={24}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 10px', background: '#f0f5ff', borderRadius: 6, border: '1px solid #d6e4ff' }}>
+                      <SwapOutlined style={{ color: C.blue, fontSize: 13 }} />
+                      <Text style={{ fontSize: 12, color: C.textMid }}>Conversion Rate:</Text>
+                      <Text strong style={{ fontSize: 13, color: C.blue, fontFamily: 'monospace' }}>1 {headerForm.getFieldValue('currency')} = {fxRate.rate.toFixed(4)} {selectedBuBaseCurrency}</Text>
                     </div>
                   </Col>
                 )}
