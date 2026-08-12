@@ -4604,13 +4604,36 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
     setInventoryTransactionFlag(false);
   }, [open, form]);
 
+  const fetchBranchPoCode = async (lookupCode: string) => {
+    const url = `${FUSION_BASE}/standardLookups/ORA_DOO_ORDER_TYPES/child/lookupCodes/${lookupCode}/child/lookupsDFF`;
+    trackApiCall(`Branch PO Code (${lookupCode})`, url);
+    try {
+      const res = await fetch(url, { headers: FUSION_HDRS });
+      if (res.ok) {
+        const data = await res.json();
+        return data.items?.[0]?.branchPoCode || '';
+      }
+      return '';
+    } catch (err) {
+      console.warn(`Failed to fetch branch PO code for ${lookupCode}:`, err);
+      return '';
+    }
+  };
+
   const fetchOrderTypes = () => {
     setOrderTypeOpts([]);
     const url = `${FUSION_BASE}/standardLookups?q=LookupType LIKE 'ORA_DOO_ORDER_TYPES%'&expand=lookupCodes&onlyData=true&limit=500`;
     trackApiCall('Order Types (standardLookups)', url);
     fetch(url, { headers: FUSION_HDRS })
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => {
+      .then(r => {
+        if (!r.ok) {
+          return r.text().then(text => {
+            throw new Error(`HTTP ${r.status}: ${text.substring(0, 200)}`);
+          });
+        }
+        return r.json();
+      })
+      .then(async (d) => {
         const items = d.items ?? [];
         if (items.length > 0 && items[0].lookupCodes) {
           const lookupMap = new Map<string, any>();
@@ -4634,6 +4657,17 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
               const bLabel = typeof b.label === 'string' ? b.label : b.label.props.children[0];
               return aLabel.localeCompare(bLabel);
             });
+
+          // Fetch branch PO codes for BRANCH SALES order types
+          for (const lc of items[0].lookupCodes) {
+            if (lc.EnabledFlag === 'Y' && lc.Tag === 'BRANCH SALES') {
+              const branchPoCode = await fetchBranchPoCode(lc.LookupCode);
+              if (branchPoCode) {
+                lookupMap.get(lc.LookupCode)!.branchPoCode = branchPoCode;
+              }
+            }
+          }
+
           setOrderTypeOpts(opts);
           setOrderTypeLookup(lookupMap);
           message.success('✓ Order types refreshed');
@@ -4641,7 +4675,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
       })
       .catch(err => {
         console.error('Error fetching order types:', err);
-        message.error('Failed to fetch order types');
+        message.error(`Failed to fetch order types: ${err.message}`);
         setOrderTypeOpts([]);
       });
   };
@@ -4732,7 +4766,11 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
     const isBranch = lookupDetail && lookupDetail.Tag === 'BRANCH SALES';
     setIsBranchSales(isBranch);
     if (isBranch) {
-      message.info('⚠️ This is a Branch Sales order. Additional branch details will be required after saving.');
+      const branchPoCode = lookupDetail?.branchPoCode || '';
+      const msg = branchPoCode
+        ? `⚠️ Branch Sales order (PO Prefix: ${branchPoCode}). Additional branch details will be required after saving.`
+        : '⚠️ This is a Branch Sales order. Additional branch details will be required after saving.';
+      message.info(msg);
     }
   };
 
