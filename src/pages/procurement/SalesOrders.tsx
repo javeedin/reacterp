@@ -4644,6 +4644,7 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
               const isBranch = lc.Tag === 'BRANCH SALES';
               return {
                 value: lc.LookupCode,
+                sortKey: lc.Meaning,
                 label: isBranch ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span>{lc.Meaning}</span>
@@ -4652,11 +4653,8 @@ const RegisterOrderModal: React.FC<{ open: boolean; onClose: () => void; onProce
                 ) : lc.Meaning
               };
             })
-            .sort((a: any, b: any) => {
-              const aLabel = typeof a.label === 'string' ? a.label : a.label.props.children[0];
-              const bLabel = typeof b.label === 'string' ? b.label : b.label.props.children[0];
-              return aLabel.localeCompare(bLabel);
-            });
+            .sort((a: any, b: any) => (a.sortKey || '').localeCompare(b.sortKey || ''))
+            .map(({ sortKey, ...rest }: any) => rest);
 
           // Fetch branch PO codes for BRANCH SALES order types
           for (const lc of items[0].lookupCodes) {
