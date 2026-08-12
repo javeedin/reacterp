@@ -6044,9 +6044,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
   // Fetch order types from standardLookups
   useEffect(() => {
-    fetch(`${FUSION_BASE}/standardLookups?q=LookupType LIKE 'ORA_DOO_ORDER_TYPES%'&expand=lookupCodes&onlyData=true&limit=500`, { headers: FUSION_HDRS })
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => {
+    (async () => {
+      try {
+        const r = await fetch(`${FUSION_BASE}/standardLookups?q=LookupType LIKE 'ORA_DOO_ORDER_TYPES%'&expand=lookupCodes&onlyData=true&limit=500`, { headers: FUSION_HDRS });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
         const items = d.items ?? [];
         if (items.length > 0 && items[0].lookupCodes) {
           const lookupMap = new Map<string, any>();
@@ -6057,14 +6059,34 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               return { value: lc.LookupCode, label: lc.Meaning };
             })
             .sort((a: any, b: any) => a.label.localeCompare(b.label));
+
+          // Fetch branch PO codes for BRANCH SALES order types
+          for (const lc of items[0].lookupCodes) {
+            if (lc.EnabledFlag === 'Y' && lc.Tag === 'BRANCH SALES') {
+              try {
+                const url = `${FUSION_BASE}/standardLookups/ORA_DOO_ORDER_TYPES/child/lookupCodes/${lc.LookupCode}/child/lookupsDFF`;
+                const res = await fetch(url, { headers: FUSION_HDRS });
+                if (res.ok) {
+                  const data = await res.json();
+                  const branchPoCode = data.items?.[0]?.branchPoCode;
+                  if (branchPoCode) {
+                    lookupMap.get(lc.LookupCode)!.branchPoCode = branchPoCode;
+                  }
+                }
+              } catch (err) {
+                console.warn(`Failed to fetch branch PO code for ${lc.LookupCode}:`, err);
+              }
+            }
+          }
+
           setOrderTypeOpts(opts);
           setOrderTypeLookup(lookupMap);
         }
-      })
-      .catch(err => {
+      } catch (err) {
         console.error('Error fetching order types:', err);
         setOrderTypeOpts([]);
-      });
+      }
+    })();
   }, []);
 
   // On edit: retrieve the saved header Additional Information (EFF) and prefill
@@ -7960,23 +7982,28 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                       />
                     </Form.Item>
                     <Form.Item label="Customer PO" name="customerPONumber" style={{ marginBottom: 10 }}><Input placeholder="Customer PO number" disabled={(editMode && !hdrUnlocked) || !isDraftStatus} /></Form.Item>
-                    {isBranchSales && (
-                      <>
-                        <Form.Item label="Branch BU" name="branchBU" rules={[{ required: true, message: 'Select a branch BU' }]} style={{ marginBottom: 10, marginTop: 10 }}>
-                          <Select
-                            showSearch
-                            disabled={editMode && hdr.branchBU}
-                            placeholder="Select Branch Business Unit"
-                            optionFilterProp="label"
-                            options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))}
-                          />
-                        </Form.Item>
-                        <div style={{ fontSize: 12, color: REDWOOD.warning, fontWeight: 500, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <ShoppingOutlined style={{ fontSize: 14 }} />
-                          <span>🔖 Branch Sales — will create linked PO with BRNS- prefix</span>
-                        </div>
-                      </>
-                    )}
+                    {isBranchSales && (() => {
+                      const orderTypeDetail = orderTypeLookup.get(hdr.orderType);
+                      const branchPoCode = orderTypeDetail?.branchPoCode || '—';
+                      const orderTypeName = orderTypeDetail?.Meaning || hdr.orderType;
+                      return (
+                        <>
+                          <Form.Item label="Branch BU" name="branchBU" rules={[{ required: true, message: 'Select a branch BU' }]} style={{ marginBottom: 10, marginTop: 10 }}>
+                            <Select
+                              showSearch
+                              disabled={editMode && hdr.branchBU}
+                              placeholder="Select Branch Business Unit"
+                              optionFilterProp="label"
+                              options={bUnits.map(b => ({ value: b.businessUnitName, label: `${b.businessUnitName}${b.paymentCurrency ? ` — ${b.paymentCurrency}` : ''}` }))}
+                            />
+                          </Form.Item>
+                          <div style={{ fontSize: 12, color: REDWOOD.warning, fontWeight: 500, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <ShoppingOutlined style={{ fontSize: 14 }} />
+                            <span>🔖 Branch Sales ({orderTypeName}) — will create linked PO with <strong>{branchPoCode}</strong>- prefix</span>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </VSection></Col>
 
                   {/* S2 — Customer Information. Customer is locked in edit mode (a DOO
@@ -8842,7 +8869,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
       {/* Branch Sales Modal — capture branch details and create PO */}
       <Modal open={branchSalesModalOpen} onCancel={() => { setBranchSalesModalOpen(false); branchSalesForm.resetFields(); setSavedOrderNumber(null); }}
-        maskClosable={false} width={1100} title={<Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /> Create Branch Purchase Order (BRNS) — Sales Order <span style={{ color: REDWOOD.info, fontWeight: 'bold' }}>{createdOrderNumber || orderNumber}</span></Space>}
+        maskClosable={false} width={1100} title={(() => {
+          const orderTypeDetail = orderTypeLookup.get(hdr.orderType);
+          const branchPoCode = orderTypeDetail?.branchPoCode || 'BRNS';
+          return <Space><ShoppingOutlined style={{ color: REDWOOD.primary }} /> Create Branch Purchase Order ({branchPoCode}) — Sales Order <span style={{ color: REDWOOD.info, fontWeight: 'bold' }}>{createdOrderNumber || orderNumber}</span></Space>;
+        })()}
         footer={<Space>
           <Button icon={<ApiOutlined />} onClick={() => setBranchApiDrawerOpen(true)}>View API</Button>
           <Button onClick={() => { setBranchSalesModalOpen(false); branchSalesForm.resetFields(); setSavedOrderNumber(null); }}>Cancel</Button>
@@ -8852,7 +8883,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         </Space>}>
         <div style={{ marginBottom: 16, padding: '12px 16px', background: '#E6F7FF', borderRadius: 6, border: `1px solid ${REDWOOD.info}` }}>
           <Text style={{ fontSize: 12, color: REDWOOD.info }}>
-            Sales Order <Text code strong>{savedOrderNumber}</Text> is a Branch Sales order. Auto-create a Purchase Order with the BRNS prefix below.
+            {(() => {
+              const orderTypeDetail = orderTypeLookup.get(hdr.orderType);
+              const branchPoCode = orderTypeDetail?.branchPoCode || 'BRNS';
+              const orderTypeName = orderTypeDetail?.Meaning || hdr.orderType;
+              return (
+                <>
+                  Sales Order <Text code strong>{savedOrderNumber}</Text> is a Branch Sales order ({orderTypeName}). Auto-create a Purchase Order with the <strong>{branchPoCode}</strong> prefix below.
+                </>
+              );
+            })()}
           </Text>
         </div>
         <Form form={branchSalesForm} layout="vertical" size="middle">
