@@ -7263,8 +7263,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     const currency = branchSalesForm.getFieldValue('currency');
     const needByDate = branchSalesForm.getFieldValue('needByDate');
 
+    console.log('Branch PO Create - Field Values:', { branchBU, branchSupplier, shipToLoc, currency, needByDate });
+
     if (!branchBU || !branchSupplier || !shipToLoc) {
-      message.error('Please fill in all Branch Sales fields');
+      const missing = [];
+      if (!branchBU) missing.push('Branch Business Unit');
+      if (!branchSupplier) missing.push('Branch Supplier');
+      if (!shipToLoc) missing.push('Ship-To Location');
+      message.error(`Please fill in: ${missing.join(', ')}`);
+      console.error('Missing fields:', missing);
       return;
     }
 
