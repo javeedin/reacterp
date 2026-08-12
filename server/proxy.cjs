@@ -254,6 +254,62 @@ app.get(/^\/api\/fusion\/(.+)$/, async (req, res) => {
   }
 });
 
+// Proxy: Fusion REST API - POST, PUT, DELETE
+[
+  { method: 'post', name: 'POST' },
+  { method: 'put', name: 'PUT' },
+  { method: 'delete', name: 'DELETE' }
+].forEach(({ method, name }) => {
+  app[method](/^\/api\/fusion\/(.+)$/, async (req, res) => {
+    const path = req.params[0];
+    const queryString = Object.keys(req.query).length > 0
+      ? '?' + new URLSearchParams(req.query).toString()
+      : '';
+
+    const url = `https://iaaobn.fa.ocs.oraclecloud.com:443/${path}${queryString}`;
+
+    if (VERBOSE) {
+      console.log(`=== FUSION PROXY ${name} REQUEST ===`);
+      console.log('Path:', path);
+      console.log('URL:', url);
+      if (req.body) console.log('Body:', JSON.stringify(req.body).substring(0, 300));
+    }
+
+    try {
+      const response = await fetch(url, {
+        method: name,
+        headers: {
+          'Authorization': getOracleAuth(),
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: name !== 'DELETE' ? JSON.stringify(req.body) : undefined,
+      });
+
+      if (VERBOSE) console.log(`Fusion ${name} Response Status:`, response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        if (VERBOSE) console.log(`Fusion ${name} Error:`, errorText.substring(0, 300));
+        return res.status(response.status).json({
+          success: false,
+          error: `Fusion API Error: ${response.status} ${response.statusText}`,
+          details: errorText.substring(0, 500),
+        });
+      }
+
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      if (VERBOSE) console.error(`Fusion ${name} Proxy Error:`, error.message);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+});
+
 // Proxy: Fetch from Oracle HCM (Test environment) - for User Accounts
 app.get(/^\/api\/hcm\/(.+)$/, async (req, res) => {
   const path = req.params[0]; // Gets everything after /api/hcm/

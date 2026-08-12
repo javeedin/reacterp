@@ -6,8 +6,10 @@ export const PROXY_CONFIG = {
 };
 
 // Oracle Fusion API Configuration
+const fusionDirectUrl = 'https://iaaobn.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05';
+const fusionProxyUrl = `${PROXY_CONFIG.baseUrl}/fusion/fscmRestApi/resources/11.13.18.05`;
 export const ORACLE_FUSION_CONFIG = {
-  baseUrl: 'https://iaaobn.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05',
+  baseUrl: PROXY_CONFIG.enabled ? fusionProxyUrl : fusionDirectUrl,
   username: 'ratheesh@buimerccorp.com',
   password: 'BCL#261285',
   defaultLimit: 500,
