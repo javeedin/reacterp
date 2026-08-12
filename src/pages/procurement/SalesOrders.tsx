@@ -7944,7 +7944,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               style={{ borderColor: REDWOOD.success, color: REDWOOD.success }}>Auto Shipconfirm</Button>}
             {!returnMode && anyAwaitingBilling && <Button icon={<DollarOutlined />} onClick={() => setAutoInvoiceOpen(true)}
               style={{ borderColor: REDWOOD.primary, color: REDWOOD.primary }}>Create AR Invoice</Button>}
-            {isBranchSales && isDraftStatus && <Button icon={<ShoppingOutlined />} onClick={() => {
+            {isBranchSales && <Button icon={<ShoppingOutlined />} onClick={() => {
               const displayOrderNo = editMode ? (editOrder?.SourceTransactionNumber ?? orderNumber) : (createdOrderNumber || orderNumber);
               setSavedOrderNumber(displayOrderNo);
               branchSalesForm.setFieldsValue({
