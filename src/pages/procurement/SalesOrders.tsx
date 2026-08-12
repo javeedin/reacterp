@@ -7948,7 +7948,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               const displayOrderNo = editMode ? (editOrder?.SourceTransactionNumber ?? orderNumber) : (createdOrderNumber || orderNumber);
               setSavedOrderNumber(displayOrderNo);
               const poNumber = 'BLPO' + displayOrderNo.replace(/^BCSO/, '');
-              const branchBU = editMode ? (editOrder?.branchBU ?? hdr.branchBU) : hdr.branchBU;
+              const branchBU = form.getFieldValue('branchBU') || hdr.branchBU;
+              branchSalesForm.resetFields();
               branchSalesForm.setFieldsValue({
                 salesOrderNumber: displayOrderNo,
                 poNumber: poNumber,
