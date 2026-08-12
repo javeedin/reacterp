@@ -1165,6 +1165,24 @@ const SearchTab: React.FC<{ onOpen: (po: RawPO) => void; onEdit: (po: RawPO) => 
     } finally { setATL(false); }
   };
 
+  const handleApiTestViaProxy = async () => {
+    const url = buildUrl(form.getFieldsValue(), page);
+    setATL(true); setApiResult(null);
+    try {
+      // Convert direct Fusion URL to proxy URL
+      // From: https://iaaobn.fa.ocs.oraclecloud.com/fscmRestApi/resources/11.13.18.05/purchaseOrders...
+      // To:   /api/fusion/fscmRestApi/resources/11.13.18.05/purchaseOrders...
+      const proxyUrl = url.replace(/^https:\/\/[^/]+\/(.+)$/, '/api/fusion/$1');
+      const res = await fetch(proxyUrl, { headers: { Accept: 'application/json' } });
+      const body = await res.text();
+      let pretty = body;
+      try { pretty = JSON.stringify(JSON.parse(body), null, 2); } catch { /* keep raw */ }
+      setApiResult({ status: res.status, body: `[VIA PROXY]\n\n${pretty}` });
+    } catch (e: any) {
+      setApiResult({ status: 0, body: `Network error: ${e.message}\n\nProxy test failed.` });
+    } finally { setATL(false); }
+  };
+
   const exportOrdersToExcel = () => {
     if (filteredOrdersData.length === 0) { message.warning('No orders to export'); return; }
     const rows = filteredOrdersData.map(po => ({
@@ -1933,10 +1951,16 @@ Content-Type: application/vnd.oracle.adf.action+json`}
               <div><span style={{ color: REDWOOD.neutral600 }}>Accept: </span>application/json</div>
             </div>
           </div>
-          <Button type="primary" icon={<ApiOutlined />} loading={apiTestLoading} onClick={handleApiTest}
-            style={{ background: REDWOOD.info, borderColor: REDWOOD.info, borderRadius: 6, alignSelf: 'flex-start' }}>
-            Test Request
-          </Button>
+          <Space style={{ alignSelf: 'flex-start' }}>
+            <Button type="primary" icon={<ApiOutlined />} loading={apiTestLoading} onClick={handleApiTest}
+              style={{ background: REDWOOD.info, borderColor: REDWOOD.info, borderRadius: 6 }}>
+              Test Request
+            </Button>
+            <Button type="default" icon={<ApiOutlined />} loading={apiTestLoading} onClick={handleApiTestViaProxy}
+              style={{ borderRadius: 6 }}>
+              Test via Proxy
+            </Button>
+          </Space>
           {apiResult && (
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
