@@ -20,6 +20,12 @@ export default defineConfig(() => {
     base: process.env.GITHUB_ACTIONS ? '/reacterp/' : './',
     server: {
       proxy: {
+        // Proxy API calls to local proxy server (port 3001)
+        '/api': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+          secure: false,
+        },
         // Proxy Mitsumi ORDS calls to avoid CORS in dev
         '/ords-mitsu': {
           target: 'https://g827cd88c3cfc03-mitsumioracledb.adb.me-dubai-1.oraclecloudapps.com',
