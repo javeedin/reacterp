@@ -6319,20 +6319,26 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       const url = `${FUSION_BASE}/inventoryOrganizations?q=${filterQuery}&onlyData=true&limit=500`;
       trackApiCall(`Ship-To Locations (${buName})`, url);
 
+      console.log('Fetching inventory organizations:', { buName, url, headers: FUSION_HDRS });
       fetch(url, { headers: FUSION_HDRS })
-        .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+        .then(r => {
+          console.log('Ship-To Locations Response Status:', r.status, r.statusText);
+          return r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}: ${r.statusText}`));
+        })
         .then(d => {
-          const orgs = d.items ?? [];
+          console.log('Ship-To Locations Raw Response:', d);
+          const orgs = d.items ?? d ?? [];
           console.log('Branch BU Change - Ship-To Locations:', { buName, bu, orgsCount: orgs.length, orgs });
           setBranchShipToOrgs(orgs);
         })
         .catch(err => {
-          console.error('Failed to fetch ship-to locations:', err);
+          console.error('Failed to fetch ship-to locations:', { err: err.message, url, buName });
           // Fallback to local filtering
           const filteredOrgs = orgRows.filter((o: any) => {
             const orgBuName = pf(o, ['BusinessUnitName', 'business_unit_name']);
             return orgBuName === buName;
           });
+          console.log('Using fallback - filtered local orgs:', filteredOrgs);
           setBranchShipToOrgs(filteredOrgs);
         });
 
