@@ -2392,69 +2392,55 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
   };
 
   const handleValidatePasted = async () => {
-    if (pastedRows.length === 0) return;
+    if (pastedRows.length === 0 || !header?.shipToOrg) return;
     setImportValidating(true);
-    let masterItems = items;
-    if (masterItems.length === 0 && header) {
-      try {
-        const cached = loadItemmasterCache(header.shipToOrg);
-        if (cached) {
-          masterItems = cached.items;
-        } else {
-          masterItems = await fetchLOV(`${ORDS_BASE}/inventory/itemmaster?org=${header.shipToOrg}`, false);
-          if (masterItems.length > 0) {
-            saveItemmasterCache(header.shipToOrg, masterItems);
-            setItemCacheTs(new Date().toISOString());
+    setAddItemApiUrl('Validating items using itemsV2…');
+
+    const org = header.shipToOrg;
+    const itemNumbers = Array.from(new Set(pastedRows.map(r => r.itemNumber)));
+    const fusionMap = new Map<string, any>();
+
+    // Validate all items using itemsV2 in parallel (up to 8 concurrent requests)
+    let idx = 0;
+    const worker = async () => {
+      while (idx < itemNumbers.length) {
+        const num = itemNumbers[idx++];
+        const url = `${FUSION_BASE}/itemsV2?q=OrganizationCode=${org};ItemNumber=${encodeURIComponent(num)}&limit=1&onlyData=true`;
+        setAddItemApiUrl(`GET itemsV2?q=OrganizationCode=${org};ItemNumber=${num}&limit=1&onlyData=true`);
+        try {
+          const r = await fetch(url, { headers: FUSION_HDRS });
+          if (r.ok) {
+            const d = await r.json();
+            const it = (d.items ?? [])[0];
+            if (it?.ItemNumber) {
+              fusionMap.set(String(it.ItemNumber).toUpperCase(), it);
+            }
           }
-        }
-        setItems(masterItems);
-      } catch { /* use empty */ }
-    }
-    const masterMap = new Map(masterItems.map((it: any) => [String(it.item_number ?? '').toUpperCase(), it]));
-    // First pass — match against the ORDS/APEX item master.
-    let rows = pastedRows.map(r => {
-      const matched = masterMap.get(r.itemNumber.toUpperCase());
-      return { ...r, status: (matched ? 'valid' : 'invalid') as PastedItem['status'], matchedItem: matched };
-    });
-    // Second pass — for anything not in the master, check the Fusion item web
-    // service (itemsV2) for this org; if found there, mark it valid too.
-    const missing = Array.from(new Set(rows.filter(r => r.status !== 'valid').map(r => r.itemNumber)));
-    if (missing.length && header?.shipToOrg) {
-      const fusionMap = new Map<string, any>();
-      // itemsV2 doesn't accept `ItemNumber in (...)` — query one item at a time
-      // (ItemNumber = <value>), a few in parallel.
-      const org = header.shipToOrg;
-      let idx = 0;
-      const worker = async () => {
-        while (idx < missing.length) {
-          const num = missing[idx++];
-          const url = `${FUSION_BASE}/itemsV2?q=OrganizationCode=${org};ItemNumber=${encodeURIComponent(num)}&limit=1&onlyData=true`;
-          try {
-            const r = await fetch(url, { headers: FUSION_HDRS });
-            if (r.ok) { const d = await r.json(); const it = (d.items ?? [])[0]; if (it?.ItemNumber) fusionMap.set(String(it.ItemNumber).toUpperCase(), it); }
-          } catch { /* ignore this item */ }
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(6, missing.length) }, worker));
-      if (fusionMap.size) {
-        rows = rows.map(r => {
-          if (r.status === 'valid') return r;
-          const f = fusionMap.get(r.itemNumber.toUpperCase());
-          if (!f) return r;
-          // Normalize the Fusion item onto the item-master shape used downstream.
-          const matchedItem = {
-            item_number: f.ItemNumber,
-            description: f.ItemDescription ?? '',
-            primary_uom_code: f.PrimaryUOMValue ?? f.PrimaryUnitOfMeasure ?? '',
-            uom: f.PrimaryUOMValue ?? f.PrimaryUnitOfMeasure ?? '',
-            _source: 'fusion',
-          };
-          return { ...r, status: 'valid' as PastedItem['status'], matchedItem };
-        });
+        } catch { /* ignore this item */ }
       }
-    }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(8, itemNumbers.length) }, worker));
+
+    // Update rows with validation results
+    const rows = pastedRows.map(r => {
+      const f = fusionMap.get(r.itemNumber.toUpperCase());
+      if (!f) return { ...r, status: 'invalid' as PastedItem['status'] };
+
+      // Normalize the Fusion item onto the item-master shape used downstream.
+      const matchedItem = {
+        item_number: f.ItemNumber,
+        description: f.ItemDescription ?? '',
+        primary_uom_code: f.PrimaryUOMValue ?? f.PrimaryUnitOfMeasure ?? '',
+        uom: f.PrimaryUOMValue ?? f.PrimaryUnitOfMeasure ?? '',
+        _source: 'fusion',
+      };
+      return { ...r, status: 'valid' as PastedItem['status'], matchedItem };
+    });
+
     setPastedRows(rows);
     setImportValidating(false);
+    setAddItemApiUrl('');
   };
 
   // Apply the pasted rows. overwrite=true updates qty/price on lines already on
