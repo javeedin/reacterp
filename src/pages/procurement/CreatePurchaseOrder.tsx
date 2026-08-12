@@ -2679,7 +2679,13 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
               initialValues={{ orderDate: dayjs() }}
               style={{ '--form-item-margin-bottom': '8px' } as React.CSSProperties}>
               <style>{`.ant-form-item { margin-bottom: 8px !important; }`}</style>
-              <Divider orientation={"left" as any} plain style={{ fontSize: 11, color: C.textMid, margin: '4px 0 8px' }}>Organization & Order</Divider>
+              <Tabs size="small" defaultActiveKey="header" items={[
+                {
+                  key: 'header',
+                  label: 'Header',
+                  children: (
+                    <>
+                      <Divider orientation={"left" as any} plain style={{ fontSize: 11, color: C.textMid, margin: '4px 0 8px' }}>Organization & Order</Divider>
               <Row gutter={[12, 0]}>
                 <Col span={12}>
                   <Form.Item name="procurementBU" label="Procurement BU" rules={[{ required: true }]}>
@@ -3280,59 +3286,60 @@ ${JSON.stringify({ name: actionName, parameters: [] }, null, 2)}`}
                 </div>
               </div>
 
-              {/* ── Terms & Notes ───────────────────────── */}
-              <Card size="small" style={{ borderRadius: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
-                <Tabs size="small" defaultActiveKey="terms" items={[
-                  {
-                    key: 'terms', label: 'Terms',
-                    children: (
-                      <Row gutter={[32, 0]}>
-                        <Col xs={24} md={8}>
-                          <InfoTile label="Required Acknowledgment" value={
-                            <Select size="small" defaultValue="None" style={{ width: 130 }}>
-                              <Option value="None">None</Option>
-                              <Option value="Required">Required</Option>
-                            </Select>
-                          } />
-                          <InfoTile label="Payment Terms"
-                            value={<InlineEdit value={header.paymentTerms} onChange={v => patch({ paymentTerms: v })} placeholder="e.g. CR30D" />} />
-                        </Col>
-                        <Col xs={24} md={8}>
-                          <InfoTile label="Shipping Method"
-                            value={<InlineEdit value={header.shippingMethod} onChange={v => patch({ shippingMethod: v })} placeholder="—" />} />
-                          <InfoTile label="Freight Terms"
-                            value={<InlineEdit value={header.freightTerms} onChange={v => patch({ freightTerms: v })} placeholder="—" />} />
-                          <InfoTile label="FOB"
-                            value={<InlineEdit value={header.fob} onChange={v => patch({ fob: v })} placeholder="—" />} />
-                        </Col>
-                        <Col xs={24} md={8}>
-                          <InfoTile label="Pay on Receipt"
-                            value={<Checkbox checked={header.payOnReceipt} onChange={e => patch({ payOnReceipt: e.target.checked })}><Text style={{ fontSize: 13 }}>Yes</Text></Checkbox>} />
-                          <InfoTile label="Confirming Order"
-                            value={<Checkbox checked={header.confirmingOrder} onChange={e => patch({ confirmingOrder: e.target.checked })}><Text style={{ fontSize: 13 }}>Yes</Text></Checkbox>} />
-                        </Col>
-                      </Row>
-                    ),
-                  },
-                  {
-                    key: 'notes', label: 'Notes & Attachments',
-                    children: (
-                      <Row gutter={[24, 0]}>
-                        <Col xs={24} md={12}>
-                          <Text style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: C.textLight }}>Note to Supplier</Text>
-                          <Input.TextArea rows={3} value={header.noteToSupplier}
-                            onChange={e => patch({ noteToSupplier: e.target.value })} placeholder="Note to supplier…" style={{ marginTop: 4 }} />
-                        </Col>
-                        <Col xs={24} md={12}>
-                          <Text style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: C.textLight }}>Note to Receiver</Text>
-                          <Input.TextArea rows={3} value={header.noteToReceiver}
-                            onChange={e => patch({ noteToReceiver: e.target.value })} placeholder="Note to receiver…" style={{ marginTop: 4 }} />
-                        </Col>
-                      </Row>
-                    ),
-                  },
-                ]} />
-              </Card>
+                    </>
+                  ),
+                },
+                {
+                  key: 'terms',
+                  label: 'Terms',
+                  children: (
+                    <Row gutter={[32, 0]}>
+                      <Col xs={24} md={8}>
+                        <InfoTile label="Required Acknowledgment" value={
+                          <Select size="small" defaultValue="None" style={{ width: 130 }}>
+                            <Option value="None">None</Option>
+                            <Option value="Required">Required</Option>
+                          </Select>
+                        } />
+                        <InfoTile label="Payment Terms"
+                          value={<InlineEdit value={header.paymentTerms} onChange={v => patch({ paymentTerms: v })} placeholder="e.g. CR30D" />} />
+                      </Col>
+                      <Col xs={24} md={8}>
+                        <InfoTile label="Shipping Method"
+                          value={<InlineEdit value={header.shippingMethod} onChange={v => patch({ shippingMethod: v })} placeholder="—" />} />
+                        <InfoTile label="Freight Terms"
+                          value={<InlineEdit value={header.freightTerms} onChange={v => patch({ freightTerms: v })} placeholder="—" />} />
+                        <InfoTile label="FOB"
+                          value={<InlineEdit value={header.fob} onChange={v => patch({ fob: v })} placeholder="—" />} />
+                      </Col>
+                      <Col xs={24} md={8}>
+                        <InfoTile label="Pay on Receipt"
+                          value={<Checkbox checked={header.payOnReceipt} onChange={e => patch({ payOnReceipt: e.target.checked })}><Text style={{ fontSize: 13 }}>Yes</Text></Checkbox>} />
+                        <InfoTile label="Confirming Order"
+                          value={<Checkbox checked={header.confirmingOrder} onChange={e => patch({ confirmingOrder: e.target.checked })}><Text style={{ fontSize: 13 }}>Yes</Text></Checkbox>} />
+                      </Col>
+                    </Row>
+                  ),
+                },
+                {
+                  key: 'notes',
+                  label: 'Notes & Attachments',
+                  children: (
+                    <Row gutter={[24, 0]}>
+                      <Col xs={24} md={12}>
+                        <Text style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: C.textLight }}>Note to Supplier</Text>
+                        <Input.TextArea rows={3} value={header.noteToSupplier}
+                          onChange={e => patch({ noteToSupplier: e.target.value })} placeholder="Note to supplier…" style={{ marginTop: 4 }} />
+                      </Col>
+                      <Col xs={24} md={12}>
+                        <Text style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: C.textLight }}>Note to Receiver</Text>
+                        <Input.TextArea rows={3} value={header.noteToReceiver}
+                          onChange={e => patch({ noteToReceiver: e.target.value })} placeholder="Note to receiver…" style={{ marginTop: 4 }} />
+                      </Col>
+                    </Row>
+                  ),
+                },
+              ]} />
 
               {/* ── Lines ───────────────────────────────── */}
               <Card size="small" style={{ borderRadius: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
