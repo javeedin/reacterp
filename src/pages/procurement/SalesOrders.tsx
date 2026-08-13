@@ -6031,6 +6031,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   }, [editOrder, isBranchSales, hdrEffVals, hdr.branchBU]);
 
   // Populate Branch BU and Branch Sales Order in EFF when values are selected
+  const effSyncRef = useRef<string>('');
   useEffect(() => {
     if (hdrEffCtxs.length > 0) {
       const active = hdrEffCtxs.find(c => c.voName === hdrEffCtxSel);
@@ -6059,7 +6060,10 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           }
         }
 
-        if (Object.keys(updates).length > 0) {
+        // Only update if values have changed
+        const syncKey = JSON.stringify(updates);
+        if (syncKey !== effSyncRef.current && Object.keys(updates).length > 0) {
+          effSyncRef.current = syncKey;
           setHdrEffVals(v => ({ ...v, ...updates }));
         }
       }
@@ -6237,10 +6241,14 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   // On edit: retrieve each saved line's Additional Information (EFF) and prefill
   // the per-line segment inputs (lines → additionalInformation → FulfillLineEffB VO).
   // Guarded on effVals == null so it runs once per (re)load, not on every keystroke.
+  const lineEffLoadRef = useRef(false);
   useEffect(() => {
-    if (!editMode) return;
+    if (!editMode || lineEffLoadRef.current) return;
     const todo = lines.filter(l => l.lineHref && l.existing && l.effVals == null);
-    if (!todo.length) return;
+    if (!todo.length) {
+      lineEffLoadRef.current = true;
+      return;
+    }
     (async () => {
       for (const l of todo) {
         const vals: Record<string, string> = {};
@@ -6252,8 +6260,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         // Mark effVals (even if empty {}) so this line isn't re-fetched next render.
         setLines(prev => prev.map(x => x.key === l.key && x.effVals == null ? { ...x, effVals: vals } : x));
       }
+      lineEffLoadRef.current = true;
     })();
-  }, [lines, editMode]);
+  }, [editMode]);
 
   // Tax code often comes back null on the line even when tax applies. Once the BU's
   // tax codes load, back-fill any line that has a derived tax % but no recognised
