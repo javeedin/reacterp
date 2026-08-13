@@ -93,22 +93,24 @@ export default function AIStockAnalysis() {
     try {
       addLog('info', 'Starting stock analysis', `Analyzing ${stock.symbol}`);
 
-      const prompt = `Analyze the stock ${stock.symbol} (${stock.symbolName}) listed on ${stock.exchange}.
+      const prompt = `You are a stock analysis AI. Analyze the stock ${stock.symbol} (${stock.symbolName}) listed on ${stock.exchange}.
       Current Price: ₹${stock.cmp}
       Quantity Held: ${stock.qty}
 
-      Please provide:
-      1. Latest news and updates about this stock
-      2. Current market trends and technical indicators
-      3. Current market price and price movement analysis
-      4. Recent financial results and performance metrics
-      5. Buy/Sell/Hold recommendation with:
-         - Action (BUY/SELL/HOLD)
-         - Target price
-         - Confidence level (0-100)
-         - Detailed reasoning
+      IMPORTANT: Return ONLY valid JSON with NO markdown, NO disclaimers, NO extra text.
 
-      Format your response as JSON with keys: news, trends, marketPrice, financials, recommendations (with action, targetPrice, confidence, reasoning)`;
+      Provide analysis for these EXACT keys:
+      - news: String with latest news and updates
+      - trends: String with market trends and technical indicators
+      - marketPrice: String with price analysis and movements
+      - financials: String with recent financial results
+      - recommendations: Object with:
+        * action: "BUY" or "SELL" or "HOLD"
+        * targetPrice: Number
+        * confidence: Number (0-100)
+        * reasoning: String
+
+      Return ONLY the JSON object, nothing else.`;
 
       addLog('info', 'Sending request to Claude API', `Model: claude-opus-5, Max Tokens: 2000`);
 
@@ -153,6 +155,9 @@ export default function AIStockAnalysis() {
 
       let jsonMatch = content.match(/```json\n([\s\S]*?)\n```/);
       if (!jsonMatch) {
+        jsonMatch = content.match(/\{[\s\S]*?\n\}/);
+      }
+      if (!jsonMatch) {
         jsonMatch = content.match(/\{[\s\S]*\}/);
       }
 
@@ -161,17 +166,32 @@ export default function AIStockAnalysis() {
         throw new Error('Failed to extract JSON from API response');
       }
 
-      const jsonText = jsonMatch[1] || jsonMatch[0];
-      addLog('info', 'JSON extracted', jsonText.substring(0, 200) + '...');
+      let jsonText = jsonMatch[1] || jsonMatch[0];
+      addLog('info', 'JSON extracted', `Length: ${jsonText.length}, First 200 chars: ${jsonText.substring(0, 200)}...`);
 
       try {
-        const parsed = JSON.parse(jsonText);
+        let parsed = JSON.parse(jsonText);
         setAnalysis(parsed);
         addLog('success', 'Analysis completed successfully', `Parsed analysis with keys: ${Object.keys(parsed).join(', ')}`);
         msgApi.success('Analysis completed');
       } catch (parseError) {
-        addLog('error', 'JSON parse error', `Error: ${parseError instanceof Error ? parseError.message : 'Unknown'}\nJSON text: ${jsonText.substring(0, 300)}`);
-        throw new Error(`Failed to parse JSON: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+        addLog('warn', 'JSON parse error, attempting cleanup', `Error: ${parseError instanceof Error ? parseError.message : 'Unknown'}`);
+
+        try {
+          const cleanedJson = jsonText
+            .replace(/,\s*}/g, '}')
+            .replace(/,\s*]/g, ']')
+            .replace(/'/g, '"');
+
+          addLog('info', 'Attempting to parse cleaned JSON', `Cleaned length: ${cleanedJson.length}`);
+          const parsed = JSON.parse(cleanedJson);
+          setAnalysis(parsed);
+          addLog('success', 'Analysis completed (after cleanup)', `Parsed analysis with keys: ${Object.keys(parsed).join(', ')}`);
+          msgApi.success('Analysis completed');
+        } catch (retryError) {
+          addLog('error', 'Final JSON parse failed', `Cleanup also failed. Error: ${retryError instanceof Error ? retryError.message : 'Unknown'}\n\nJSON preview:\n${jsonText.substring(0, 500)}`);
+          throw new Error(`Failed to parse JSON response: ${retryError instanceof Error ? retryError.message : 'Unknown error'}`);
+        }
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
