@@ -5969,10 +5969,11 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-populate form when bUnits load (for initial header value set)
+  const formInitRef = useRef(false);
   useEffect(() => {
     try {
       console.log('NewOrderTab: bUnits loaded, count:', bUnits.length);
-      if (bUnits.length > 0) {
+      if (bUnits.length > 0 && !formInitRef.current) {
         const h = initialDraft?.header ?? header;
         if (h && h.businessUnit) {
           console.log('NewOrderTab: Setting businessUnit field to:', h.businessUnit);
@@ -5982,12 +5983,13 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         if (h && h.branchBU && isBranchSales) {
           console.log('NewOrderTab: Populating branchBU for edit mode:', h.branchBU);
           form.setFieldsValue({ branchBU: h.branchBU });
+          formInitRef.current = true;
         }
       }
     } catch (e) {
       console.error('NewOrderTab: Error re-populating form:', e);
     }
-  }, [bUnits.length, form, header, initialDraft, isBranchSales]);
+  }, [bUnits.length, isBranchSales]);
 
   // Update isBranchSales based on order type (initial load or change)
   useEffect(() => {
@@ -6006,8 +6008,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   }, [isBranchSales]);
 
   // When editing a branch sales order, if branchBusinessUnit has a stored value in EFF or hdr.branchBU, disable the field
+  const branchBUInitRef = useRef(false);
   useEffect(() => {
-    if (editOrder && isBranchSales) {
+    if (editOrder && isBranchSales && !branchBUInitRef.current) {
       // Check if branchBU has a value from EFF or current form state
       const branchBuValue = hdrEffVals?.['branchBusinessUnit'] || hdr.branchBU;
       if (branchBuValue) {
@@ -6016,14 +6019,16 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           form.setFieldsValue({ branchBU: hdrEffVals['branchBusinessUnit'] });
         }
         setIsBranchBUDisabled(true);
+        branchBUInitRef.current = true;
       } else {
         setIsBranchBUDisabled(false);
       }
-    } else {
+    } else if (!editOrder || !isBranchSales) {
       // Reset disabled state when not editing or not a branch sales order
       setIsBranchBUDisabled(false);
+      branchBUInitRef.current = false;
     }
-  }, [editOrder, hdrEffVals, hdr.branchBU, isBranchSales, form]);
+  }, [editOrder, isBranchSales, hdrEffVals, hdr.branchBU]);
 
   // Populate Branch BU and Branch Sales Order in EFF when values are selected
   useEffect(() => {
@@ -7342,6 +7347,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       // Build PO header payload with correct Fusion structure
       const poPayload = {
         ProcurementBUId: procBUId,
+        RequisitioningBUId: procBUId,
         OrderNumber: `BRNS-${savedOrderNumber}`,
         RequiredAcknowledgment: 'None',
         CurrencyCode: currency,
