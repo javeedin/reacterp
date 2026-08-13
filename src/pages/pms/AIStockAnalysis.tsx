@@ -115,6 +115,7 @@ export default function AIStockAnalysis() {
   const [chatLoading, setChatLoading] = useState(false);
   const [priceMovement, setPriceMovement] = useState<{ percentage: number; isUp: boolean } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [exchangeRates, setExchangeRates] = useState({ usd: 83, aed: 15 }); // Default fallback rates
 
   const addLog = useCallback((level: 'info' | 'error' | 'success' | 'warn', message: string, details?: string) => {
     const now = new Date().toLocaleTimeString();
@@ -128,26 +129,37 @@ export default function AIStockAnalysis() {
   const refreshPrice = useCallback(async () => {
     if (!stock) return;
     setRefreshing(true);
+    addLog('info', 'Fetching exchange rates and price data');
     try {
-      const response = await fetch(
+      // Fetch exchange rates
+      const ratesResponse = await fetch('https://api.exchangerate-api.com/v4/latest/INR');
+      if (ratesResponse.ok) {
+        const ratesData = await ratesResponse.json();
+        const usdRate = ratesData.rates?.USD || 83;
+        const aedRate = ratesData.rates?.AED || 15;
+        setExchangeRates({ usd: usdRate, aed: aedRate });
+        addLog('success', 'Exchange rates fetched', `USD: ${usdRate.toFixed(2)}, AED: ${aedRate.toFixed(2)}`);
+      }
+
+      // Fetch price movement data
+      const priceResponse = await fetch(
         `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${stock.symbol}?modules=price`
       );
-      if (response.ok) {
-        const data = await response.json();
-        const currentPrice = data.quoteSummary?.result?.[0]?.price?.regularMarketPrice;
-        const change = data.quoteSummary?.result?.[0]?.price?.regularMarketChange;
-        const changePercent = data.quoteSummary?.result?.[0]?.price?.regularMarketChangePercent;
+      if (priceResponse.ok) {
+        const priceData = await priceResponse.json();
+        const changePercent = priceData.quoteSummary?.result?.[0]?.price?.regularMarketChangePercent;
 
         if (changePercent !== undefined) {
           setPriceMovement({
             percentage: Math.abs(changePercent),
             isUp: changePercent >= 0,
           });
-          msgApi.success(`Price: ₹${currentPrice?.toFixed(2) || stock.cmp}`);
+          addLog('success', 'Price movement updated', `Change: ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%`);
+          msgApi.success('Exchange rates and price data updated');
         }
       }
     } catch (error) {
-      addLog('warn', 'Unable to fetch live price', 'Using historical data only');
+      addLog('warn', 'Unable to fetch live data', error instanceof Error ? error.message : 'Using cached rates');
     } finally {
       setRefreshing(false);
     }
@@ -714,7 +726,7 @@ Provide a concise, helpful answer based on the stock's fundamentals, market posi
         <Card style={{ marginBottom: 16, borderRadius: 8 }}>
           <Row gutter={[16, 16]} align="middle">
             {/* Left: Symbol & Details */}
-            <Col xs={24} sm={12} lg={6}>
+            <Col xs={24} sm={12} lg={5}>
               <div>
                 <Title level={4} style={{ margin: 0, color: COLORS.primary }}>
                   {stock.symbol}
@@ -732,7 +744,7 @@ Provide a concise, helpful answer based on the stock's fundamentals, market posi
             </Col>
 
             {/* Middle: Recommendation */}
-            <Col xs={24} sm={12} lg={6}>
+            <Col xs={24} sm={12} lg={5}>
               <Card
                 size="small"
                 style={{
@@ -764,7 +776,7 @@ Provide a concise, helpful answer based on the stock's fundamentals, market posi
             </Col>
 
             {/* Price & Movement */}
-            <Col xs={24} sm={12} lg={5}>
+            <Col xs={24} sm={12} lg={4}>
               <Row gutter={8} align="middle">
                 <Col xs={24}>
                   <Text style={{ fontSize: 11, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
@@ -796,29 +808,50 @@ Provide a concise, helpful answer based on the stock's fundamentals, market posi
             </Col>
 
             {/* Quantity & Total Value */}
-            <Col xs={24} sm={12} lg={5}>
-              <Row gutter={[8, 8]}>
-                <Col xs={12}>
+            <Col xs={24} sm={24} lg={7}>
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <div>
                   <Text style={{ fontSize: 11, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
                     Qty Held
                   </Text>
                   <Text strong style={{ fontSize: 16, fontFamily: 'monospace' }}>
                     {stock.qty.toLocaleString()}
                   </Text>
-                </Col>
-                <Col xs={12}>
+                </div>
+
+                <Divider style={{ margin: '8px 0' }} />
+
+                <div>
                   <Text style={{ fontSize: 11, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
-                    Total Value
+                    Total Value (INR)
                   </Text>
-                  <Text strong style={{ fontSize: 16, fontFamily: 'monospace', color: COLORS.primary }}>
+                  <Text strong style={{ fontSize: 14, fontFamily: 'monospace', color: COLORS.primary }}>
                     ₹{(stock.cmp * stock.qty).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                   </Text>
-                </Col>
-              </Row>
+                </div>
+
+                <div>
+                  <Text style={{ fontSize: 11, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+                    In USD
+                  </Text>
+                  <Text strong style={{ fontSize: 14, fontFamily: 'monospace', color: COLORS.blue }}>
+                    ${((stock.cmp * stock.qty) / exchangeRates.usd).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </Text>
+                </div>
+
+                <div>
+                  <Text style={{ fontSize: 11, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+                    In AED
+                  </Text>
+                  <Text strong style={{ fontSize: 14, fontFamily: 'monospace', color: COLORS.orange }}>
+                    د.إ{((stock.cmp * stock.qty) / exchangeRates.aed).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </Text>
+                </div>
+              </Space>
             </Col>
 
             {/* Refresh Button */}
-            <Col xs={24} sm={24} lg={2} style={{ textAlign: 'right' }}>
+            <Col xs={24} sm={24} lg={3} style={{ textAlign: 'right' }}>
               <Button
                 icon={<ReloadOutlined />}
                 loading={refreshing}
