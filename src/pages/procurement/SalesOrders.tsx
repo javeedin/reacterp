@@ -1964,7 +1964,13 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
       if (append) setLoadingMore(false); else setLoading(false);
     }
   }, [searchUrl]);
-  const runSearch = useCallback(() => fetchPage(0, false), [fetchPage]);
+  const runSearch = useCallback(() => {
+    if (!filters.businessUnitId) {
+      message.error('Please select a Business Unit to search');
+      return;
+    }
+    fetchPage(0, false);
+  }, [fetchPage, filters.businessUnitId]);
   const loadMore = useCallback(() => fetchPage(pageOffset + SEARCH_LIMIT, true), [fetchPage, pageOffset]);
 
   const filtered = useMemo(() => {
@@ -1972,8 +1978,10 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
     // Hide reference/skeleton orders (StatusCode DOO_REFERENCE) unless opted in.
     if (!showDooRef) base = base.filter(r => String(r.StatusCode ?? '').toUpperCase() !== 'DOO_REFERENCE');
     const t = filterText.trim().toLowerCase();
-    if (!t) return base;
-    return base.filter(r => JSON.stringify(r).toLowerCase().includes(t));
+    if (t) base = base.filter(r => JSON.stringify(r).toLowerCase().includes(t));
+    // Sort by Order Date descending (most recent first)
+    base = base.sort((a, b) => new Date(b.TransactionOn ?? '').getTime() - new Date(a.TransactionOn ?? '').getTime());
+    return base;
   }, [rows, filterText, showDooRef]);
 
   const columns = useMemo<ColumnsType<any>>(() => ([
@@ -1990,8 +1998,9 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
     { title: 'Order', dataIndex: 'OrderNumber', width: 100,
       sorter: (a, b) => String(a.OrderNumber ?? '').localeCompare(String(b.OrderNumber ?? '')),
       render: v => <Text strong style={{ fontSize: 12 }}>{v ?? '—'}</Text> },
-    { title: 'Order Date', dataIndex: 'TransactionOn', width: 130, render: fmtDateTime,
-      sorter: (a, b) => String(a.TransactionOn ?? '').localeCompare(String(b.TransactionOn ?? '')) },
+    { title: 'Order Date', dataIndex: 'TransactionOn', width: 130, render: fmtDate,
+      sorter: (a, b) => new Date(b.TransactionOn ?? '').getTime() - new Date(a.TransactionOn ?? '').getTime(),
+      defaultSortOrder: 'descend' as const },
     { title: 'Transaction Type', dataIndex: 'TransactionType', width: 140,
       sorter: (a, b) => String(a.TransactionType ?? '').localeCompare(String(b.TransactionType ?? '')),
       render: (v, r) => v ? <Tag color="purple" style={{ fontSize: 11 }}>{v}</Tag> : (r.TransactionTypeCode ? <Tag style={{ fontSize: 11 }}>{r.TransactionTypeCode}</Tag> : '—') },
@@ -2444,7 +2453,7 @@ const SearchTab: React.FC<{ onOpen: (order: any) => void; onEdit: (order: any) =
               </Form.Item>
             </Col>
             <Col xs={12} sm={8} md={5}>
-              <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Business Unit</Text>} style={{ marginBottom: 6 }}>
+              <Form.Item label={<Text style={{ fontSize: 11, fontWeight: 600 }}>Business Unit <span style={{ color: 'red' }}>*</span></Text>} style={{ marginBottom: 6 }} required>
                 <Select
                   allowClear
                   showSearch
