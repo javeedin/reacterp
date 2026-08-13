@@ -4443,6 +4443,50 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         {(() => {
           const [viewMode, setViewMode] = React.useState<'bank-to-sys' | 'sys-to-bank'>('bank-to-sys');
 
+          const handleExportMatching = () => {
+            const ws_data: any[] = [];
+            if (viewMode === 'bank-to-sys') {
+              ws_data.push(['Statement ID', 'Line ID', 'Reference', 'Type', 'Bank Amount', 'System Txn(s)', 'Sys Type', 'Date', 'Sys Amount', 'Difference']);
+              matches.forEach(m => {
+                ws_data.push([
+                  m.bankLine?.statementId || '',
+                  m.bankLine?.lineId || '',
+                  m.bankLine?.reference || '',
+                  m.bankLine?.transactionCode || '',
+                  m.totalBankAmount || 0,
+                  m.sysTxns?.map(t => t.txnNumber).join(', ') || '—',
+                  m.sysTxns?.[0]?.source?.replace('_', ' ') || '—',
+                  m.sysTxns?.[0]?.txnDate?.slice(0, 10) || m.bankLine?.transactionDate?.slice(0, 10) || '',
+                  m.totalSysAmount || 0,
+                  m.difference || 0,
+                ]);
+              });
+              ws_data.push(['', '', '', 'TOTAL', totalBankSum, '', '', '', totalSysSum, totalBankSum - totalSysSum]);
+            } else {
+              ws_data.push(['Txn ID', 'Payee', 'Type', 'Sys Amount', 'Bank Line(s)', 'Bank Type', 'Date', 'Bank Amount', 'Difference']);
+              matches.forEach(m => {
+                ws_data.push([
+                  m.sysTxn?.txnNumber || '',
+                  m.sysTxn?.payee || m.sysTxn?.customerName || '',
+                  m.sysTxn?.source?.replace('_', ' ') || '',
+                  m.totalSysAmount || 0,
+                  m.bankLines?.map(l => `#${l.lineId}`).join(', ') || '—',
+                  m.bankLines?.[0]?.transactionCode || '—',
+                  m.sysTxn?.txnDate?.slice(0, 10) || '',
+                  m.totalBankAmount || 0,
+                  m.difference || 0,
+                ]);
+              });
+              ws_data.push(['', '', '', totalSysSum, '', '', '', totalBankSum, totalBankSum - totalSysSum]);
+            }
+            const ws = XLSX.utils.aoa_to_sheet(ws_data);
+            ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, `Matching-${viewMode}`);
+            const timestamp = dayjs().format('YYYY-MM-DD_HHmmss');
+            XLSX.writeFile(wb, `matching-${viewMode}-${timestamp}.xlsx`);
+          };
+
           const buildMatches = () => {
             const matches: Array<{
               bankLine?: typeof filteredStmtLines[0];
@@ -4521,6 +4565,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                   <div><Text strong>Matched:</Text> <Tag color="green">{matchedCount}</Tag></div>
                   <div><Text strong>Unmatched:</Text> <Tag color="red">{matches.filter(m => m.matchType === 'No Match').length}</Tag></div>
                   <div><Text strong>Difference:</Text> <Text style={{ color: Math.abs(totalBankSum - totalSysSum) < 0.01 ? REDWOOD.success : REDWOOD.warning, fontWeight: 600 }}>{fmtAmount(totalBankSum - totalSysSum)}</Text></div>
+                  <Button type="primary" size="small" icon={<DownloadOutlined />} onClick={handleExportMatching}>Export</Button>
                 </Space>
               </div>
 
@@ -4533,9 +4578,14 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 scroll={{ x: 1100 }}
                 columns={viewMode === 'bank-to-sys' ? [
                   {
-                    title: 'Bank Line ID',
-                    width: 80,
-                    render: (_, rec) => <Text>{rec.bankLine?.lineId}</Text>,
+                    title: 'Statement ID',
+                    width: 90,
+                    render: (_, rec) => <Text style={{ fontSize: 11 }}>{rec.bankLine?.statementId}</Text>,
+                  },
+                  {
+                    title: 'Line ID',
+                    width: 70,
+                    render: (_, rec) => <Text strong>{rec.bankLine?.lineId}</Text>,
                   },
                   {
                     title: 'Reference',
@@ -4544,18 +4594,18 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                   },
                   {
                     title: 'Type',
-                    width: 70,
+                    width: 60,
                     render: (_, rec) => <Text style={{ fontSize: 11 }}>{rec.bankLine?.transactionCode}</Text>,
                   },
                   {
                     title: 'Bank Amount',
-                    width: 90,
+                    width: 95,
                     align: 'right',
                     render: (_, rec) => <Text strong>{fmtAmount(rec.totalBankAmount)}</Text>,
                   },
                   {
                     title: 'System Txn(s)',
-                    width: 100,
+                    width: 110,
                     render: (_, rec) => (
                       rec.sysTxns && rec.sysTxns.length > 0
                         ? <Text style={{ fontSize: 11 }}>{rec.sysTxns.map(t => t.txnNumber).join(', ')}</Text>
@@ -4564,7 +4614,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                   },
                   {
                     title: 'Sys Type',
-                    width: 70,
+                    width: 80,
                     render: (_, rec) => (
                       rec.sysTxns && rec.sysTxns.length > 0
                         ? <Tag color="geekblue" style={{ fontSize: 10, margin: 0 }}>{rec.sysTxns[0]?.source?.replace('_', ' ')}</Tag>
@@ -4573,18 +4623,18 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                   },
                   {
                     title: 'Date',
-                    width: 80,
+                    width: 75,
                     render: (_, rec) => <Text style={{ fontSize: 11 }}>{rec.sysTxns?.[0]?.txnDate?.slice(0, 10) || rec.bankLine?.transactionDate?.slice(0, 10)}</Text>,
                   },
                   {
                     title: 'Sys Amount',
-                    width: 90,
+                    width: 95,
                     align: 'right',
                     render: (_, rec) => <Text style={{ color: rec.sysTxns && rec.sysTxns.length > 0 ? REDWOOD.success : REDWOOD.error }}>{fmtAmount(rec.totalSysAmount)}</Text>,
                   },
                   {
                     title: 'Difference',
-                    width: 80,
+                    width: 85,
                     align: 'right',
                     render: (_, rec) => <Text style={{ color: Math.abs(rec.difference) < 0.01 ? REDWOOD.success : REDWOOD.warning, fontWeight: 500 }}>{fmtAmount(rec.difference)}</Text>,
                   },
