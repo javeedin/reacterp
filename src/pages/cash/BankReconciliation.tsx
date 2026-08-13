@@ -4431,7 +4431,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         )}
       </Modal>
 
-      {/* ── Matching View Modal (Table-based with toggle) ──────────────── */}
+      {/* ── Matching View Modal (Simple table format) ──────────────── */}
       <Modal
         title={<Space><LinkOutlined style={{ color: '#1890ff' }} /><span>Matching Analysis</span></Space>}
         open={matchingViewOpen}
@@ -4443,7 +4443,6 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         {(() => {
           const [viewMode, setViewMode] = React.useState<'bank-to-sys' | 'sys-to-bank'>('bank-to-sys');
 
-          // Build matching map: which system txns match which bank lines
           const buildMatches = () => {
             const matches: Array<{
               bankLine?: typeof filteredStmtLines[0];
@@ -4457,7 +4456,6 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             }> = [];
 
             if (viewMode === 'bank-to-sys') {
-              // Bank → System: group by bank line
               filteredStmtLines.forEach(bankLine => {
                 const matchedSysTxns = filteredSysTxns.filter(t => Math.abs(t.amount - bankLine.amount) < 0.01);
                 const totalSysAmount = matchedSysTxns.reduce((sum, t) => sum + t.amount, 0);
@@ -4473,7 +4471,6 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 });
               });
             } else {
-              // System → Bank: group by system transaction
               filteredSysTxns.forEach(sysTxn => {
                 const matchedBankLines = filteredStmtLines.filter(l => Math.abs(l.amount - sysTxn.amount) < 0.01);
                 const totalBankAmount = matchedBankLines.reduce((sum, l) => sum + l.amount, 0);
@@ -4523,191 +4520,140 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 <Space split={<Divider type="vertical" />} style={{ fontSize: 12 }}>
                   <div><Text strong>Matched:</Text> <Tag color="green">{matchedCount}</Tag></div>
                   <div><Text strong>Unmatched:</Text> <Tag color="red">{matches.filter(m => m.matchType === 'No Match').length}</Tag></div>
-                  <div><Text strong>Total Difference:</Text> <Text style={{ color: Math.abs(totalBankSum - totalSysSum) < 0.01 ? REDWOOD.success : REDWOOD.warning, fontWeight: 600 }}>{fmtAmount(totalBankSum - totalSysSum)}</Text></div>
+                  <div><Text strong>Difference:</Text> <Text style={{ color: Math.abs(totalBankSum - totalSysSum) < 0.01 ? REDWOOD.success : REDWOOD.warning, fontWeight: 600 }}>{fmtAmount(totalBankSum - totalSysSum)}</Text></div>
                 </Space>
               </div>
 
-              {/* Matching Table */}
+              {/* Simple Matching Table */}
               <Table
                 size="small"
                 dataSource={matches}
                 pagination={false}
                 rowKey={(_, idx) => idx}
-                scroll={{ x: 1200 }}
+                scroll={{ x: 1100 }}
                 columns={viewMode === 'bank-to-sys' ? [
                   {
-                    title: 'Bank Line',
-                    width: 120,
-                    render: (_, rec) => (
-                      <div>
-                        <div style={{ fontWeight: 500, fontSize: 12 }}>
-                          {rec.bankLine?.description || rec.bankLine?.reference || `Line #${rec.bankLine?.lineId}`}
-                        </div>
-                        <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
-                          {rec.bankLine?.transactionDate?.slice(0, 10)}
-                        </div>
-                      </div>
-                    ),
+                    title: 'Bank Line ID',
+                    width: 80,
+                    render: (_, rec) => <Text>{rec.bankLine?.lineId}</Text>,
+                  },
+                  {
+                    title: 'Reference',
+                    width: 100,
+                    render: (_, rec) => <Text style={{ fontSize: 11 }}>{rec.bankLine?.reference?.substring(0, 15)}</Text>,
+                  },
+                  {
+                    title: 'Type',
+                    width: 70,
+                    render: (_, rec) => <Text style={{ fontSize: 11 }}>{rec.bankLine?.transactionCode}</Text>,
                   },
                   {
                     title: 'Bank Amount',
-                    width: 100,
+                    width: 90,
                     align: 'right',
+                    render: (_, rec) => <Text strong>{fmtAmount(rec.totalBankAmount)}</Text>,
+                  },
+                  {
+                    title: 'System Txn(s)',
+                    width: 100,
                     render: (_, rec) => (
-                      <Text strong style={{ color: REDWOOD.primary }}>
-                        {fmtAmount(rec.totalBankAmount)}
-                      </Text>
+                      rec.sysTxns && rec.sysTxns.length > 0
+                        ? <Text style={{ fontSize: 11 }}>{rec.sysTxns.map(t => t.txnNumber).join(', ')}</Text>
+                        : <Text type="danger">—</Text>
                     ),
                   },
                   {
-                    title: 'Matched System Transaction(s)',
-                    flex: 1,
+                    title: 'Sys Type',
+                    width: 70,
                     render: (_, rec) => (
-                      <div>
-                        {rec.sysTxns && rec.sysTxns.length > 0 ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            {rec.sysTxns.map((txn, idx) => (
-                              <div key={idx} style={{ padding: '4px 8px', background: '#f6ffed', borderRadius: 4, fontSize: 12 }}>
-                                <div>{txn.payee || txn.customerName || txn.bankAccountName || txn.txnNumber}</div>
-                                <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
-                                  {txn.txnDate?.slice(0, 10)} • <Tag color="geekblue" style={{ fontSize: 9, margin: 0 }}>{txn.source?.replace('_', ' ')}</Tag>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <Text type="danger">No matches found</Text>
-                        )}
-                      </div>
+                      rec.sysTxns && rec.sysTxns.length > 0
+                        ? <Tag color="geekblue" style={{ fontSize: 10, margin: 0 }}>{rec.sysTxns[0]?.source?.replace('_', ' ')}</Tag>
+                        : <Text type="danger">—</Text>
                     ),
                   },
                   {
-                    title: 'System Total',
-                    width: 100,
+                    title: 'Date',
+                    width: 80,
+                    render: (_, rec) => <Text style={{ fontSize: 11 }}>{rec.sysTxns?.[0]?.txnDate?.slice(0, 10) || rec.bankLine?.transactionDate?.slice(0, 10)}</Text>,
+                  },
+                  {
+                    title: 'Sys Amount',
+                    width: 90,
                     align: 'right',
-                    render: (_, rec) => (
-                      <Text style={{ color: rec.sysTxns && rec.sysTxns.length > 0 ? REDWOOD.success : REDWOOD.error }}>
-                        {fmtAmount(rec.totalSysAmount)}
-                      </Text>
-                    ),
+                    render: (_, rec) => <Text style={{ color: rec.sysTxns && rec.sysTxns.length > 0 ? REDWOOD.success : REDWOOD.error }}>{fmtAmount(rec.totalSysAmount)}</Text>,
                   },
                   {
                     title: 'Difference',
-                    width: 100,
+                    width: 80,
                     align: 'right',
-                    render: (_, rec) => (
-                      <Text style={{ color: Math.abs(rec.difference) < 0.01 ? REDWOOD.success : REDWOOD.warning, fontWeight: 500 }}>
-                        {fmtAmount(rec.difference)}
-                      </Text>
-                    ),
-                  },
-                  {
-                    title: 'Type',
-                    width: 70,
-                    align: 'center',
-                    render: (_, rec) => (
-                      <Tag color={rec.matchType === 'No Match' ? 'red' : 'green'}>
-                        {rec.matchType}
-                      </Tag>
-                    ),
+                    render: (_, rec) => <Text style={{ color: Math.abs(rec.difference) < 0.01 ? REDWOOD.success : REDWOOD.warning, fontWeight: 500 }}>{fmtAmount(rec.difference)}</Text>,
                   },
                 ] : [
                   {
-                    title: 'System Transaction',
+                    title: 'System Txn ID',
+                    width: 80,
+                    render: (_, rec) => <Text>{rec.sysTxn?.txnNumber}</Text>,
+                  },
+                  {
+                    title: 'Payee',
                     width: 120,
-                    render: (_, rec) => (
-                      <div>
-                        <div style={{ fontWeight: 500, fontSize: 12 }}>
-                          {rec.sysTxn?.payee || rec.sysTxn?.customerName || rec.sysTxn?.bankAccountName || rec.sysTxn?.txnNumber}
-                        </div>
-                        <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
-                          {rec.sysTxn?.txnDate?.slice(0, 10)} • <Tag color="geekblue" style={{ fontSize: 9, margin: 0 }}>{rec.sysTxn?.source?.replace('_', ' ')}</Tag>
-                        </div>
-                      </div>
-                    ),
-                  },
-                  {
-                    title: 'System Amount',
-                    width: 100,
-                    align: 'right',
-                    render: (_, rec) => (
-                      <Text strong style={{ color: REDWOOD.primary }}>
-                        {fmtAmount(rec.totalSysAmount)}
-                      </Text>
-                    ),
-                  },
-                  {
-                    title: 'Matched Bank Line(s)',
-                    flex: 1,
-                    render: (_, rec) => (
-                      <div>
-                        {rec.bankLines && rec.bankLines.length > 0 ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            {rec.bankLines.map((line, idx) => (
-                              <div key={idx} style={{ padding: '4px 8px', background: '#f6ffed', borderRadius: 4, fontSize: 12 }}>
-                                <div>{line.description || line.reference || `Line #${line.lineId}`}</div>
-                                <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>
-                                  {line.transactionDate?.slice(0, 10)} • {line.transactionCode}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <Text type="danger">No matches found</Text>
-                        )}
-                      </div>
-                    ),
-                  },
-                  {
-                    title: 'Bank Total',
-                    width: 100,
-                    align: 'right',
-                    render: (_, rec) => (
-                      <Text style={{ color: rec.bankLines && rec.bankLines.length > 0 ? REDWOOD.success : REDWOOD.error }}>
-                        {fmtAmount(rec.totalBankAmount)}
-                      </Text>
-                    ),
-                  },
-                  {
-                    title: 'Difference',
-                    width: 100,
-                    align: 'right',
-                    render: (_, rec) => (
-                      <Text style={{ color: Math.abs(rec.difference) < 0.01 ? REDWOOD.success : REDWOOD.warning, fontWeight: 500 }}>
-                        {fmtAmount(rec.difference)}
-                      </Text>
-                    ),
+                    render: (_, rec) => <Text style={{ fontSize: 11 }}>{rec.sysTxn?.payee?.substring(0, 20)}</Text>,
                   },
                   {
                     title: 'Type',
                     width: 70,
-                    align: 'center',
+                    render: (_, rec) => <Tag color="geekblue" style={{ fontSize: 10, margin: 0 }}>{rec.sysTxn?.source?.replace('_', ' ')}</Tag>,
+                  },
+                  {
+                    title: 'Sys Amount',
+                    width: 90,
+                    align: 'right',
+                    render: (_, rec) => <Text strong>{fmtAmount(rec.totalSysAmount)}</Text>,
+                  },
+                  {
+                    title: 'Bank Line(s)',
+                    width: 100,
                     render: (_, rec) => (
-                      <Tag color={rec.matchType === 'No Match' ? 'red' : 'green'}>
-                        {rec.matchType}
-                      </Tag>
+                      rec.bankLines && rec.bankLines.length > 0
+                        ? <Text style={{ fontSize: 11 }}>{rec.bankLines.map(l => `#${l.lineId}`).join(', ')}</Text>
+                        : <Text type="danger">—</Text>
                     ),
+                  },
+                  {
+                    title: 'Bank Type',
+                    width: 70,
+                    render: (_, rec) => (
+                      rec.bankLines && rec.bankLines.length > 0
+                        ? <Text style={{ fontSize: 11 }}>{rec.bankLines[0]?.transactionCode}</Text>
+                        : <Text type="danger">—</Text>
+                    ),
+                  },
+                  {
+                    title: 'Date',
+                    width: 80,
+                    render: (_, rec) => <Text style={{ fontSize: 11 }}>{rec.sysTxn?.txnDate?.slice(0, 10)}</Text>,
+                  },
+                  {
+                    title: 'Bank Amount',
+                    width: 90,
+                    align: 'right',
+                    render: (_, rec) => <Text style={{ color: rec.bankLines && rec.bankLines.length > 0 ? REDWOOD.success : REDWOOD.error }}>{fmtAmount(rec.totalBankAmount)}</Text>,
+                  },
+                  {
+                    title: 'Difference',
+                    width: 80,
+                    align: 'right',
+                    render: (_, rec) => <Text style={{ color: Math.abs(rec.difference) < 0.01 ? REDWOOD.success : REDWOOD.warning, fontWeight: 500 }}>{fmtAmount(rec.difference)}</Text>,
                   },
                 ]}
                 summary={() => (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ fontWeight: 600, background: REDWOOD.neutral100 }}>
-                      <Table.Summary.Cell colSpan={2} align="right">
-                        <Text strong>TOTAL</Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell />
-                      <Table.Summary.Cell align="right">
-                        <Text strong>{fmtAmount(totalBankSum)}</Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell align="right">
-                        <Text strong>{fmtAmount(totalSysSum)}</Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell align="right">
-                        <Text strong style={{ color: Math.abs(totalBankSum - totalSysSum) < 0.01 ? REDWOOD.success : REDWOOD.warning }}>
-                          {fmtAmount(totalBankSum - totalSysSum)}
-                        </Text>
-                      </Table.Summary.Cell>
-                      <Table.Summary.Cell />
+                      <Table.Summary.Cell colSpan={3} align="right"><Text strong>TOTAL</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell align="right"><Text strong>{fmtAmount(totalBankSum)}</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell colSpan={3} />
+                      <Table.Summary.Cell align="right"><Text strong>{fmtAmount(totalSysSum)}</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell align="right"><Text strong style={{ color: Math.abs(totalBankSum - totalSysSum) < 0.01 ? REDWOOD.success : REDWOOD.warning }}>{fmtAmount(totalBankSum - totalSysSum)}</Text></Table.Summary.Cell>
                     </Table.Summary.Row>
                   </Table.Summary>
                 )}
