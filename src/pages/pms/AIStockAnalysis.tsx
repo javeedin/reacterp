@@ -139,29 +139,40 @@ export default function AIStockAnalysis() {
       }
 
       const data = await response.json();
-      addLog('success', 'Response parsed successfully', JSON.stringify(data, null, 2));
+      addLog('success', 'Response parsed successfully', `Status: ${data.stop_reason}, Tokens: ${data.usage?.output_tokens}`);
 
-      const content = data.content?.[0]?.text;
+      const textBlock = data.content?.find((c: any) => c.type === 'text');
+      const content = textBlock?.text;
 
       if (!content) {
-        addLog('error', 'No text content in response', `Response structure: ${JSON.stringify(data, null, 2)}`);
-        throw new Error('No response text from Claude API');
+        addLog('error', 'No text content in response', `Response structure: ${JSON.stringify(data.content, null, 2)}`);
+        throw new Error('No text content in Claude API response');
       }
 
-      addLog('info', 'Content extracted', content.substring(0, 200) + '...');
+      addLog('info', 'Content extracted', content.substring(0, 300) + (content.length > 300 ? '...' : ''));
 
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      let jsonMatch = content.match(/```json\n([\s\S]*?)\n```/);
       if (!jsonMatch) {
-        addLog('error', 'Failed to parse JSON from response', `Response text: ${content.substring(0, 500)}`);
-        throw new Error('Failed to parse JSON from API response');
+        jsonMatch = content.match(/\{[\s\S]*\}/);
       }
 
-      addLog('info', 'JSON found in response', jsonMatch[0].substring(0, 200) + '...');
+      if (!jsonMatch) {
+        addLog('error', 'Failed to extract JSON from response', `First 500 chars: ${content.substring(0, 500)}`);
+        throw new Error('Failed to extract JSON from API response');
+      }
 
-      const parsed = JSON.parse(jsonMatch[0]);
-      setAnalysis(parsed);
-      addLog('success', 'Analysis completed successfully');
-      msgApi.success('Analysis completed');
+      const jsonText = jsonMatch[1] || jsonMatch[0];
+      addLog('info', 'JSON extracted', jsonText.substring(0, 200) + '...');
+
+      try {
+        const parsed = JSON.parse(jsonText);
+        setAnalysis(parsed);
+        addLog('success', 'Analysis completed successfully', `Parsed analysis with keys: ${Object.keys(parsed).join(', ')}`);
+        msgApi.success('Analysis completed');
+      } catch (parseError) {
+        addLog('error', 'JSON parse error', `Error: ${parseError instanceof Error ? parseError.message : 'Unknown'}\nJSON text: ${jsonText.substring(0, 300)}`);
+        throw new Error(`Failed to parse JSON: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+      }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       addLog('error', 'Analysis failed', errorMsg);
