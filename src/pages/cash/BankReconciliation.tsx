@@ -2372,6 +2372,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       key: 'amount',
       width: 110,
       align: 'right',
+      sorter: (a: StmtLine, b: StmtLine) => (a.amount || 0) - (b.amount || 0),
       render: (v: number, r) => (
         <span
           style={{
@@ -2489,6 +2490,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     key: 'amount',
     width: 110,
     align: 'right',
+    sorter: (a: SysTxn, b: SysTxn) => (a.amount || 0) - (b.amount || 0),
     render: (v: number) => <span style={{ fontWeight: 500 }}>{fmtAmount(v)}</span>,
   };
   const colCurrency: ColumnsType<SysTxn>[number] = {
@@ -3264,6 +3266,11 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             }
             styles={{ body: { padding: 0 } }}
           >
+            <div style={{ padding: '4px 8px', borderBottom: '1px solid #f0f0f0', background: REDWOOD.neutral100, display: 'flex', gap: 12, fontSize: 11 }}>
+              <Text style={{ color: REDWOOD.neutral600 }}>
+                {stmtReconFilter === 'ALL' ? 'All' : stmtReconFilter === 'RECONCILED' ? 'Reconciled' : 'Unreconciled'}: <strong>{filteredStmtLines.length}</strong> record{filteredStmtLines.length !== 1 ? 's' : ''}
+              </Text>
+            </div>
             <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0' }}>
               <Input.Search
                 size="small"
@@ -3476,6 +3483,14 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               >
                 Search
               </Button>
+            </div>
+            <div style={{ padding: '4px 8px', borderBottom: '1px solid #f0f0f0', background: REDWOOD.neutral100, display: 'flex', gap: 12, fontSize: 11, flexWrap: 'wrap' }}>
+              <Text style={{ color: REDWOOD.neutral600 }}>
+                {sysReconFilter === 'ALL' ? 'All' : sysReconFilter === 'RECONCILED' ? 'Reconciled' : 'Unreconciled'}: <strong>{filteredSysTxns.length}</strong> record{filteredSysTxns.length !== 1 ? 's' : ''}
+              </Text>
+              <Text style={{ color: REDWOOD.neutral600 }}>
+                | Source: <strong>{txnSourceFilter}</strong>
+              </Text>
             </div>
             <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0' }}>
               <Input.Search
