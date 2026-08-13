@@ -2566,6 +2566,22 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       width: 110,
       render: (v: string) => fmtDate(v),
     },
+    {
+      title: 'TRX ID',
+      dataIndex: 'txnId',
+      key: 'txnId',
+      width: 120,
+      render: (v: string) => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v || '—'}</Text>,
+    },
+    {
+      title: 'Account St',
+      key: 'acctStatus',
+      width: 90,
+      render: (_: unknown, r: SysTxn) => {
+        const isAccounted = glJournalStatus[r.txnId];
+        return isAccounted === undefined ? '—' : isAccounted ? <Tag color="green" style={{ fontSize: 10 }}>Yes</Tag> : <Tag style={{ fontSize: 10 }}>No</Tag>;
+      },
+    },
     colStatus,
     colBU,
     colUnrecon,
@@ -2593,6 +2609,22 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       key: 'receiptMethod',
       width: 130,
       render: (v: string) => v || '—',
+    },
+    {
+      title: 'TRX ID',
+      dataIndex: 'txnId',
+      key: 'txnId',
+      width: 120,
+      render: (v: string) => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v || '—'}</Text>,
+    },
+    {
+      title: 'Account St',
+      key: 'acctStatus',
+      width: 90,
+      render: (_: unknown, r: SysTxn) => {
+        const isAccounted = glJournalStatus[r.txnId];
+        return isAccounted === undefined ? '—' : isAccounted ? <Tag color="green" style={{ fontSize: 10 }}>Yes</Tag> : <Tag style={{ fontSize: 10 }}>No</Tag>;
+      },
     },
     colStatus,
     colBU,
@@ -2653,6 +2685,22 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           </Tooltip>
         ) : <span style={{ color: '#bbb', fontSize: 11 }}>—</span>,
     },
+    {
+      title: 'TRX ID',
+      dataIndex: 'txnId',
+      key: 'txnId',
+      width: 120,
+      render: (v: string) => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v || '—'}</Text>,
+    },
+    {
+      title: 'Account St',
+      key: 'acctStatus',
+      width: 90,
+      render: (_: unknown, r: SysTxn) => {
+        const isAccounted = glJournalStatus[r.txnId];
+        return isAccounted === undefined ? '—' : isAccounted ? <Tag color="green" style={{ fontSize: 10 }}>Yes</Tag> : <Tag style={{ fontSize: 10 }}>No</Tag>;
+      },
+    },
     colUnrecon,
   ];
 
@@ -2679,6 +2727,22 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       ellipsis: true,
       render: (_: unknown, r: SysTxn) =>
         r.paymentMethod || r.receiptMethod || r.journalCategory || '—',
+    },
+    {
+      title: 'TRX ID',
+      dataIndex: 'txnId',
+      key: 'txnId',
+      width: 120,
+      render: (v: string) => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v || '—'}</Text>,
+    },
+    {
+      title: 'Account St',
+      key: 'acctStatus',
+      width: 90,
+      render: (_: unknown, r: SysTxn) => {
+        const isAccounted = glJournalStatus[r.txnId];
+        return isAccounted === undefined ? '—' : isAccounted ? <Tag color="green" style={{ fontSize: 10 }}>Yes</Tag> : <Tag style={{ fontSize: 10 }}>No</Tag>;
+      },
     },
     colStatus,
     colBU,
@@ -2723,6 +2787,22 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       render: (_: unknown, r: SysTxn) =>
         r.paymentMethod || r.receiptMethod || r.journalCategory || '—',
     },
+    {
+      title: 'TRX ID',
+      dataIndex: 'txnId',
+      key: 'txnId',
+      width: 120,
+      render: (v: string) => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v || '—'}</Text>,
+    },
+    {
+      title: 'Account St',
+      key: 'acctStatus',
+      width: 90,
+      render: (_: unknown, r: SysTxn) => {
+        const isAccounted = glJournalStatus[r.txnId];
+        return isAccounted === undefined ? '—' : isAccounted ? <Tag color="green" style={{ fontSize: 10 }}>Yes</Tag> : <Tag style={{ fontSize: 10 }}>No</Tag>;
+      },
+    },
     colStatus,
     colBU,
     colUnrecon,
@@ -2736,6 +2816,22 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
     { title: 'Description', dataIndex: 'payee',     key: 'desc',   width: 160, render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 11 }} ellipsis>{v || '—'}</Text></Tooltip> },
     { title: 'Asset Acct',  dataIndex: 'assetAccountCombination',  key: 'asset',  width: 160, render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 10, fontFamily: 'monospace' }} ellipsis>{v || '—'}</Text></Tooltip> },
     { title: 'Offset Acct', dataIndex: 'offsetAccountCombination', key: 'offset', width: 160, render: (v: string) => <Tooltip title={v}><Text style={{ fontSize: 10, fontFamily: 'monospace' }} ellipsis>{v || '—'}</Text></Tooltip> },
+    {
+      title: 'TRX ID',
+      dataIndex: 'txnId',
+      key: 'txnId',
+      width: 120,
+      render: (v: string) => <Text style={{ fontSize: 11, fontFamily: 'monospace' }}>{v || '—'}</Text>,
+    },
+    {
+      title: 'Account St',
+      key: 'acctStatus',
+      width: 90,
+      render: (_: unknown, r: SysTxn) => {
+        const isAccounted = glJournalStatus[r.txnId];
+        return isAccounted === undefined ? '—' : isAccounted ? <Tag color="green" style={{ fontSize: 10 }}>Yes</Tag> : <Tag style={{ fontSize: 10 }}>No</Tag>;
+      },
+    },
     { title: 'Recon',       dataIndex: 'reconciledFlag', key: 'recon', width: 70,
       render: (v: string) => <Tag color={v === 'Y' ? 'green' : 'default'} style={{ fontSize: 10 }}>{v === 'Y' ? 'Recon' : 'Unrecon'}</Tag> },
     colUnrecon,
@@ -2911,6 +3007,46 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
       setExporting(false);
     }
   }, [stmtLines, filteredSysTxns, lastParams, msgApi]);
+
+  // Store GL journal status for transactions
+  const [glJournalStatus, setGlJournalStatus] = React.useState<Record<string, boolean>>({});
+  const [checkingGlStatus, setCheckingGlStatus] = React.useState(false);
+
+  // Check GL Status for visible system transactions
+  const checkGlJournalStatus = async () => {
+    setCheckingGlStatus(true);
+    try {
+      const statusMap: Record<string, boolean> = {};
+
+      // Check each visible transaction
+      for (const txn of filteredSysTxns) {
+        const refType = txn.source === 'AP_PAYMENT' ? 'AP-PAYMENT'
+                      : txn.source === 'EXTERNAL_TXN' ? 'BANK_EXTERNAL_TRANSACTIONS'
+                      : txn.source === 'AR_RECEIPT' ? 'AR_RECEIPTS'
+                      : 'GL_JOURNAL';
+
+        try {
+          const q = new URLSearchParams({
+            reference_2: txn.txnId,
+            reference_5: refType,
+            row_limit: '1',
+          });
+          const res = await fetch(`${APEX_BASE}/gl/journals?${q}`);
+          const data = await res.json();
+          statusMap[txn.txnId] = (data.items?.length || 0) > 0;
+        } catch (e) {
+          statusMap[txn.txnId] = false;
+        }
+      }
+
+      setGlJournalStatus(statusMap);
+      msgApi.success(`GL Status checked for ${filteredSysTxns.length} transactions`);
+    } catch (e) {
+      msgApi.error('Failed to check GL status');
+    } finally {
+      setCheckingGlStatus(false);
+    }
+  };
 
   const stmtRowSelection: TableRowSelection<StmtLine> = {
     type: 'checkbox',
@@ -3291,6 +3427,17 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                     onClick={() => { setApiCopied(false); setApiModal(true); }}
                     style={{ color: REDWOOD.info, borderColor: REDWOOD.info }}
                   />
+                </Tooltip>
+                <Tooltip title="Check GL Journal status for visible transactions">
+                  <Button
+                    size="small"
+                    icon={<CheckCircleOutlined />}
+                    loading={checkingGlStatus}
+                    onClick={checkGlJournalStatus}
+                    style={{ color: '#52c41a', borderColor: '#52c41a' }}
+                  >
+                    Check GL Status
+                  </Button>
                 </Tooltip>
               </Space>
             }
