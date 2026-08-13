@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   Layout, Card, Row, Col, Typography, Space, Button, Spin, Divider, Tag,
-  Breadcrumb, Tabs, Empty, message, Drawer, Tooltip, Badge,
+  Breadcrumb, Tabs, Empty, message, Drawer, Tooltip, Badge, Input,
 } from 'antd';
 import {
   HomeOutlined, ArrowLeftOutlined, ReloadOutlined, SettingOutlined,
@@ -45,6 +45,13 @@ interface AnalysisResult {
   };
 }
 
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
 export default function AIStockAnalysis() {
   const navigate = useNavigate();
   const [stock, setStock] = useState<StockData | null>(null);
@@ -54,6 +61,9 @@ export default function AIStockAnalysis() {
   const [apiKey, setApiKey] = useState<string>(getSavedApiKey() || '');
   const [msgApi, ctxHolder] = message.useMessage();
   const [logs, setLogs] = useState<Array<{ time: string; level: 'info' | 'error' | 'success' | 'warn'; message: string; details?: string }>>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
 
   const addLog = useCallback((level: 'info' | 'error' | 'success' | 'warn', message: string, details?: string) => {
     const now = new Date().toLocaleTimeString();
@@ -63,6 +73,72 @@ export default function AIStockAnalysis() {
   const clearLogs = useCallback(() => {
     setLogs([]);
   }, []);
+
+  const sendPrompt = useCallback(async (question: string) => {
+    if (!question.trim() || !stock || !apiKey) {
+      if (!apiKey) {
+        msgApi.error('Please set your Claude API key first');
+        setSettingsOpen(true);
+      }
+      return;
+    }
+
+    setChatLoading(true);
+    const userMsgId = `msg_${Date.now()}`;
+    setChatMessages(prev => [...prev, {
+      id: userMsgId,
+      role: 'user',
+      content: question,
+      timestamp: new Date().toLocaleTimeString(),
+    }]);
+    setChatInput('');
+
+    try {
+      const prompt = `You are analyzing ${stock.symbol} (${stock.symbolName}). The user has this question about the stock:
+
+"${question}"
+
+Provide a concise, helpful answer based on the stock's fundamentals, market position, and general knowledge. Keep the response focused and practical.`;
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-opus-5',
+          max_tokens: 1000,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: { message: 'API error' } }));
+        throw new Error(errorData.error?.message || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const textBlock = data.content?.find((c: any) => c.type === 'text');
+      const responseText = textBlock?.text;
+
+      if (!responseText) {
+        throw new Error('No response from Claude API');
+      }
+
+      setChatMessages(prev => [...prev, {
+        id: `msg_${Date.now()}`,
+        role: 'assistant',
+        content: responseText,
+        timestamp: new Date().toLocaleTimeString(),
+      }]);
+    } catch (error) {
+      msgApi.error(`Failed to get response: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setChatLoading(false);
+    }
+  }, [stock, apiKey, msgApi]);
 
   useEffect(() => {
     const stockData = localStorage.getItem('selectedStock');
@@ -344,6 +420,79 @@ export default function AIStockAnalysis() {
     },
     {
       key: '3',
+      label: 'Prompt',
+      children: (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <div style={{
+            background: '#f5f5f5',
+            border: '1px solid #d9d9d9',
+            borderRadius: 4,
+            padding: 12,
+            maxHeight: '400px',
+            overflowY: 'auto',
+            marginBottom: 12,
+          }}>
+            {chatMessages.length === 0 ? (
+              <Empty description="Ask Claude about this stock" />
+            ) : (
+              chatMessages.map(msg => (
+                <div
+                  key={msg.id}
+                  style={{
+                    marginBottom: 12,
+                    paddingBottom: 12,
+                    borderBottom: '1px solid #e8e8e8',
+                  }}
+                >
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                    marginBottom: 4,
+                  }}>
+                    <Tag color={msg.role === 'user' ? 'blue' : 'green'}>
+                      {msg.role === 'user' ? 'You' : 'Claude'}
+                    </Tag>
+                    <span style={{ fontSize: 10, color: '#8c8c8c', marginLeft: 8 }}>
+                      {msg.timestamp}
+                    </span>
+                  </div>
+                  <div style={{
+                    background: msg.role === 'user' ? '#e3f2fd' : '#e8f5e9',
+                    borderRadius: 4,
+                    padding: 8,
+                    marginLeft: msg.role === 'user' ? '40px' : '0px',
+                    marginRight: msg.role === 'user' ? '0px' : '40px',
+                  }}>
+                    <Text style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</Text>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Input
+              placeholder="Ask Claude about this stock..."
+              value={chatInput}
+              onChange={e => setChatInput(e.target.value)}
+              onPressEnter={() => sendPrompt(chatInput)}
+              disabled={chatLoading}
+              allowClear
+            />
+            <Button
+              type="primary"
+              onClick={() => sendPrompt(chatInput)}
+              loading={chatLoading}
+              disabled={!chatInput.trim()}
+            >
+              Send
+            </Button>
+          </div>
+        </Space>
+      ),
+    },
+    {
+      key: '4',
       label: (
         <Space size={4}>
           Logs
