@@ -5726,7 +5726,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       const poPayload = {
         ProcurementBUId: procBUId,
         RequisitioningBUId: procBUId,
-        OrderNumber: `BRNS-${savedOrderNumber}`,
+        OrderNumber: `BLPO${savedOrderNumber}`,
         RequiredAcknowledgment: 'None',
         CurrencyCode: currency,
         ConversionRateTypeCode: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'User') : null,
@@ -7448,7 +7448,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       const poPayload = {
         ProcurementBUId: procBUId,
         RequisitioningBUId: procBUId,
-        OrderNumber: `BRNS-${savedOrderNumber}`,
+        OrderNumber: `BLPO${savedOrderNumber}`,
         RequiredAcknowledgment: 'None',
         CurrencyCode: currency,
         ConversionRateTypeCode: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'User') : null,
@@ -7482,7 +7482,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       try { data = JSON.parse(text); } catch { /* raw */ }
 
       if (r.ok && data) {
-        const poNum = data.OrderNumber || data.PurchaseOrderNumber || `BRNS-${savedOrderNumber}`;
+        const poNum = data.OrderNumber || data.PurchaseOrderNumber || `BLPO${savedOrderNumber}`;
         setCreatedPONumber(poNum);
         message.success(`Branch Purchase Order ${poNum} created successfully`);
         setBranchSalesModalOpen(false);
