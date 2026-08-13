@@ -856,6 +856,7 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
   const [autoReconRunning,  setAutoReconRunning]  = useState(false);
   const [autoReconTxnType,  setAutoReconTxnType]  = useState<string>('ALL');
   const [autoReconApiOpen,  setAutoReconApiOpen]  = useState(false);
+  const [matchingViewOpen, setMatchingViewOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   // Cash account combination for the selected bank — used to fetch GL journal lines
@@ -3484,6 +3485,17 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           </Button>
         </Col>
         <Col>
+          <Button
+            icon={<LinkOutlined />}
+            size="large"
+            onClick={() => setMatchingViewOpen(true)}
+            disabled={stmtLines.length === 0 || sysTxns.length === 0}
+            style={{ borderColor: '#1890ff', color: '#1890ff' }}
+          >
+            View Matching
+          </Button>
+        </Col>
+        <Col>
           <ReconAgent
             stmtLines={stmtLines}
             sysTxns={sysTxns}
@@ -4417,6 +4429,155 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             )}
           </div>
         )}
+      </Modal>
+
+      {/* ── Matching View Modal (Side-by-side matching by amount) ──────────────── */}
+      <Modal
+        title={<Space><LinkOutlined style={{ color: '#1890ff' }} /><span>Statement Lines ↔ System Transactions Matching</span></Space>}
+        open={matchingViewOpen}
+        onCancel={() => setMatchingViewOpen(false)}
+        footer={<Button onClick={() => setMatchingViewOpen(false)}>Close</Button>}
+        width={1200}
+        bodyStyle={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, minHeight: 500 }}>
+          {/* ── LEFT: Bank Statement Lines ────────────────────────────── */}
+          <div>
+            <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14, color: REDWOOD.primary }}>
+              Bank Statement Lines ({filteredStmtLines.length})
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 550, overflowY: 'auto' }}>
+              {filteredStmtLines.length === 0 ? (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No statement lines" />
+              ) : (
+                filteredStmtLines.map((line) => {
+                  const matchedTxns = filteredSysTxns.filter(t => Math.abs(t.amount - line.amount) < 0.01);
+                  const isMatched = matchedTxns.length > 0;
+                  return (
+                    <div
+                      key={line.lineId}
+                      style={{
+                        padding: '10px 12px',
+                        border: isMatched ? `2px solid ${REDWOOD.success}` : '1px solid #d9d9d9',
+                        borderRadius: 6,
+                        background: isMatched ? '#f6ffed' : '#fafafa',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (isMatched) e.currentTarget.style.boxShadow = `0 0 8px ${REDWOOD.success}40`;
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.boxShadow = '';
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                        <div>
+                          <div style={{ fontWeight: 500, fontSize: 12 }}>
+                            {line.description || line.reference || `Line #${line.lineId}`}
+                          </div>
+                          <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 4 }}>
+                            {line.transactionDate?.slice(0, 10)} • {line.transactionCode}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: isMatched ? REDWOOD.success : REDWOOD.neutral900 }}>
+                            {fmtAmount(line.amount)}
+                          </div>
+                          {isMatched && (
+                            <Tag color="success" style={{ marginTop: 4, fontSize: 10 }}>
+                              ✓ Match found
+                            </Tag>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* ── RIGHT: System Transactions ────────────────────────────── */}
+          <div>
+            <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14, color: REDWOOD.primary }}>
+              System Transactions ({filteredSysTxns.length})
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 550, overflowY: 'auto' }}>
+              {filteredSysTxns.length === 0 ? (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No system transactions" />
+              ) : (
+                filteredSysTxns.map((txn) => {
+                  const matchedLines = filteredStmtLines.filter(l => Math.abs(l.amount - txn.amount) < 0.01);
+                  const isMatched = matchedLines.length > 0;
+                  return (
+                    <div
+                      key={sysTxnRowKey(txn)}
+                      style={{
+                        padding: '10px 12px',
+                        border: isMatched ? `2px solid ${REDWOOD.success}` : '1px solid #d9d9d9',
+                        borderRadius: 6,
+                        background: isMatched ? '#f6ffed' : '#fafafa',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (isMatched) e.currentTarget.style.boxShadow = `0 0 8px ${REDWOOD.success}40`;
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.boxShadow = '';
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                        <div>
+                          <div style={{ fontWeight: 500, fontSize: 12 }}>
+                            {txn.payee || txn.customerName || txn.bankAccountName || txn.txnNumber}
+                          </div>
+                          <div style={{ fontSize: 11, color: REDWOOD.neutral600, marginTop: 4 }}>
+                            {txn.txnDate?.slice(0, 10)} • <Tag color="geekblue" style={{ fontSize: 10, margin: 0 }}>{txn.source?.replace('_', ' ')}</Tag>
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: isMatched ? REDWOOD.success : REDWOOD.neutral900 }}>
+                            {fmtAmount(txn.amount)}
+                          </div>
+                          {isMatched && (
+                            <Tag color="success" style={{ marginTop: 4, fontSize: 10 }}>
+                              ✓ Match found
+                            </Tag>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Summary ────────────────────────────────────────────────────── */}
+        <Divider style={{ margin: '16px 0' }} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+          <div style={{ textAlign: 'center', padding: '10px', background: '#f5f5f5', borderRadius: 6 }}>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total Statement Amount</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.neutral900, marginTop: 4 }}>
+              {fmtAmount(filteredStmtLines.reduce((sum, l) => sum + l.amount, 0))}
+            </div>
+          </div>
+          <div style={{ textAlign: 'center', padding: '10px', background: '#f5f5f5', borderRadius: 6 }}>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total System Amount</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.neutral900, marginTop: 4 }}>
+              {fmtAmount(filteredSysTxns.reduce((sum, t) => sum + t.amount, 0))}
+            </div>
+          </div>
+          <div style={{ textAlign: 'center', padding: '10px', background: '#f5f5f5', borderRadius: 6 }}>
+            <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Difference</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: difference === 0 ? REDWOOD.success : REDWOOD.error, marginTop: 4 }}>
+              {fmtAmount(filteredSysTxns.reduce((sum, t) => sum + t.amount, 0) - filteredStmtLines.reduce((sum, l) => sum + l.amount, 0))}
+            </div>
+          </div>
+        </div>
       </Modal>
 
       {/* Shared API Debug Modal */}
