@@ -3314,6 +3314,10 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             >
               <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                 <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
+                  Records: <strong style={{ color: REDWOOD.info }}>{filteredStmtLines.length}</strong>
+                </Text>
+                <Divider type="vertical" />
+                <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
                   Total: <strong style={{ color: REDWOOD.neutral900 }}>{fmtAmount(filteredStmtLines.reduce((sum, l) => sum + (l.amount || 0), 0))}</strong>
                 </Text>
                 <Divider type="vertical" />
@@ -3539,6 +3543,10 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               }}
             >
               <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
+                  Records: <strong style={{ color: REDWOOD.info }}>{filteredSysTxns.length}</strong>
+                </Text>
+                <Divider type="vertical" />
                 <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
                   Total: <strong style={{ color: REDWOOD.neutral900 }}>{fmtAmount(filteredSysTxns.reduce((sum, t) => sum + (t.amount || 0), 0))}</strong>
                 </Text>
