@@ -133,13 +133,16 @@ export default function AIStockAnalysis() {
     try {
       // Fetch exchange rates (1 INR = ? USD/AED, so multiply not divide)
       const ratesResponse = await fetch('https://api.exchangerate-api.com/v4/latest/INR');
+      addLog('info', 'Exchange rates API response', `Status: ${ratesResponse.status}, OK: ${ratesResponse.ok}`);
       if (ratesResponse.ok) {
         const ratesData = await ratesResponse.json();
+        addLog('info', 'Raw API response', JSON.stringify(ratesData, null, 2));
         // API returns 1 INR = X currency, we need these values to multiply
         const usdRate = ratesData.rates?.USD || (1 / 83);
         const aedRate = ratesData.rates?.AED || (1 / 22.5);
+        addLog('info', 'Processing rates', `Raw USD: ${ratesData.rates?.USD}, Calculated: ${usdRate}, 1/83: ${(1/83).toFixed(6)}`);
         setExchangeRates({ usd: usdRate, aed: aedRate });
-        addLog('success', 'Exchange rates fetched', `1 INR = ${usdRate.toFixed(4)} USD, 1 INR = ${aedRate.toFixed(4)} AED`);
+        addLog('success', 'Exchange rates updated', `1 INR = ${usdRate.toFixed(6)} USD, 1 INR = ${aedRate.toFixed(6)} AED`);
       }
 
       // Fetch price movement data
@@ -245,6 +248,10 @@ Provide a concise, helpful answer based on the stock's fundamentals, market posi
       navigate('/pms/holdings');
     }
   }, [navigate, msgApi]);
+
+  useEffect(() => {
+    addLog('info', 'Exchange rates state changed', `USD rate: ${exchangeRates.usd.toFixed(6)}, AED rate: ${exchangeRates.aed.toFixed(6)}`);
+  }, [exchangeRates, addLog]);
 
   const analyzeStock = useCallback(async () => {
     if (!stock) return;
