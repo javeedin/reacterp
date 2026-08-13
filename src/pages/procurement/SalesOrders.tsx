@@ -9234,6 +9234,57 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               POST {FUSION_BASE}/draftPurchaseOrders
             </div>
           </div>
+
+          <Divider />
+
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <Button
+              type="primary"
+              icon={<ApiOutlined />}
+              onClick={async () => {
+                if (!branchPoPayload) {
+                  message.error('Fill in all required fields to test payload');
+                  return;
+                }
+                try {
+                  const payload = JSON.parse(branchPoPayload);
+                  const r = await fetch(`${FUSION_BASE}/draftPurchaseOrders`, {
+                    method: 'POST',
+                    headers: { ...FUSION_HDRS, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                  });
+                  const data = await r.json();
+                  if (r.ok) {
+                    Modal.success({
+                      title: 'Test Successful',
+                      content: `Draft PO created successfully\nPO Number: ${data.OrderNumber || data.PurchaseOrderNumber || 'N/A'}`,
+                      okText: 'Close',
+                    });
+                  } else {
+                    const errorMsg = data.message || data.error || JSON.stringify(data, null, 2);
+                    Modal.error({
+                      title: 'Test Failed',
+                      content: <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '12px', maxHeight: '400px', overflow: 'auto' }}>
+                        {errorMsg}
+                      </div>,
+                      okText: 'Close',
+                      width: 600,
+                    });
+                  }
+                } catch (e: any) {
+                  Modal.error({
+                    title: 'Test Error',
+                    content: String(e),
+                    okText: 'Close',
+                  });
+                }
+              }}
+              loading={creatingBranchPO}
+            >
+              Test Payload
+            </Button>
+            <Button onClick={() => setBranchApiDrawerOpen(false)}>Close</Button>
+          </div>
         </div>
       </Drawer>
 
