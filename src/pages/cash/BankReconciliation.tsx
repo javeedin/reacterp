@@ -4716,17 +4716,9 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
           );
         })()}
       </Modal>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        </div>
 
-        {/* ── Summary ────────────────────────────────────────────────────── */}
-        <Divider style={{ margin: '16px 0' }} />
+      {/* ── Summary ────────────────────────────────────────────────────── */}
+      <Divider style={{ margin: '16px 0' }} />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
           <div style={{ textAlign: 'center', padding: '10px', background: '#f5f5f5', borderRadius: 6 }}>
             <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total Statement Amount</div>
