@@ -4230,10 +4230,90 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
               />
             ) : (
               <div>
-                <div style={{ marginBottom: 10, fontSize: 12, color: '#8c8c8c' }}>
-                  Found <strong>{autoReconMatches.length}</strong> match(es). Uncheck any pairs you don't want to reconcile.
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>
+                    Found <strong>{autoReconMatches.length}</strong> match(es). Uncheck any pairs you don't want to reconcile.
+                  </div>
+                  <Table<AutoReconMatch>
+                    size="small"
+                    dataSource={autoReconMatches.map((m, idx) => ({ ...m, _idx: idx }))}
+                    rowKey="_idx"
+                    pagination={false}
+                    scroll={{ x: 800, y: 250 }}
+                    columns={[
+                      {
+                        title: 'Select',
+                        key: 'select',
+                        width: 50,
+                        align: 'center',
+                        render: (_: any, record: any) => (
+                          <Checkbox
+                            checked={record.confirmed}
+                            disabled={record.status !== 'pending'}
+                            onChange={e => {
+                              const copy = [...autoReconMatches];
+                              copy[record._idx] = { ...record, confirmed: e.target.checked };
+                              setAutoReconMatches(copy);
+                            }}
+                          />
+                        ),
+                      },
+                      {
+                        title: 'Bank Statement Line',
+                        dataIndex: 'stmtLine',
+                        key: 'stmt',
+                        width: 200,
+                        render: (line: StmtLine) => (
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 500 }}>{line.description || line.reference || `Line #${line.lineId}`}</div>
+                            <div style={{ fontSize: 10, color: '#8c8c8c' }}>
+                              {line.transactionDate?.slice(0, 10)} • {line.transactionCode} • {Math.abs(line.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </div>
+                          </div>
+                        ),
+                      },
+                      {
+                        title: 'Criteria',
+                        dataIndex: 'matchedBy',
+                        key: 'criteria',
+                        width: 150,
+                        render: (criteria: string[]) => (
+                          <Space size={4}>
+                            {criteria.map(c => <Tag key={c} color="purple" style={{ fontSize: 10, margin: 0 }}>{c}</Tag>)}
+                          </Space>
+                        ),
+                      },
+                      {
+                        title: 'System Transaction',
+                        dataIndex: 'sysTxn',
+                        key: 'sys',
+                        width: 200,
+                        render: (txn: SysTxn) => (
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 500 }}>{txn.payee || txn.txnNumber}</div>
+                            <div style={{ fontSize: 10, color: '#8c8c8c' }}>
+                              {txn.txnDate?.slice(0, 10)} • {txn.source?.replace('_', ' ')} • {Math.abs(txn.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </div>
+                          </div>
+                        ),
+                      },
+                      {
+                        title: 'Status',
+                        dataIndex: 'status',
+                        key: 'status',
+                        width: 80,
+                        align: 'center',
+                        render: (status: string, record: any) => {
+                          if (status === 'success') return <Tag color="success">Done</Tag>;
+                          if (status === 'error') return <Tag color="error">{record.errorMsg || 'Failed'}</Tag>;
+                          return <Tag color="processing">Pending</Tag>;
+                        },
+                      },
+                    ]}
+                  />
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 520, overflowY: 'auto' }}>
+                <Divider style={{ margin: '12px 0' }} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 280, overflowY: 'auto', marginTop: 12 }}>
                   {autoReconMatches.map((m, idx) => (
                     <div
                       key={idx}
