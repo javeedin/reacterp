@@ -102,7 +102,7 @@ export default function AIStockAnalysis() {
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'claude-opus-4-1',
+          model: 'claude-opus-5',
           max_tokens: 2000,
           messages: [{ role: 'user', content: prompt }],
         }),

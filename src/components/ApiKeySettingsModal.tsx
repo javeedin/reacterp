@@ -43,7 +43,7 @@ export const ApiKeySettingsModal: React.FC<ApiKeySettingsModalProps> = ({
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'claude-opus-4-1',
+          model: 'claude-opus-5',
           max_tokens: 10,
           messages: [{ role: 'user', content: 'test' }],
         }),
@@ -51,8 +51,12 @@ export const ApiKeySettingsModal: React.FC<ApiKeySettingsModalProps> = ({
 
       if (response.ok) {
         setTestResult({ success: true, message: 'API key is valid and working!' });
-      } else if (response.status === 401) {
-        setTestResult({ success: false, message: 'Invalid API key. Please check and try again.' });
+      } else if (response.status === 401 || response.status === 403) {
+        setTestResult({ success: false, message: 'Invalid or expired API key. Please check and try again.' });
+      } else if (response.status === 400) {
+        const data = await response.json().catch(() => ({}));
+        const errorMsg = data.error?.message || 'Invalid request parameters';
+        setTestResult({ success: false, message: `Request error: ${errorMsg}` });
       } else {
         setTestResult({ success: false, message: `API error: ${response.status} ${response.statusText}` });
       }
