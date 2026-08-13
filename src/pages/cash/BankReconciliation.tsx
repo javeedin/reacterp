@@ -678,8 +678,35 @@ const StatementSelector: React.FC<StatementSelectorProps> = ({
               dataSource={filtered.map((l, i) => ({ ...l, _key: i }))}
               rowKey="_key"
               size="small"
-              pagination={{ pageSize: 50, showSizeChanger: true, showTotal: t => `${t} lines` }}
+              pagination={{
+                pageSize: 50,
+                showSizeChanger: true,
+                pageSizeOptions: ['25', '50', '100', '200'],
+                showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} lines`,
+                total: filtered.length
+              }}
               scroll={{ x: 1100, y: 420 }}
+              summary={() => (
+                <Table.Summary fixed="bottom">
+                  <Table.Summary.Row style={{ fontWeight: 600, background: REDWOOD.neutral100 }}>
+                    <Table.Summary.Cell index={0} colSpan={6}>
+                      <Text strong>TOTAL</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={6} />
+                    <Table.Summary.Cell index={7} />
+                    <Table.Summary.Cell index={8} align="right">
+                      <Text strong style={{ color: REDWOOD.success }}>
+                        {totalDr.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={9} align="right">
+                      <Text strong style={{ color: REDWOOD.error }}>
+                        {totalCr.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
               columns={[
                 { title: 'Status', key: 'status', width: 80,
                   render: (_: any, r: any) => {
