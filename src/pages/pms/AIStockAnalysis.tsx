@@ -113,6 +113,8 @@ export default function AIStockAnalysis() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [priceMovement, setPriceMovement] = useState<{ percentage: number; isUp: boolean } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const addLog = useCallback((level: 'info' | 'error' | 'success' | 'warn', message: string, details?: string) => {
     const now = new Date().toLocaleTimeString();
@@ -122,6 +124,34 @@ export default function AIStockAnalysis() {
   const clearLogs = useCallback(() => {
     setLogs([]);
   }, []);
+
+  const refreshPrice = useCallback(async () => {
+    if (!stock) return;
+    setRefreshing(true);
+    try {
+      const response = await fetch(
+        `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${stock.symbol}?modules=price`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        const currentPrice = data.quoteSummary?.result?.[0]?.price?.regularMarketPrice;
+        const change = data.quoteSummary?.result?.[0]?.price?.regularMarketChange;
+        const changePercent = data.quoteSummary?.result?.[0]?.price?.regularMarketChangePercent;
+
+        if (changePercent !== undefined) {
+          setPriceMovement({
+            percentage: Math.abs(changePercent),
+            isUp: changePercent >= 0,
+          });
+          msgApi.success(`Price: ₹${currentPrice?.toFixed(2) || stock.cmp}`);
+        }
+      }
+    } catch (error) {
+      addLog('warn', 'Unable to fetch live price', 'Using historical data only');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [stock, msgApi, addLog]);
 
   const sendPrompt = useCallback(async (question: string) => {
     if (!question.trim() || !stock || !apiKey) {
@@ -682,47 +712,121 @@ Provide a concise, helpful answer based on the stock's fundamentals, market posi
         </Row>
 
         <Card style={{ marginBottom: 16, borderRadius: 8 }}>
-          <Row gutter={16} align="middle">
-            <Col>
+          <Row gutter={[16, 16]} align="middle">
+            {/* Left: Symbol & Details */}
+            <Col xs={24} sm={12} lg={6}>
               <div>
-                <Title level={5} style={{ margin: 0, color: COLORS.primary }}>
+                <Title level={4} style={{ margin: 0, color: COLORS.primary }}>
                   {stock.symbol}
                 </Title>
-                <Text type="secondary" style={{ fontSize: 12 }}>
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
                   {stock.symbolName}
                 </Text>
+                <Space size={4}>
+                  <Tag color="blue">{stock.exchange}</Tag>
+                  <Tag color={stock.shareType === 'NRE' ? 'purple' : 'cyan'}>
+                    {stock.shareType}
+                  </Tag>
+                </Space>
               </div>
             </Col>
-            <Col flex="auto">
-              <Space>
-                <Tag color="blue">{stock.exchange}</Tag>
-                <Tag color={stock.shareType === 'NRE' ? 'purple' : 'cyan'}>
-                  {stock.shareType}
-                </Tag>
-              </Space>
+
+            {/* Middle: Recommendation */}
+            <Col xs={24} sm={12} lg={6}>
+              <Card
+                size="small"
+                style={{
+                  borderRadius: 8,
+                  borderLeft: `4px solid ${recommendation?.action === 'BUY' ? COLORS.green : recommendation?.action === 'SELL' ? COLORS.red : COLORS.blue}`,
+                  background: recommendation?.action === 'BUY' ? '#f6ffed' : recommendation?.action === 'SELL' ? '#fff1f0' : '#f5f5f5',
+                }}
+              >
+                <div style={{ textAlign: 'center' }}>
+                  <Text style={{ fontSize: 11, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+                    Recommendation
+                  </Text>
+                  <Text
+                    strong
+                    style={{
+                      fontSize: 20,
+                      color:
+                        recommendation?.action === 'BUY'
+                          ? COLORS.green
+                          : recommendation?.action === 'SELL'
+                            ? COLORS.red
+                            : COLORS.blue,
+                    }}
+                  >
+                    {recommendation?.action || 'HOLD'}
+                  </Text>
+                </div>
+              </Card>
             </Col>
-            <Col>
-              <div style={{ textAlign: 'right' }}>
-                <Text style={{ fontSize: 11, color: '#8c8c8c' }}>Current Price</Text>
-                <div>
+
+            {/* Price & Movement */}
+            <Col xs={24} sm={12} lg={5}>
+              <Row gutter={8} align="middle">
+                <Col xs={24}>
+                  <Text style={{ fontSize: 11, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+                    Current Price
+                  </Text>
                   <Text strong style={{ fontSize: 18, fontFamily: 'monospace', color: COLORS.blue }}>
                     ₹{stock.cmp.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                   </Text>
-                </div>
-              </div>
+                </Col>
+                {priceMovement && (
+                  <Col xs={24}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                      <span style={{ fontSize: 14, color: priceMovement.isUp ? COLORS.green : COLORS.red }}>
+                        {priceMovement.isUp ? <RiseOutlined /> : <FallOutlined />}
+                      </span>
+                      <Text
+                        strong
+                        style={{
+                          color: priceMovement.isUp ? COLORS.green : COLORS.red,
+                          fontSize: 12,
+                        }}
+                      >
+                        {priceMovement.isUp ? '+' : '-'}{priceMovement.percentage.toFixed(2)}%
+                      </Text>
+                    </div>
+                  </Col>
+                )}
+              </Row>
             </Col>
-            <Col>
-              <Divider type="vertical" style={{ height: 40 }} />
-            </Col>
-            <Col>
-              <div style={{ textAlign: 'right' }}>
-                <Text style={{ fontSize: 11, color: '#8c8c8c' }}>Quantity Held</Text>
-                <div>
-                  <Text strong style={{ fontSize: 18, fontFamily: 'monospace' }}>
+
+            {/* Quantity & Total Value */}
+            <Col xs={24} sm={12} lg={5}>
+              <Row gutter={[8, 8]}>
+                <Col xs={12}>
+                  <Text style={{ fontSize: 11, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+                    Qty Held
+                  </Text>
+                  <Text strong style={{ fontSize: 16, fontFamily: 'monospace' }}>
                     {stock.qty.toLocaleString()}
                   </Text>
-                </div>
-              </div>
+                </Col>
+                <Col xs={12}>
+                  <Text style={{ fontSize: 11, color: '#8c8c8c', display: 'block', marginBottom: 4 }}>
+                    Total Value
+                  </Text>
+                  <Text strong style={{ fontSize: 16, fontFamily: 'monospace', color: COLORS.primary }}>
+                    ₹{(stock.cmp * stock.qty).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                  </Text>
+                </Col>
+              </Row>
+            </Col>
+
+            {/* Refresh Button */}
+            <Col xs={24} sm={24} lg={2} style={{ textAlign: 'right' }}>
+              <Button
+                icon={<ReloadOutlined />}
+                loading={refreshing}
+                onClick={refreshPrice}
+                title="Refresh stock price and daily movement"
+              >
+                Refresh
+              </Button>
             </Col>
           </Row>
         </Card>
