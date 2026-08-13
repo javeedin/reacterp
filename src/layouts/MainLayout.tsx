@@ -24,6 +24,7 @@ import {
 import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { ShowAndTellPanel } from '../features/showAndTell';
 import { useAuth } from '../context/AuthContext';
+import { getFusionInstanceKey, getFusionInstance } from '../config/fusionInstance';
 import { useGlValidation } from '../context/GlValidationContext';
 import { useNotifications } from '../context/NotificationContext';
 import ProfileModal from '../components/ProfileModal';
@@ -344,6 +345,11 @@ const MainLayout: React.FC = () => {
               </Tag>
             </Tooltip>
           )}
+          <Tooltip title={`Fusion Instance: ${getFusionInstance().label} (${getFusionInstance().host})`} placement="bottomLeft">
+            <Tag icon={<CloudServerOutlined />} style={{ marginLeft: 6, marginRight: 0, fontWeight: 600, background: 'rgba(255,255,255,0.15)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)' }}>
+              {getFusionInstance().label}
+            </Tag>
+          </Tooltip>
           <Tooltip title={user?.name || 'User Profile'}>
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" trigger={['click']}>
               <Avatar
