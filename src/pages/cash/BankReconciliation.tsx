@@ -4717,29 +4717,6 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
         })()}
       </Modal>
 
-      {/* ── Summary ────────────────────────────────────────────────────── */}
-      <Divider style={{ margin: '16px 0' }} />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-          <div style={{ textAlign: 'center', padding: '10px', background: '#f5f5f5', borderRadius: 6 }}>
-            <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total Statement Amount</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.neutral900, marginTop: 4 }}>
-              {fmtAmount(filteredStmtLines.reduce((sum, l) => sum + l.amount, 0))}
-            </div>
-          </div>
-          <div style={{ textAlign: 'center', padding: '10px', background: '#f5f5f5', borderRadius: 6 }}>
-            <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Total System Amount</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: REDWOOD.neutral900, marginTop: 4 }}>
-              {fmtAmount(filteredSysTxns.reduce((sum, t) => sum + t.amount, 0))}
-            </div>
-          </div>
-          <div style={{ textAlign: 'center', padding: '10px', background: '#f5f5f5', borderRadius: 6 }}>
-            <div style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Difference</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: difference === 0 ? REDWOOD.success : REDWOOD.error, marginTop: 4 }}>
-              {fmtAmount(filteredSysTxns.reduce((sum, t) => sum + t.amount, 0) - filteredStmtLines.reduce((sum, l) => sum + l.amount, 0))}
-            </div>
-          </div>
-        </div>
-      </Modal>
 
       {/* Shared API Debug Modal */}
       <Modal
