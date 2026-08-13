@@ -3424,7 +3424,6 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                   style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
                 />
               </Tooltip>
-            </div>
               {selectedStmtKeys.length > 0 && selectedSysKeys.length > 0 && Math.abs(difference) > 0.001 && (
                 <>
                   <Divider type="vertical" />
