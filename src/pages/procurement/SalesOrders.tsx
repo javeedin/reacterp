@@ -5663,11 +5663,12 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     try {
       const branchBU = branchSalesForm.getFieldValue('branchBusinessUnit');
       const branchSupplier = branchSalesForm.getFieldValue('branchSupplierName');
+      const branchSupplierSite = branchSalesForm.getFieldValue('branchSupplierSite');
       const shipToLoc = branchSalesForm.getFieldValue('shipToLocation');
       const currency = branchSalesForm.getFieldValue('currency');
       const needByDate = branchSalesForm.getFieldValue('needByDate');
 
-      if (!branchBU || !branchSupplier || !shipToLoc) {
+      if (!branchBU || !branchSupplier || !branchSupplierSite || !shipToLoc) {
         setBranchPoPayload('');
         return;
       }
@@ -5736,6 +5737,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         Buyer: hdr.buyer || '',
         PayOnReceiptFlag: 'N',
         Supplier: branchSupplier,
+        SupplierSite: branchSupplierSite,
         BillToLocation: branchBU,
         DefaultShipToLocation: shipToLoc,
         ModeOfTransportCode: null,
@@ -7373,16 +7375,18 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     if (!savedOrderNumber) return;
     const branchBU = branchSalesForm.getFieldValue('branchBusinessUnit');
     const branchSupplier = branchSalesForm.getFieldValue('branchSupplierName');
+    const branchSupplierSite = branchSalesForm.getFieldValue('branchSupplierSite');
     const shipToLoc = branchSalesForm.getFieldValue('shipToLocation');
     const currency = branchSalesForm.getFieldValue('currency');
     const needByDate = branchSalesForm.getFieldValue('needByDate');
 
-    console.log('Branch PO Create - Field Values:', { branchBU, branchSupplier, shipToLoc, currency, needByDate });
+    console.log('Branch PO Create - Field Values:', { branchBU, branchSupplier, branchSupplierSite, shipToLoc, currency, needByDate });
 
-    if (!branchBU || !branchSupplier || !shipToLoc) {
+    if (!branchBU || !branchSupplier || !branchSupplierSite || !shipToLoc) {
       const missing = [];
       if (!branchBU) missing.push('Branch Business Unit (required)');
       if (!branchSupplier) missing.push('Branch Supplier - Click search icon 🔍 to select');
+      if (!branchSupplierSite) missing.push('Supplier Site (required)');
       if (!shipToLoc) missing.push('Ship-To Location');
       const msg = `Required fields not filled:\n\n${missing.join('\n')}`;
       message.error(msg);
@@ -7459,6 +7463,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         PayOnReceiptFlag: 'N',
         RequisitioningBUId: procBUId,
         Supplier: branchSupplier,
+        SupplierSite: branchSupplierSite,
         BillToLocation: branchBU,
         DefaultShipToLocation: shipToLoc,
         ModeOfTransportCode: null,
@@ -9106,6 +9111,9 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
               <Input placeholder="Search supplier by name..." size="small" readOnly value={branchSalesForm.getFieldValue('branchSupplierName') ?? ''} disabled style={{ flex: 1 }} />
               <Button size="small" icon={<SearchOutlined />} onClick={() => setBranchSupplierSearchOpen(true)} style={{ background: REDWOOD.info, borderColor: REDWOOD.info, color: '#fff' }} />
             </div>
+          </Form.Item>
+          <Form.Item label="Supplier Site" name="branchSupplierSite" rules={[{ required: true, message: 'Enter supplier site code' }]} style={{ marginBottom: 8 }}>
+            <Input placeholder="e.g., VIS0005-S" size="small" />
           </Form.Item>
           <Form.Item label={<span>Ship-To Location (Inventory Org) <Tooltip title={(() => {
             const buName = branchSalesForm.getFieldValue('branchBusinessUnit');
