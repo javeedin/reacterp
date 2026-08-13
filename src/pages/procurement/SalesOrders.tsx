@@ -9347,7 +9347,42 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           pagination={false}
           onRow={(record) => ({
             onClick: () => {
-              setSelectedSupplierWithSites(record._source);
+              const branchBU = branchSalesForm.getFieldValue('branchBusinessUnit');
+              const supplier = record._source;
+
+              if (!branchBU) {
+                message.error('Please select Branch Business Unit first');
+                return;
+              }
+
+              // Filter sites by the selected business unit
+              const filteredSites = (supplier.sites ?? []).filter((site: any) =>
+                site.ProcurementBU === branchBU
+              );
+
+              console.log('Supplier sites filtered:', { supplier: supplier.SupplierName || supplier.Supplier, branchBU, total: supplier.sites?.length, filtered: filteredSites.length, filteredSites });
+
+              if (filteredSites.length === 0) {
+                message.error(`No sites found for ${branchBU}. Please select a different business unit.`);
+                return;
+              }
+
+              // If only one site, auto-select it
+              if (filteredSites.length === 1) {
+                const site = filteredSites[0];
+                const siteCode = pf(site, ['SupplierSite', 'VendorSiteCode', 'SiteCode']);
+                branchSalesForm.setFieldsValue({
+                  branchSupplierName: supplier.SupplierName || supplier.Supplier,
+                  branchSupplierSite: siteCode,
+                });
+                setBranchSupplierSearchOpen(false);
+                setBranchSupplierSearchTerm('');
+                message.success(`Selected site: ${siteCode}`);
+                return;
+              }
+
+              // If multiple sites, show modal to select
+              setSelectedSupplierWithSites({ ...supplier, sites: filteredSites });
               setBranchSupplierSitesModalOpen(true);
             },
             style: { cursor: 'pointer' },
@@ -9381,15 +9416,15 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             ]}
             dataSource={(selectedSupplierWithSites.sites ?? []).map((site: any, i: number) => ({
               key: i,
-              SiteCode: pf(site, ['VendorSiteCode', 'SiteCode']),
-              SiteName: pf(site, ['VendorSiteName', 'SiteName']),
+              SiteCode: pf(site, ['SupplierSite', 'VendorSiteCode', 'SiteCode']),
+              SiteName: pf(site, ['SupplierAddressName', 'VendorSiteName', 'SiteName']),
               Status: site.InactiveDate ? 'Inactive' : 'Active',
               _site: site,
             }))}
             pagination={false}
             onRow={(record) => ({
               onClick: () => {
-                const siteCode = pf(record._site, ['VendorSiteCode', 'SiteCode']);
+                const siteCode = pf(record._site, ['SupplierSite', 'VendorSiteCode', 'SiteCode']);
                 branchSalesForm.setFieldsValue({
                   branchSupplierName: selectedSupplierWithSites.SupplierName || selectedSupplierWithSites.Supplier,
                   branchSupplierSite: siteCode,
@@ -9398,6 +9433,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
                 setBranchSupplierSitesModalOpen(false);
                 setSelectedSupplierWithSites(null);
                 setBranchSupplierSearchTerm('');
+                message.success(`Selected site: ${siteCode}`);
               },
               style: { cursor: 'pointer' },
             })}
