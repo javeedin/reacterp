@@ -115,7 +115,7 @@ export default function AIStockAnalysis() {
   const [chatLoading, setChatLoading] = useState(false);
   const [priceMovement, setPriceMovement] = useState<{ percentage: number; isUp: boolean } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [exchangeRates, setExchangeRates] = useState({ usd: 83, aed: 15 }); // Default fallback rates
+  const [exchangeRates, setExchangeRates] = useState({ usd: 1 / 83, aed: 1 / 22.5 }); // Default fallback: 1 INR = X currency
 
   const addLog = useCallback((level: 'info' | 'error' | 'success' | 'warn', message: string, details?: string) => {
     const now = new Date().toLocaleTimeString();
@@ -131,14 +131,15 @@ export default function AIStockAnalysis() {
     setRefreshing(true);
     addLog('info', 'Fetching exchange rates and price data');
     try {
-      // Fetch exchange rates
+      // Fetch exchange rates (1 INR = ? USD/AED, so multiply not divide)
       const ratesResponse = await fetch('https://api.exchangerate-api.com/v4/latest/INR');
       if (ratesResponse.ok) {
         const ratesData = await ratesResponse.json();
-        const usdRate = ratesData.rates?.USD || 83;
-        const aedRate = ratesData.rates?.AED || 15;
+        // API returns 1 INR = X currency, we need these values to multiply
+        const usdRate = ratesData.rates?.USD || (1 / 83);
+        const aedRate = ratesData.rates?.AED || (1 / 22.5);
         setExchangeRates({ usd: usdRate, aed: aedRate });
-        addLog('success', 'Exchange rates fetched', `USD: ${usdRate.toFixed(2)}, AED: ${aedRate.toFixed(2)}`);
+        addLog('success', 'Exchange rates fetched', `1 INR = ${usdRate.toFixed(4)} USD, 1 INR = ${aedRate.toFixed(4)} AED`);
       }
 
       // Fetch price movement data
@@ -835,7 +836,7 @@ Provide a concise, helpful answer based on the stock's fundamentals, market posi
                     In USD
                   </Text>
                   <Text strong style={{ fontSize: 14, fontFamily: 'monospace', color: COLORS.blue }}>
-                    ${((stock.cmp * stock.qty) / exchangeRates.usd).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    ${((stock.cmp * stock.qty) * exchangeRates.usd).toLocaleString('en-US', { maximumFractionDigits: 0 })}
                   </Text>
                 </div>
 
@@ -844,7 +845,7 @@ Provide a concise, helpful answer based on the stock's fundamentals, market posi
                     In AED
                   </Text>
                   <Text strong style={{ fontSize: 14, fontFamily: 'monospace', color: COLORS.orange }}>
-                    د.إ{((stock.cmp * stock.qty) / exchangeRates.aed).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    د.إ{((stock.cmp * stock.qty) * exchangeRates.aed).toLocaleString('en-US', { maximumFractionDigits: 0 })}
                   </Text>
                 </div>
               </Space>
