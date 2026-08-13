@@ -5652,6 +5652,8 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [branchSupplierSearchOpen, setBranchSupplierSearchOpen] = useState(false);
   const [branchSupplierSearchTerm, setBranchSupplierSearchTerm] = useState('');
   const [branchSupplierSearchLoading, setBranchSupplierSearchLoading] = useState(false);
+  const [selectedSupplierWithSites, setSelectedSupplierWithSites] = useState<any>(null);
+  const [branchSupplierSitesModalOpen, setBranchSupplierSitesModalOpen] = useState(false);
   const [branchPoNeedByDate, setBranchPoNeedByDate] = useState<any>(dayjs().add(7, 'days'));
   const [orderTypeOpts, setOrderTypeOpts] = useState<any[]>([]);
   const [orderTypeLookup, setOrderTypeLookup] = useState<Map<string, any>>(new Map());
@@ -6467,7 +6469,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
       return;
     }
     try {
-      const url = `${FUSION_BASE}/suppliers?q=Supplier LIKE '*${term}*' OR SupplierNumber LIKE '*${term}*'&limit=20`;
+      const url = `${FUSION_BASE}/suppliers?q=Supplier LIKE '*${term}*' OR SupplierNumber LIKE '*${term}*'&limit=20&expand=sites&onlyData=true`;
       console.log('Fetching suppliers with URL:', url);
       const r = await fetch(url, { headers: FUSION_HDRS });
       if (r.ok) {
@@ -9345,14 +9347,64 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           pagination={false}
           onRow={(record) => ({
             onClick: () => {
-              branchSalesForm.setFieldsValue({ branchSupplierName: record.SupplierName });
-              setBranchSupplierSearchOpen(false);
-              setBranchSupplierSearchTerm('');
+              setSelectedSupplierWithSites(record._source);
+              setBranchSupplierSitesModalOpen(true);
             },
             style: { cursor: 'pointer' },
           })}
           locale={{ emptyText: branchSupplierSearchTerm.length < 2 ? 'Type at least 2 characters to search' : 'No suppliers found' }}
         />
+      </Modal>
+
+      {/* Supplier Sites Selection Modal */}
+      <Modal
+        open={branchSupplierSitesModalOpen}
+        onCancel={() => {
+          setBranchSupplierSitesModalOpen(false);
+          setSelectedSupplierWithSites(null);
+        }}
+        title={<Space><BankOutlined style={{ color: REDWOOD.info }} /> Select Supplier Site</Space>}
+        footer={null}
+        width={600}
+      >
+        <div style={{ marginBottom: 16, padding: '12px', background: REDWOOD.neutral100, borderRadius: 4 }}>
+          <div><Text strong>Supplier:</Text> {selectedSupplierWithSites?.SupplierName || selectedSupplierWithSites?.Supplier}</div>
+          <div style={{ marginTop: 4 }}><Text strong>Supplier #:</Text> {selectedSupplierWithSites?.SupplierNumber}</div>
+        </div>
+        {selectedSupplierWithSites?.sites && selectedSupplierWithSites.sites.length > 0 ? (
+          <Table
+            size="small"
+            columns={[
+              { title: 'Site Code', dataIndex: 'SiteCode', width: 120 },
+              { title: 'Site Name', dataIndex: 'SiteName', render: (v: any) => v || '—' },
+              { title: 'Status', dataIndex: 'Status', width: 100, render: (v: any) => <Tag color={v === 'Active' ? 'green' : 'red'}>{v || '—'}</Tag> },
+            ]}
+            dataSource={(selectedSupplierWithSites.sites ?? []).map((site: any, i: number) => ({
+              key: i,
+              SiteCode: pf(site, ['VendorSiteCode', 'SiteCode']),
+              SiteName: pf(site, ['VendorSiteName', 'SiteName']),
+              Status: site.InactiveDate ? 'Inactive' : 'Active',
+              _site: site,
+            }))}
+            pagination={false}
+            onRow={(record) => ({
+              onClick: () => {
+                const siteCode = pf(record._site, ['VendorSiteCode', 'SiteCode']);
+                branchSalesForm.setFieldsValue({
+                  branchSupplierName: selectedSupplierWithSites.SupplierName || selectedSupplierWithSites.Supplier,
+                  branchSupplierSite: siteCode,
+                });
+                setBranchSupplierSearchOpen(false);
+                setBranchSupplierSitesModalOpen(false);
+                setSelectedSupplierWithSites(null);
+                setBranchSupplierSearchTerm('');
+              },
+              style: { cursor: 'pointer' },
+            })}
+          />
+        ) : (
+          <Empty description="No sites available for this supplier" />
+        )}
       </Modal>
 
       <CustomerSearchBipModal
