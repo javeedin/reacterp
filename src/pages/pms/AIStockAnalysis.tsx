@@ -1,11 +1,12 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   Layout, Card, Row, Col, Typography, Space, Button, Spin, Divider, Tag,
-  Breadcrumb, Tabs, Empty, message, Drawer, Tooltip,
+  Breadcrumb, Tabs, Empty, message, Drawer, Tooltip, Badge,
 } from 'antd';
 import {
   HomeOutlined, ArrowLeftOutlined, ReloadOutlined, SettingOutlined,
   RiseOutlined, FallOutlined, BulbOutlined, ShoppingCartOutlined,
+  DeleteOutlined, CopyOutlined,
 } from '@ant-design/icons';
 import type { TabsProps } from 'antd';
 import { useNavigate } from 'react-router-dom';
@@ -52,6 +53,16 @@ export default function AIStockAnalysis() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [apiKey, setApiKey] = useState<string>(getSavedApiKey() || '');
   const [msgApi, ctxHolder] = message.useMessage();
+  const [logs, setLogs] = useState<Array<{ time: string; level: 'info' | 'error' | 'success' | 'warn'; message: string; details?: string }>>([]);
+
+  const addLog = useCallback((level: 'info' | 'error' | 'success' | 'warn', message: string, details?: string) => {
+    const now = new Date().toLocaleTimeString();
+    setLogs(prev => [...prev, { time: now, level, message, details }]);
+  }, []);
+
+  const clearLogs = useCallback(() => {
+    setLogs([]);
+  }, []);
 
   useEffect(() => {
     const stockData = localStorage.getItem('selectedStock');
@@ -70,13 +81,18 @@ export default function AIStockAnalysis() {
   const analyzeStock = useCallback(async () => {
     if (!stock) return;
     if (!apiKey) {
+      addLog('error', 'API key not configured', 'Please set your Claude API key in settings');
       msgApi.error('Please set your Claude API key first');
       setSettingsOpen(true);
       return;
     }
 
     setLoading(true);
+    clearLogs();
+
     try {
+      addLog('info', 'Starting stock analysis', `Analyzing ${stock.symbol}`);
+
       const prompt = `Analyze the stock ${stock.symbol} (${stock.symbolName}) listed on ${stock.exchange}.
       Current Price: ₹${stock.cmp}
       Quantity Held: ${stock.qty}
@@ -94,6 +110,16 @@ export default function AIStockAnalysis() {
 
       Format your response as JSON with keys: news, trends, marketPrice, financials, recommendations (with action, targetPrice, confidence, reasoning)`;
 
+      addLog('info', 'Sending request to Claude API', `Model: claude-opus-5, Max Tokens: 2000`);
+
+      const requestBody = {
+        model: 'claude-opus-5',
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: prompt }],
+      };
+
+      addLog('info', 'Request body prepared', JSON.stringify(requestBody, null, 2));
+
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -101,39 +127,49 @@ export default function AIStockAnalysis() {
           'anthropic-version': '2023-06-01',
           'content-type': 'application/json',
         },
-        body: JSON.stringify({
-          model: 'claude-opus-5',
-          max_tokens: 2000,
-          messages: [{ role: 'user', content: prompt }],
-        }),
+        body: JSON.stringify(requestBody),
       });
 
+      addLog('info', 'Response received', `Status: ${response.status} ${response.statusText}`);
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error?.message || 'API request failed');
+        const errorData = await response.json().catch(() => ({ error: { message: 'Failed to parse error response' } }));
+        addLog('error', `API error: ${response.status}`, JSON.stringify(errorData, null, 2));
+        throw new Error(errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
-      const content = data.content[0]?.text;
+      addLog('success', 'Response parsed successfully', JSON.stringify(data, null, 2));
+
+      const content = data.content?.[0]?.text;
 
       if (!content) {
-        throw new Error('No response from Claude API');
+        addLog('error', 'No text content in response', `Response structure: ${JSON.stringify(data, null, 2)}`);
+        throw new Error('No response text from Claude API');
       }
+
+      addLog('info', 'Content extracted', content.substring(0, 200) + '...');
 
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-        throw new Error('Failed to parse API response');
+        addLog('error', 'Failed to parse JSON from response', `Response text: ${content.substring(0, 500)}`);
+        throw new Error('Failed to parse JSON from API response');
       }
+
+      addLog('info', 'JSON found in response', jsonMatch[0].substring(0, 200) + '...');
 
       const parsed = JSON.parse(jsonMatch[0]);
       setAnalysis(parsed);
+      addLog('success', 'Analysis completed successfully');
       msgApi.success('Analysis completed');
     } catch (error) {
-      msgApi.error(`Analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      addLog('error', 'Analysis failed', errorMsg);
+      msgApi.error(`Analysis failed: ${errorMsg}`);
     } finally {
       setLoading(false);
     }
-  }, [stock, apiKey, msgApi]);
+  }, [stock, apiKey, msgApi, addLog, clearLogs]);
 
   const handlePlaceOrder = useCallback(() => {
     if (!stock || !analysis?.recommendations) return;
@@ -147,6 +183,15 @@ export default function AIStockAnalysis() {
 
   const recommendation = analysis?.recommendations;
   const isPositive = recommendation?.action === 'BUY';
+
+  const getLogColor = (level: string) => {
+    switch (level) {
+      case 'error': return '#d32f2f';
+      case 'success': return '#1d7b4d';
+      case 'warn': return '#e65100';
+      default: return '#1565c0';
+    }
+  };
 
   const tabItems: TabsProps['items'] = [
     {
@@ -264,6 +309,87 @@ export default function AIStockAnalysis() {
         </Space>
       ) : (
         <Empty description="Run analysis first to see recommendations" />
+      ),
+    },
+    {
+      key: '3',
+      label: (
+        <Space size={4}>
+          Logs
+          {logs.length > 0 && <Badge count={logs.length} style={{ backgroundColor: COLORS.orange }} />}
+        </Space>
+      ),
+      children: (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {logs.length > 0 && (
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={clearLogs}
+            >
+              Clear Logs
+            </Button>
+          )}
+          {logs.length === 0 ? (
+            <Empty description="No logs yet. Run analysis to see logs." />
+          ) : (
+            <div style={{
+              background: '#f5f5f5',
+              border: '1px solid #d9d9d9',
+              borderRadius: 4,
+              padding: 12,
+              maxHeight: '600px',
+              overflowY: 'auto',
+              fontFamily: 'monospace',
+              fontSize: 12,
+            }}>
+              {logs.map((log, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    marginBottom: 12,
+                    paddingBottom: 12,
+                    borderBottom: idx < logs.length - 1 ? '1px solid #e8e8e8' : 'none',
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 4, alignItems: 'center' }}>
+                    <span style={{ color: '#8c8c8c', minWidth: '90px' }}>{log.time}</span>
+                    <Tag
+                      color={
+                        log.level === 'error' ? 'red' :
+                        log.level === 'success' ? 'green' :
+                        log.level === 'warn' ? 'orange' : 'blue'
+                      }
+                      style={{ margin: 0 }}
+                    >
+                      {log.level.toUpperCase()}
+                    </Tag>
+                    <span style={{ color: getLogColor(log.level), fontWeight: 500 }}>
+                      {log.message}
+                    </span>
+                  </div>
+                  {log.details && (
+                    <div style={{
+                      background: '#fff',
+                      border: '1px solid #e8e8e8',
+                      borderRadius: 2,
+                      padding: 8,
+                      marginTop: 4,
+                      overflow: 'auto',
+                      maxHeight: '200px',
+                      color: '#595959',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}>
+                      {log.details}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </Space>
       ),
     },
   ];
