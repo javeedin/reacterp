@@ -3761,6 +3761,56 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
             {EXT_TXN_URL}
           </div>
         </div>
+
+        {/* ── GET: Check GL Journal Status ── */}
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${REDWOOD.neutral200}` }}>
+          <Space style={{ marginBottom: 6 }}>
+            <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>GET</Tag>
+            <Text style={{ fontSize: 11, color: REDWOOD.neutral600 }}>Check if transaction is accounted in GL journals</Text>
+          </Space>
+          <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 8 }}>
+            Used to verify if a system transaction has been recorded in the General Ledger (matching by reference_2 and reference_5).
+          </Text>
+          <div style={{ marginBottom: 12 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              <thead>
+                <tr style={{ background: REDWOOD.neutral200 }}>
+                  {['Parameter', 'Purpose', 'Example'].map(h => (
+                    <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, borderBottom: `1px solid ${REDWOOD.neutral300}` }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { param: 'reference_2', purpose: 'Transaction ID from system transaction (txnId)', ex: '1000000256-1' },
+                  { param: 'reference_5', purpose: 'Source/Reference type identifier', ex: 'AP-PAYMENT | BANK_EXTERNAL_TRANSACTIONS | AR_RECEIPTS | GL_JOURNAL' },
+                  { param: 'row_limit', purpose: 'Max results (just need 1 to confirm existence)', ex: '1' },
+                ].map((row, i) => (
+                  <tr key={row.param} style={{ background: i % 2 === 0 ? REDWOOD.surface : REDWOOD.neutral100 }}>
+                    <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}` }}>
+                      <code style={{ color: REDWOOD.info, fontSize: 10 }}>{row.param}</code>
+                    </td>
+                    <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}`, color: REDWOOD.neutral600, fontSize: 10 }}>{row.purpose}</td>
+                    <td style={{ padding: '5px 10px', borderBottom: `1px solid ${REDWOOD.neutral200}`, fontFamily: 'monospace', color: REDWOOD.neutral900, fontSize: 10 }}>{row.ex}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Text style={{ fontSize: 11, color: REDWOOD.neutral600, display: 'block', marginBottom: 4 }}>Full URL Pattern</Text>
+          <div style={{ background: '#0d1117', borderRadius: 6, padding: '10px 12px', fontFamily: 'monospace', fontSize: 10, wordBreak: 'break-all', color: '#79c0ff', position: 'relative' }}>
+            {`${APEX_BASE}/gl/journals?reference_2={txnId}&reference_5={refType}&row_limit=1`}
+            <Button size="small" icon={<CopyOutlined />}
+              onClick={() => handleCopyUrl(`${APEX_BASE}/gl/journals?reference_2={txnId}&reference_5={refType}&row_limit=1`)}
+              style={{ position: 'absolute', top: 6, right: 6, backgroundColor: apiCopied ? REDWOOD.success : '#30363d', borderColor: apiCopied ? REDWOOD.success : '#484f58', color: '#fff', fontSize: 10 }}
+            >
+              {apiCopied ? 'Copied!' : 'Copy'}
+            </Button>
+          </div>
+          <Text style={{ fontSize: 10, color: REDWOOD.neutral600, display: 'block', marginTop: 8, fontStyle: 'italic' }}>
+            Response: If item exists in GL journals, status is "Yes", else "No"
+          </Text>
+        </div>
       </Modal>
 
       {/* ── Reconcile Progress Modal ─────────────────────────────── */}
