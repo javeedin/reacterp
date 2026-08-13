@@ -5726,18 +5726,21 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
           };
         });
 
+      const currencyNames: Record<string, string> = { USD: 'US Dollar', AED: 'United Arab Emirates Dirham', KES: 'Kenyan Shilling', EUR: 'Euro', GBP: 'British Pound' };
+
       const poPayload = {
         ProcurementBUId: procBUId,
-        RequisitioningBUId: procBUId,
         OrderNumber: `BLPO${savedOrderNumber?.replace(/^BCSO/, '') || ''}`,
         RequiredAcknowledgment: 'None',
         CurrencyCode: currency,
-        ConversionRateTypeCode: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'User') : null,
-        ConversionRateType: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'User') : null,
+        Currency: currencyNames[currency] || currency,
+        ConversionRateTypeCode: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'Corporate') : null,
+        ConversionRateType: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'Corporate') : null,
         ConversionRateDate: hdr.currencyDate?.format('YYYY-MM-DD'),
         ConversionRate: hdr.rate && hdr.rate !== 1 ? num(hdr.rate) : null,
         Buyer: hdr.buyer || '',
-        PayOnReceiptFlag: 'N',
+        PayOnReceiptFlag: 'Y',
+        RequisitioningBUId: procBUId,
         Supplier: branchSupplier,
         SupplierSite: branchSupplierSite,
         BillToLocation: branchBU,
@@ -7451,18 +7454,20 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         });
 
       // Build PO header payload with correct Fusion structure (must match API Inspector)
+      const currencyNames: Record<string, string> = { USD: 'US Dollar', AED: 'United Arab Emirates Dirham', KES: 'Kenyan Shilling', EUR: 'Euro', GBP: 'British Pound' };
+
       const poPayload = {
         ProcurementBUId: procBUId,
-        RequisitioningBUId: procBUId,
         OrderNumber: `BLPO${savedOrderNumber?.replace(/^BCSO/, '') || ''}`,
         RequiredAcknowledgment: 'None',
         CurrencyCode: currency,
-        ConversionRateTypeCode: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'User') : null,
-        ConversionRateType: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'User') : null,
+        Currency: currencyNames[currency] || currency,
+        ConversionRateTypeCode: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'Corporate') : null,
+        ConversionRateType: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'Corporate') : null,
         ConversionRateDate: hdr.currencyDate ? hdr.currencyDate.format('YYYY-MM-DD') : null,
         ConversionRate: hdr.rate && hdr.rate !== 1 ? num(hdr.rate) : null,
         Buyer: hdr.buyer || '',
-        PayOnReceiptFlag: 'N',
+        PayOnReceiptFlag: 'Y',
         RequisitioningBUId: procBUId,
         Supplier: branchSupplier,
         SupplierSite: branchSupplierSite,
