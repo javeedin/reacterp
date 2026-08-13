@@ -23,6 +23,58 @@ const COLORS = {
   orange: '#E65100',
 };
 
+const createAnalysisPrompts = (symbol: string, symbolName: string, cmp: number, qty: number, exchange: string): AnalysisPrompt[] => [
+  {
+    id: 'general',
+    category: 'General',
+    title: 'Company Overview',
+    prompt: `Provide a brief overview of ${symbol} (${symbolName}). Include: business segments, market position, headquarters location, and key achievements. Keep it concise (200-300 words).`,
+    status: 'pending',
+  },
+  {
+    id: 'financials',
+    category: 'Financials',
+    title: 'Financial Health & Growth',
+    prompt: `Analyze the financial health of ${symbol}. Include: revenue growth trends, profitability, debt levels, cash flow, EBITDA margins, and key financial ratios. Current price: ₹${cmp}. (300-400 words)`,
+    status: 'pending',
+  },
+  {
+    id: 'news',
+    category: 'News',
+    title: 'Recent News & Developments',
+    prompt: `What are the latest significant news, announcements, and developments for ${symbol}? Include recent earnings, management changes, strategic initiatives, or market events. (250-350 words)`,
+    status: 'pending',
+  },
+  {
+    id: 'technical',
+    category: 'Technical',
+    title: 'Technical Analysis',
+    prompt: `Provide technical analysis for ${symbol} at current price ₹${cmp}. Include: support/resistance levels, trend analysis, momentum indicators, and key technical patterns. (250-350 words)`,
+    status: 'pending',
+  },
+  {
+    id: 'recommendations',
+    category: 'Recommendations',
+    title: 'Investment Recommendation',
+    prompt: `Give a clear investment recommendation for ${symbol} (current price ₹${cmp}). Include: BUY/SELL/HOLD rating, target price, timeframe, confidence level (%), and key reasons for your recommendation. (300-400 words)`,
+    status: 'pending',
+  },
+  {
+    id: 'peers',
+    category: 'Peers',
+    title: 'Peer Comparison',
+    prompt: `How does ${symbol} compare to its peer companies in the same sector? Include competitive advantages, market share position, and relative valuation. (250-350 words)`,
+    status: 'pending',
+  },
+  {
+    id: 'risks',
+    category: 'Risk',
+    title: 'Risks & Challenges',
+    prompt: `What are the main risks and challenges for ${symbol}? Include market risks, regulatory risks, competition, and company-specific risks. How might these impact the stock? (250-350 words)`,
+    status: 'pending',
+  },
+];
+
 interface StockData {
   symbol: string;
   symbolName: string;
@@ -32,17 +84,14 @@ interface StockData {
   shareType: string;
 }
 
-interface AnalysisResult {
-  news: string;
-  trends: string;
-  marketPrice: string;
-  financials: string;
-  recommendations: {
-    action: 'BUY' | 'SELL' | 'HOLD';
-    targetPrice: number;
-    confidence: number;
-    reasoning: string;
-  };
+interface AnalysisPrompt {
+  id: string;
+  category: 'General' | 'Financials' | 'News' | 'Technical' | 'Recommendations' | 'Peers' | 'Risk';
+  title: string;
+  prompt: string;
+  status: 'pending' | 'running' | 'completed' | 'error';
+  response?: string;
+  error?: string;
 }
 
 interface ChatMessage {
@@ -55,7 +104,7 @@ interface ChatMessage {
 export default function AIStockAnalysis() {
   const navigate = useNavigate();
   const [stock, setStock] = useState<StockData | null>(null);
-  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [analysisPrompts, setAnalysisPrompts] = useState<AnalysisPrompt[]>([]);
   const [loading, setLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [apiKey, setApiKey] = useState<string>(getSavedApiKey() || '');
@@ -169,106 +218,67 @@ Provide a concise, helpful answer based on the stock's fundamentals, market posi
     try {
       addLog('info', 'Starting stock analysis', `Analyzing ${stock.symbol}`);
 
-      const prompt = `You are a stock analysis AI. Analyze the stock ${stock.symbol} (${stock.symbolName}) listed on ${stock.exchange}.
-      Current Price: ₹${stock.cmp}
-      Quantity Held: ${stock.qty}
+      const prompts = createAnalysisPrompts(stock.symbol, stock.symbolName, stock.cmp, stock.qty, stock.exchange);
+      setAnalysisPrompts(prompts);
 
-      IMPORTANT: Return ONLY valid JSON with NO markdown, NO disclaimers, NO extra text.
+      addLog('info', 'Created analysis prompts', `Total: ${prompts.length} prompts across ${new Set(prompts.map(p => p.category)).size} categories`);
 
-      Provide analysis for these EXACT keys:
-      - news: String with latest news and updates
-      - trends: String with market trends and technical indicators
-      - marketPrice: String with price analysis and movements
-      - financials: String with recent financial results
-      - recommendations: Object with:
-        * action: "BUY" or "SELL" or "HOLD"
-        * targetPrice: Number
-        * confidence: Number (0-100)
-        * reasoning: String
+      const results = await Promise.allSettled(
+        prompts.map(async (prompt) => {
+          setAnalysisPrompts(prev => prev.map(p => p.id === prompt.id ? { ...p, status: 'running' } : p));
+          addLog('info', `Running prompt: ${prompt.title}`, prompt.prompt.substring(0, 100) + '...');
 
-      Return ONLY the JSON object, nothing else.`;
+          const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'claude-opus-5',
+              max_tokens: 1000,
+              messages: [{ role: 'user', content: prompt.prompt }],
+            }),
+          });
 
-      addLog('info', 'Sending request to Claude API', `Model: claude-opus-5, Max Tokens: 2000`);
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: { message: 'API error' } }));
+            throw new Error(errorData.error?.message || `HTTP ${response.status}`);
+          }
 
-      const requestBody = {
-        model: 'claude-opus-5',
-        max_tokens: 2000,
-        messages: [{ role: 'user', content: prompt }],
-      };
+          const data = await response.json();
+          const textBlock = data.content?.find((c: any) => c.type === 'text');
+          const responseText = textBlock?.text;
 
-      addLog('info', 'Request body prepared', JSON.stringify(requestBody, null, 2));
+          if (!responseText) {
+            throw new Error('No text content in response');
+          }
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
+          addLog('success', `Completed: ${prompt.title}`, `Tokens: ${data.usage?.output_tokens}`);
 
-      addLog('info', 'Response received', `Status: ${response.status} ${response.statusText}`);
+          return { id: prompt.id, response: responseText };
+        })
+      );
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: { message: 'Failed to parse error response' } }));
-        addLog('error', `API error: ${response.status}`, JSON.stringify(errorData, null, 2));
-        throw new Error(errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`);
-      }
+      const completed = results.filter((r): r is PromiseFulfilledResult<{ id: string; response: string }> => r.status === 'fulfilled');
+      const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
 
-      const data = await response.json();
-      addLog('success', 'Response parsed successfully', `Status: ${data.stop_reason}, Tokens: ${data.usage?.output_tokens}`);
+      setAnalysisPrompts(prev =>
+        prev.map(p => {
+          const result = completed.find(c => c.value.id === p.id);
+          if (result) {
+            return { ...p, status: 'completed', response: result.value.response };
+          }
+          if (failed.some(f => f.reason?.includes?.(p.id))) {
+            return { ...p, status: 'error' };
+          }
+          return p;
+        })
+      );
 
-      const textBlock = data.content?.find((c: any) => c.type === 'text');
-      const content = textBlock?.text;
-
-      if (!content) {
-        addLog('error', 'No text content in response', `Response structure: ${JSON.stringify(data.content, null, 2)}`);
-        throw new Error('No text content in Claude API response');
-      }
-
-      addLog('info', 'Content extracted', content.substring(0, 300) + (content.length > 300 ? '...' : ''));
-
-      let jsonMatch = content.match(/```json\n([\s\S]*?)\n```/);
-      if (!jsonMatch) {
-        jsonMatch = content.match(/\{[\s\S]*?\n\}/);
-      }
-      if (!jsonMatch) {
-        jsonMatch = content.match(/\{[\s\S]*\}/);
-      }
-
-      if (!jsonMatch) {
-        addLog('error', 'Failed to extract JSON from response', `First 500 chars: ${content.substring(0, 500)}`);
-        throw new Error('Failed to extract JSON from API response');
-      }
-
-      let jsonText = jsonMatch[1] || jsonMatch[0];
-      addLog('info', 'JSON extracted', `Length: ${jsonText.length}, First 200 chars: ${jsonText.substring(0, 200)}...`);
-
-      try {
-        let parsed = JSON.parse(jsonText);
-        setAnalysis(parsed);
-        addLog('success', 'Analysis completed successfully', `Parsed analysis with keys: ${Object.keys(parsed).join(', ')}`);
-        msgApi.success('Analysis completed');
-      } catch (parseError) {
-        addLog('warn', 'JSON parse error, attempting cleanup', `Error: ${parseError instanceof Error ? parseError.message : 'Unknown'}`);
-
-        try {
-          const cleanedJson = jsonText
-            .replace(/,\s*}/g, '}')
-            .replace(/,\s*]/g, ']')
-            .replace(/'/g, '"');
-
-          addLog('info', 'Attempting to parse cleaned JSON', `Cleaned length: ${cleanedJson.length}`);
-          const parsed = JSON.parse(cleanedJson);
-          setAnalysis(parsed);
-          addLog('success', 'Analysis completed (after cleanup)', `Parsed analysis with keys: ${Object.keys(parsed).join(', ')}`);
-          msgApi.success('Analysis completed');
-        } catch (retryError) {
-          addLog('error', 'Final JSON parse failed', `Cleanup also failed. Error: ${retryError instanceof Error ? retryError.message : 'Unknown'}\n\nJSON preview:\n${jsonText.substring(0, 500)}`);
-          throw new Error(`Failed to parse JSON response: ${retryError instanceof Error ? retryError.message : 'Unknown error'}`);
-        }
-      }
+      addLog('success', 'Analysis completed', `Completed: ${completed.length}/${prompts.length} prompts`);
+      msgApi.success(`Analysis completed: ${completed.length}/${prompts.length} prompts successful`);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       addLog('error', 'Analysis failed', errorMsg);
@@ -300,32 +310,91 @@ Provide a concise, helpful answer based on the stock's fundamentals, market posi
     }
   };
 
+  const getCategoryColor = (category: string) => {
+    switch (category) {
+      case 'General': return 'blue';
+      case 'Financials': return 'green';
+      case 'News': return 'orange';
+      case 'Technical': return 'purple';
+      case 'Recommendations': return 'red';
+      case 'Peers': return 'cyan';
+      case 'Risk': return 'volcano';
+      default: return 'default';
+    }
+  };
+
   const tabItems: TabsProps['items'] = [
     {
       key: '1',
       label: 'Analysis',
       children: (
         <Spin spinning={loading}>
-          {analysis ? (
-            <Space direction="vertical" style={{ width: '100%', gap: 16 }}>
-              <Card size="small" title="News & Updates" style={{ borderRadius: 8 }}>
-                <Paragraph>{analysis.news}</Paragraph>
-              </Card>
-
-              <Card size="small" title="Market Trends" style={{ borderRadius: 8 }}>
-                <Paragraph>{analysis.trends}</Paragraph>
-              </Card>
-
-              <Card size="small" title="Market Price Analysis" style={{ borderRadius: 8 }}>
-                <Paragraph>{analysis.marketPrice}</Paragraph>
-              </Card>
-
-              <Card size="small" title="Financial Results" style={{ borderRadius: 8 }}>
-                <Paragraph>{analysis.financials}</Paragraph>
-              </Card>
-            </Space>
-          ) : (
+          {analysisPrompts.length === 0 ? (
             <Empty description="Click 'Analyze' to generate AI analysis" />
+          ) : (
+            <Row gutter={16}>
+              <Col xs={24} sm={16}>
+                <Space direction="vertical" style={{ width: '100%', gap: 16 }}>
+                  {analysisPrompts
+                    .filter(p => p.status === 'completed' && p.response)
+                    .map(prompt => (
+                      <Card
+                        key={prompt.id}
+                        size="small"
+                        title={
+                          <Space>
+                            <Tag color={getCategoryColor(prompt.category)}>{prompt.category}</Tag>
+                            <span>{prompt.title}</span>
+                          </Space>
+                        }
+                        style={{ borderRadius: 8 }}
+                      >
+                        <Paragraph style={{ whiteSpace: 'pre-wrap' }}>{prompt.response}</Paragraph>
+                      </Card>
+                    ))}
+                </Space>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Card size="small" title="Analysis Prompts" style={{ borderRadius: 8, position: 'sticky', top: 0 }}>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    {analysisPrompts.map(prompt => (
+                      <div
+                        key={prompt.id}
+                        style={{
+                          padding: 8,
+                          borderRadius: 4,
+                          background: prompt.status === 'completed' ? '#f6ffed' :
+                                     prompt.status === 'error' ? '#fff1f0' :
+                                     prompt.status === 'running' ? '#e6f7ff' : '#fafafa',
+                          borderLeft: `3px solid ${
+                            prompt.status === 'completed' ? '#52c41a' :
+                            prompt.status === 'error' ? '#ff4d4f' :
+                            prompt.status === 'running' ? '#1890ff' : '#d9d9d9'
+                          }`,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Tag color={getCategoryColor(prompt.category)} style={{ margin: 0 }}>
+                            {prompt.category}
+                          </Tag>
+                          {prompt.status === 'completed' && <span style={{ color: '#52c41a', fontSize: 12 }}>✓</span>}
+                          {prompt.status === 'error' && <span style={{ color: '#ff4d4f', fontSize: 12 }}>✗</span>}
+                          {prompt.status === 'running' && <span style={{ color: '#1890ff', fontSize: 12 }}>⟳</span>}
+                        </div>
+                        <div style={{ fontSize: 11, marginTop: 4, fontWeight: 500 }}>
+                          {prompt.title}
+                        </div>
+                        {prompt.status === 'error' && (
+                          <div style={{ fontSize: 10, color: '#ff4d4f', marginTop: 4 }}>
+                            {prompt.error || 'Failed'}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </Space>
+                </Card>
+              </Col>
+            </Row>
           )}
         </Spin>
       ),
