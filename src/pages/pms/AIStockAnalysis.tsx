@@ -288,17 +288,34 @@ Provide a concise, helpful answer based on the stock's fundamentals, market posi
     }
   }, [stock, apiKey, msgApi, addLog, clearLogs]);
 
+  const recommendationPrompt = analysisPrompts.find(p => p.id === 'recommendations');
+  const parseRecommendation = useCallback(() => {
+    if (!recommendationPrompt?.response) return null;
+    const text = recommendationPrompt.response;
+    const buyMatch = text.match(/BUY/i);
+    const sellMatch = text.match(/SELL/i);
+    const holdMatch = text.match(/HOLD/i);
+
+    let action = 'HOLD';
+    if (buyMatch) action = 'BUY';
+    else if (sellMatch) action = 'SELL';
+
+    return { action };
+  }, [recommendationPrompt]);
+
   const handlePlaceOrder = useCallback(() => {
-    if (!stock || !analysis?.recommendations) return;
-    const url = `https://www.icicidirect.com/trading?symbol=${stock.symbol}&action=${analysis.recommendations.action === 'BUY' ? 'BUY' : 'SELL'}`;
+    if (!stock) return;
+    const rec = parseRecommendation();
+    if (!rec) return;
+    const url = `https://www.icicidirect.com/trading?symbol=${stock.symbol}&action=${rec.action}`;
     window.open(url, '_blank');
-  }, [stock, analysis]);
+  }, [stock, parseRecommendation]);
 
   if (!stock) {
     return <Spin />;
   }
 
-  const recommendation = analysis?.recommendations;
+  const recommendation = parseRecommendation();
   const isPositive = recommendation?.action === 'BUY';
 
   const getLogColor = (level: string) => {
@@ -402,7 +419,7 @@ Provide a concise, helpful answer based on the stock's fundamentals, market posi
     {
       key: '2',
       label: 'Recommendation',
-      children: recommendation ? (
+      children: recommendationPrompt?.status === 'completed' && recommendationPrompt?.response ? (
         <Space direction="vertical" style={{ width: '100%', gap: 16 }}>
           <Card size="small" style={{ borderRadius: 8, borderLeft: `4px solid ${isPositive ? COLORS.green : COLORS.red}` }}>
             <Row gutter={16} align="middle">
@@ -421,21 +438,7 @@ Provide a concise, helpful answer based on the stock's fundamentals, market posi
                       color: isPositive ? COLORS.green : COLORS.red,
                     }}
                   >
-                    {recommendation.action}
-                  </Text>
-                </div>
-              </Col>
-              <Col>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>Confidence</div>
-                  <Text
-                    strong
-                    style={{
-                      fontSize: 18,
-                      color: COLORS.blue,
-                    }}
-                  >
-                    {recommendation.confidence}%
+                    {recommendation?.action || 'HOLD'}
                   </Text>
                 </div>
               </Col>
@@ -452,25 +455,11 @@ Provide a concise, helpful answer based on the stock's fundamentals, market posi
                   ₹{stock.cmp.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </Text>
               </Col>
-              <Col xs={12}>
-                <div style={{ marginBottom: 8 }}>
-                  <Text style={{ fontSize: 11, color: '#8c8c8c' }}>Target Price</Text>
-                </div>
-                <Text
-                  strong
-                  style={{
-                    fontSize: 18,
-                    color: isPositive ? COLORS.green : COLORS.red,
-                  }}
-                >
-                  ₹{recommendation.targetPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                </Text>
-              </Col>
             </Row>
           </Card>
 
-          <Card size="small" title="Reasoning" style={{ borderRadius: 8 }}>
-            <Paragraph>{recommendation.reasoning}</Paragraph>
+          <Card size="small" title="Investment Analysis" style={{ borderRadius: 8 }}>
+            <Paragraph style={{ whiteSpace: 'pre-wrap' }}>{recommendationPrompt.response}</Paragraph>
           </Card>
 
           <Button
