@@ -5656,6 +5656,100 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
   const [orderTypeOpts, setOrderTypeOpts] = useState<any[]>([]);
   const [orderTypeLookup, setOrderTypeLookup] = useState<Map<string, any>>(new Map());
   const [inventoryTransactionFlag, setInventoryTransactionFlag] = useState<boolean>(false);
+
+  // Build Branch PO payload when form values or lines change
+  useEffect(() => {
+    if (!branchApiDrawerOpen) return; // Only build payload when drawer is open
+    try {
+      const branchBU = branchSalesForm.getFieldValue('branchBusinessUnit');
+      const branchSupplier = branchSalesForm.getFieldValue('branchSupplierName');
+      const shipToLoc = branchSalesForm.getFieldValue('shipToLocation');
+      const currency = branchSalesForm.getFieldValue('currency');
+      const needByDate = branchSalesForm.getFieldValue('needByDate');
+
+      if (!branchBU || !branchSupplier || !shipToLoc) {
+        setBranchPoPayload('');
+        return;
+      }
+
+      const buRow = bUnits.find((b: any) => b.businessUnitName === branchBU);
+      const procBUId = buRow?.businessUnitId;
+
+      if (!procBUId) {
+        setBranchPoPayload('');
+        return;
+      }
+
+      const poLines = lines
+        .filter((l: any) => l.itemNumber && num(l.qty) > 0)
+        .map((l: any, idx: number) => {
+          const orgObj = orgRows.find((o: any) => pf(o, ['OrganizationCode']) === shipToLoc);
+          return {
+            LineNumber: idx + 1,
+            LineType: 'Goods',
+            Item: l.itemNumber,
+            Description: l.description,
+            Quantity: num(l.qty),
+            Price: num(l.unitPrice),
+            UOM: l.uom || 'EA',
+            schedules: [{
+              ScheduleNumber: 1,
+              Quantity: num(l.qty),
+              ShipToLocation: shipToLoc,
+              ShipToOrganizationCode: shipToLoc,
+              ShipToOrganization: pf(orgObj, ['OrganizationName']),
+              RequestedDeliveryDate: (needByDate || branchPoNeedByDate)?.format('YYYY-MM-DD'),
+              ReceiptCloseTolerancePercent: 0,
+              InvoiceMatchOptionCode: 'P',
+              InvoiceMatchOption: 'Order',
+              EarlyReceiptToleranceDays: 0,
+              InvoiceCloseTolerancePercent: 0,
+              LateReceiptToleranceDays: 0,
+              AccrueAtReceiptFlag: true,
+              InspectionRequiredFlag: true,
+              ReceiptRequiredFlag: false,
+              ReceiptRoutingId: 3,
+              ReceiptRouting: 'Direct delivery',
+              DestinationTypeCode: 'INVENTORY',
+              MatchApprovalLevelCode: '3-Way',
+              MatchApprovalLevel: '3 Way',
+              distributions: [{
+                DistributionNumber: 1,
+                DeliverToLocation: shipToLoc,
+                DeliverToLocationCode: shipToLoc,
+                Quantity: num(l.qty),
+              }],
+            }],
+          };
+        });
+
+      const poPayload = {
+        ProcurementBUId: procBUId,
+        RequisitioningBUId: procBUId,
+        OrderNumber: `BRNS-${savedOrderNumber}`,
+        RequiredAcknowledgment: 'None',
+        CurrencyCode: currency,
+        ConversionRateTypeCode: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'User') : null,
+        ConversionRateType: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'User') : null,
+        ConversionRateDate: hdr.currencyDate?.format('YYYY-MM-DD'),
+        ConversionRate: hdr.rate && hdr.rate !== 1 ? num(hdr.rate) : null,
+        Buyer: hdr.buyer || '',
+        PayOnReceiptFlag: 'N',
+        Supplier: branchSupplier,
+        BillToLocation: branchBU,
+        DefaultShipToLocation: shipToLoc,
+        ModeOfTransportCode: null,
+        BuyerManagedTransportFlag: false,
+        SupplierEmailAddress: null,
+        lines: poLines,
+      };
+
+      setBranchPoPayload(JSON.stringify(poPayload, null, 2));
+    } catch (e) {
+      console.error('Error building branch PO payload:', e);
+      setBranchPoPayload('');
+    }
+  }, [branchApiDrawerOpen, branchSalesForm, bUnits, lines, hdr, branchPoNeedByDate, savedOrderNumber, orgRows]);
   const [arTxn, setArTxn] = useState<string | null>(null);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   // Edit mode: the raw Fusion order lines (with child links) for the Billing /
@@ -6328,16 +6422,14 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
     setHdr(prev => ({ ...prev, ...fill }));
   };
 
-  const onBranchBUChange = (buName: string) => {
+  const onBranchBUChange = useCallback((buName: string) => {
     const bu = bUnits.find(b => b.businessUnitName === buName);
     if (bu) {
       const baseCcy = pf(bu, ['paymentCurrency', 'ledgerCurrency', 'invoiceCurrency']);
-      // Calculate conversion rate from transaction currency to base currency
       const txnCcy = hdr.txnCurrency || branchSalesForm.getFieldValue('currency');
       const conversionRate = (txnCcy === baseCcy) ? 1 : hdr.rate || 1;
       setBranchBUData({ baseCurrency: baseCcy, conversionRate });
 
-      // Fetch inventory orgs filtered by Management Business Unit Name (from Fusion)
       const filterQuery = `ManagementBusinessUnitName=${buName}`;
       const url = `${FUSION_BASE}/inventoryOrganizations?q=${filterQuery}&onlyData=true&limit=500`;
 
@@ -6355,7 +6447,6 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
         })
         .catch(err => {
           console.error('Failed to fetch ship-to locations:', { err: err.message, url, buName });
-          // Fallback to local filtering
           const filteredOrgs = orgRows.filter((o: any) => {
             const orgBuName = pf(o, ['BusinessUnitName', 'business_unit_name']);
             return orgBuName === buName;
@@ -6366,7 +6457,7 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
 
       setBranchPoNeedByDate(dayjs().add(7, 'days'));
     }
-  };
+  }, [bUnits, hdr.txnCurrency, hdr.rate, branchSalesForm, orgRows]);
 
   const fetchBranchSuppliers = useCallback(async (term: string) => {
     if (!term || term.length < 2) {
@@ -9098,119 +9189,26 @@ const NewOrderTab: React.FC<{ header: OrderHeader; initialDraft?: SoDraft; editO
             <Typography.Paragraph>
               <Text strong>PO Payload (will be sent on Create):</Text>
             </Typography.Paragraph>
-            {(() => {
-              try {
-                const branchBU = branchSalesForm.getFieldValue('branchBusinessUnit');
-                const branchSupplier = branchSalesForm.getFieldValue('branchSupplierName');
-                const shipToLoc = branchSalesForm.getFieldValue('shipToLocation');
-                const currency = branchSalesForm.getFieldValue('currency');
-                const needByDate = branchSalesForm.getFieldValue('needByDate');
-
-                if (!branchBU || !branchSupplier || !shipToLoc) {
-                  return <div style={{ background: '#f5f5f5', padding: '12px', borderRadius: '4px', color: '#999' }}>
-                    Fill in required fields to preview PO payload
-                  </div>;
-                }
-
-                // Get Business Unit ID from the selected branch BU
-                const buRow = bUnits.find((b: any) => b.businessUnitName === branchBU);
-                const procBUId = buRow?.businessUnitId;
-
-                if (!procBUId) {
-                  return <div style={{ background: '#fff1f0', padding: '12px', borderRadius: '4px', color: '#d93025' }}>
-                    Could not find Business Unit ID for selected branch
-                  </div>;
-                }
-
-                // Build PO lines with Fusion structure
-                const poLines = lines
-                  .filter((l: any) => l.itemNumber && num(l.qty) > 0)
-                  .map((l: any, idx: number) => {
-                    const orgObj = orgRows.find((o: any) => pf(o, ['OrganizationCode']) === shipToLoc);
-                    return {
-                      LineNumber: idx + 1,
-                      LineType: 'Goods',
-                      Item: l.itemNumber,
-                      Description: l.description,
-                      Quantity: num(l.qty),
-                      Price: num(l.unitPrice),
-                      UOM: l.uom || 'EA',
-                      schedules: [{
-                        ScheduleNumber: 1,
-                        Quantity: num(l.qty),
-                        ShipToLocation: shipToLoc,
-                        ShipToOrganizationCode: shipToLoc,
-                        ShipToOrganization: pf(orgObj, ['OrganizationName']),
-                        RequestedDeliveryDate: (needByDate || branchPoNeedByDate)?.format('YYYY-MM-DD'),
-                        ReceiptCloseTolerancePercent: 0,
-                        InvoiceMatchOptionCode: 'P',
-                        InvoiceMatchOption: 'Order',
-                        EarlyReceiptToleranceDays: 0,
-                        InvoiceCloseTolerancePercent: 0,
-                        LateReceiptToleranceDays: 0,
-                        AccrueAtReceiptFlag: true,
-                        InspectionRequiredFlag: true,
-                        ReceiptRequiredFlag: false,
-                        ReceiptRoutingId: 3,
-                        ReceiptRouting: 'Direct delivery',
-                        DestinationTypeCode: 'INVENTORY',
-                        MatchApprovalLevelCode: '3-Way',
-                        MatchApprovalLevel: '3 Way',
-                        distributions: [{
-                          DistributionNumber: 1,
-                          DeliverToLocation: shipToLoc,
-                          DeliverToLocationCode: shipToLoc,
-                          Quantity: num(l.qty),
-                        }],
-                      }],
-                    };
-                  });
-
-                // Build Fusion draftPurchaseOrders payload (must match createBranchPO)
-                const poPayload = {
-                  ProcurementBUId: procBUId,
-                  RequisitioningBUId: procBUId,
-                  OrderNumber: `BRNS-${savedOrderNumber}`,
-                  RequiredAcknowledgment: 'None',
-                  CurrencyCode: currency,
-                  ConversionRateTypeCode: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'User') : null,
-                  ConversionRateType: hdr.rate && hdr.rate !== 1 ? (hdr.currencyRateType || 'User') : null,
-                  ConversionRateDate: hdr.currencyDate?.format('YYYY-MM-DD'),
-                  ConversionRate: hdr.rate && hdr.rate !== 1 ? num(hdr.rate) : null,
-                  Buyer: hdr.buyer || '',
-                  PayOnReceiptFlag: 'N',
-                  Supplier: branchSupplier,
-                  BillToLocation: branchBU,
-                  DefaultShipToLocation: shipToLoc,
-                  ModeOfTransportCode: null,
-                  BuyerManagedTransportFlag: false,
-                  SupplierEmailAddress: null,
-                  lines: poLines,
-                };
-
-                const payload = JSON.stringify(poPayload, null, 2);
-                setBranchPoPayload(payload);
-
-                return <pre
-                  style={{
-                    background: '#f5f5f5',
-                    padding: '12px',
-                    borderRadius: '4px',
-                    maxHeight: '400px',
-                    overflow: 'auto',
-                    fontSize: '11px',
-                    fontFamily: 'monospace',
-                    lineHeight: '1.4',
-                  }}
-                >
-                  {payload}
-                </pre>;
-              } catch (e) {
-                return <div style={{ background: '#fff1f0', padding: '12px', borderRadius: '4px', color: '#d93025' }}>
-                  Error building payload: {String(e)}
-                </div>;
-              }
-            })()}
+            {!branchPoPayload ? (
+              <div style={{ background: '#f5f5f5', padding: '12px', borderRadius: '4px', color: '#999' }}>
+                Fill in all required fields (Branch Business Unit, Supplier, Ship-To Location) to preview PO payload
+              </div>
+            ) : (
+              <pre
+                style={{
+                  background: '#f5f5f5',
+                  padding: '12px',
+                  borderRadius: '4px',
+                  maxHeight: '400px',
+                  overflow: 'auto',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  lineHeight: '1.4',
+                }}
+              >
+                {branchPoPayload}
+              </pre>
+            )}
             {branchPoPayload && (
               <Button
                 size="small"
