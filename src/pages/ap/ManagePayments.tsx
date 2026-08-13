@@ -1825,6 +1825,12 @@ const ManagePayments: React.FC = () => {
         if (onlyPdc) {
           mappedPayments = mappedPayments.filter(p => !!p.maturityDate && p.maturityDate !== '-' && p.maturityDate !== p.paymentDate);
         }
+        // Client-side reconciled filter
+        if (values.reconciledStatus) {
+          mappedPayments = mappedPayments.filter(p =>
+            values.reconciledStatus === 'yes' ? p.reconciled : !p.reconciled
+          );
+        }
         setPayments(mappedPayments);
         debugLog('MAPPED', `Mapped ${mappedPayments.length} payment records to UI model`);
         setLastApiResponse(`Success: ${mappedPayments.length} of ${totalCount} payments returned`);
@@ -3467,6 +3473,12 @@ const ManagePayments: React.FC = () => {
                               </span>
                             </Checkbox>
                           </Form.Item>
+                          <Form.Item label="Reconciled" name="reconciledStatus">
+                            <Select placeholder="Select reconciliation status" allowClear>
+                              <Option value="yes">Yes - Reconciled</Option>
+                              <Option value="no">No - Not Reconciled</Option>
+                            </Select>
+                          </Form.Item>
                           <Text type="secondary" style={{ fontSize: 11 }}>
                             ** At least one is required
                           </Text>
@@ -3623,6 +3635,7 @@ const ManagePayments: React.FC = () => {
               loading={loading}
               pagination={{
                 pageSize: 25,
+                pageSizeOptions: ['25', '50', '100', '200'],
                 showSizeChanger: true,
                 showQuickJumper: true,
                 showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
@@ -3634,6 +3647,21 @@ const ManagePayments: React.FC = () => {
                 onDoubleClick: () => openPaymentTab(record),
                 style: { cursor: 'pointer' },
               })}
+              summary={() => (
+                <Table.Summary fixed>
+                  <Table.Summary.Row style={{ fontWeight: 600, background: REDWOOD.neutral100 }}>
+                    <Table.Summary.Cell index={0} colSpan={9}>
+                      <Text strong>TOTAL</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={9} align="right">
+                      <Text strong style={{ color: REDWOOD.primary }}>
+                        {displayPayments.reduce((sum, p) => sum + (p.paymentAmount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={10} />
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
             />
           </Card>
         </div>
