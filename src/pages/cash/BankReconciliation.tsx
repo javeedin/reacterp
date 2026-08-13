@@ -3163,18 +3163,52 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 borderTop:       `1px solid ${REDWOOD.neutral200}`,
                 display:         'flex',
                 gap:             16,
+                justifyContent:  'space-between',
+                alignItems:      'center',
+                flexWrap:        'wrap',
               }}
             >
-              <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
-                Selected: <strong>{selectedStmtKeys.length}</strong>
-              </Text>
-              <Divider type="vertical" />
-              <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
-                Amount:{' '}
-                <strong style={{ color: REDWOOD.neutral900 }}>
-                  {fmtAmount(stmtSelectedAmount)}
-                </strong>
-              </Text>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
+                  Total: <strong style={{ color: REDWOOD.neutral900 }}>{fmtAmount(filteredStmtLines.reduce((sum, l) => sum + (l.amount || 0), 0))}</strong>
+                </Text>
+                <Divider type="vertical" />
+                <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
+                  Selected: <strong>{selectedStmtKeys.length}</strong>
+                </Text>
+                <Divider type="vertical" />
+                <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
+                  Amount:{' '}
+                  <strong style={{ color: REDWOOD.neutral900 }}>
+                    {fmtAmount(stmtSelectedAmount)}
+                  </strong>
+                </Text>
+              </div>
+              <Tooltip title="Export Bank Statement Lines">
+                <Button
+                  size="small"
+                  icon={<DownloadOutlined />}
+                  onClick={() => {
+                    const rows = filteredStmtLines.map(l => ({
+                      'Line ID':      l.lineId,
+                      'Reference':    l.reference || l.bankTxnReference || '',
+                      'Date':         fmtDate(l.transactionDate),
+                      'Amount':       l.amount,
+                      'Type':         l.transactionCode,
+                      'Status':       l.reconStatus,
+                      'Description':  l.description || '',
+                      'Statement #':  l.statementNumber,
+                      'Counterparty': l.counterpartyName || '',
+                    }));
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Bank Statement Lines');
+                    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                    saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+                      `BankStatementLines_${selectedStatement?.statementNumber || 'export'}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+                  }}
+                  style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
+                />
+              </Tooltip>
             </div>
           </Card>
         </div>
@@ -3337,25 +3371,60 @@ const UnreconciledTab: React.FC<UnreconciledTabProps> = ({ bankAccounts, busines
                 display:         'flex',
                 gap:             16,
                 flexWrap:        'wrap',
+                justifyContent:  'space-between',
+                alignItems:      'center',
               }}
             >
-              <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
-                Selected: <strong>{selectedSysKeys.length}</strong>
-              </Text>
-              <Divider type="vertical" />
-              <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
-                Amount:{' '}
-                <strong style={{ color: REDWOOD.neutral900 }}>
-                  {fmtAmount(sysSelectedAmount)}
-                </strong>
-              </Text>
-              <Divider type="vertical" />
-              <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
-                Difference:{' '}
-                <strong style={{ color: difference === 0 ? REDWOOD.success : REDWOOD.error }}>
-                  {fmtAmount(difference)}
-                </strong>
-              </Text>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
+                  Total: <strong style={{ color: REDWOOD.neutral900 }}>{fmtAmount(filteredSysTxns.reduce((sum, t) => sum + (t.amount || 0), 0))}</strong>
+                </Text>
+                <Divider type="vertical" />
+                <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
+                  Selected: <strong>{selectedSysKeys.length}</strong>
+                </Text>
+                <Divider type="vertical" />
+                <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
+                  Amount:{' '}
+                  <strong style={{ color: REDWOOD.neutral900 }}>
+                    {fmtAmount(sysSelectedAmount)}
+                  </strong>
+                </Text>
+                <Divider type="vertical" />
+                <Text style={{ color: REDWOOD.neutral600, fontSize: 12 }}>
+                  Difference:{' '}
+                  <strong style={{ color: difference === 0 ? REDWOOD.success : REDWOOD.error }}>
+                    {fmtAmount(difference)}
+                  </strong>
+                </Text>
+              </div>
+              <Tooltip title="Export System Transactions">
+                <Button
+                  size="small"
+                  icon={<DownloadOutlined />}
+                  onClick={() => {
+                    const rows = filteredSysTxns.map(t => ({
+                      'Txn ID':       t.txnId,
+                      'Txn Number':   t.txnNumber,
+                      'Date':         fmtDate(t.txnDate),
+                      'Amount':       t.amount,
+                      'Currency':     t.currencyCode || '',
+                      'Source':       t.source,
+                      'Status':       t.reconciledFlag === 'Y' ? 'Reconciled' : 'Unreconciled',
+                      'Party':        t.payee || t.customerName || t.accountCode || t.bankAccountName || '',
+                      'Method':       t.paymentMethod || t.receiptMethod || t.journalCategory || '',
+                      'Business Unit': t.businessUnit || '',
+                    }));
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'System Transactions');
+                    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                    saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+                      `SystemTransactions_${selectedStatement?.bankAccountName || 'export'}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+                  }}
+                  style={{ color: REDWOOD.success, borderColor: REDWOOD.success }}
+                />
+              </Tooltip>
+            </div>
               {selectedStmtKeys.length > 0 && selectedSysKeys.length > 0 && Math.abs(difference) > 0.001 && (
                 <>
                   <Divider type="vertical" />
