@@ -7,10 +7,11 @@ import {
 import {
   HomeOutlined, ReloadOutlined, StockOutlined, DollarOutlined,
   RiseOutlined, FallOutlined, BankOutlined, GlobalOutlined,
-  PieChartOutlined, BarChartOutlined, TableOutlined,
+  PieChartOutlined, BarChartOutlined, TableOutlined, BulbOutlined, SettingOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { ApiKeySettingsModal, getSavedApiKey } from '../../components/ApiKeySettingsModal';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -121,6 +122,7 @@ const MultiCurrCell = ({ usd, aed, inr, bold, isPnl, fmt }: {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function InvestmentHoldings() {
+  const navigate = useNavigate();
   const [allData,   setAllData]   = useState<Holding[]>([]);
   const [company,   setCompany]   = useState<string>('ALL');
   const [shareType, setShareType] = useState<string>('ALL');
@@ -129,8 +131,23 @@ export default function InvestmentHoldings() {
   const [currency,  setCurrency]  = useState<CurrencyMode>('ALL');
   const [msgApi, ctxHolder]       = message.useMessage();
   const [numFmt, setNumFmt]       = useState<'abbr' | 'full'>('abbr');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [apiKey, setApiKey] = useState<string>(getSavedApiKey() || '');
 
   const fmt = useCallback((v: number) => numFmt === 'full' ? fmtNum(v) : fmtAbbr(v), [numFmt]);
+
+  const handleAnalyzeStock = useCallback((holding: Holding) => {
+    const stockData = {
+      symbol: holding.symbol,
+      symbolName: holding.symbolName,
+      exchange: holding.exchange,
+      cmp: holding.cmp,
+      qty: holding.qty,
+      shareType: holding.shareType,
+    };
+    localStorage.setItem('selectedStock', JSON.stringify(stockData));
+    navigate('/pms/ai-analysis');
+  }, [navigate]);
 
   // ── Fetch from API ───────────────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
@@ -476,9 +493,14 @@ export default function InvestmentHoldings() {
             </Space>
           </Col>
           <Col>
-            <Button icon={<ReloadOutlined />} size="small" loading={loading} onClick={fetchData}>
-              Refresh
-            </Button>
+            <Space>
+              <Button icon={<SettingOutlined />} size="small" onClick={() => setSettingsOpen(true)}>
+                API Settings
+              </Button>
+              <Button icon={<ReloadOutlined />} size="small" loading={loading} onClick={fetchData}>
+                Refresh
+              </Button>
+            </Space>
           </Col>
         </Row>
 
@@ -673,7 +695,20 @@ export default function InvestmentHoldings() {
                   <Col key={`${r.companyCode}-${r.shareType}-${r.symbol}`} xs={24} sm={12} lg={showAll ? 8 : 6}>
                     <Card size="small" style={{ borderRadius: 8, borderTop: `3px solid ${pnlColor(pnl)}` }}
                       title={<Space><Text strong style={{ fontSize: 13 }}>{r.symbol}</Text><Tag style={{ fontSize: 10, margin: 0 }} color={r.shareType === 'NRE' ? 'purple' : 'cyan'}>{r.shareType}</Tag></Space>}
-                      extra={<Text style={{ fontSize: 10, color: '#8c8c8c' }}>{r.exchange}</Text>}
+                      extra={
+                        <Space size={4}>
+                          <Tooltip title="AI Analysis">
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<BulbOutlined />}
+                              onClick={() => handleAnalyzeStock(r)}
+                              style={{ color: COLORS.orange }}
+                            />
+                          </Tooltip>
+                          <Text style={{ fontSize: 10, color: '#8c8c8c' }}>{r.exchange}</Text>
+                        </Space>
+                      }
                     >
                       <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6 }} ellipsis={{ tooltip: r.symbolName }}>{r.symbolName}</Text>
                       <Divider style={{ margin: '4px 0' }} />
@@ -747,6 +782,13 @@ export default function InvestmentHoldings() {
           )}
         </Spin>
       </Content>
+
+      <ApiKeySettingsModal
+        visible={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        apiKey={apiKey}
+        onSave={setApiKey}
+      />
     </Layout>
   );
 }
