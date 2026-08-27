@@ -1,0 +1,38 @@
+.companySelectorContainer {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 6px;
+}
+
+.selectorWrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.label {
+  display: none;
+}
+
+.select {
+  min-width: 100px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.badge {
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: auto;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
